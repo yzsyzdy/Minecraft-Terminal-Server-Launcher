@@ -10,6 +10,8 @@ import os
 import signal
 import json
 import glob
+import zipfile
+import shutil
 from datetime import datetime, timezone
 from dataclasses import dataclass, asdict
 from typing import Optional, Any
@@ -20,15 +22,9 @@ from typing import Optional, Any
 # =============================================================================
 
 DEFAULT_CONFIG: dict[str, Any] = {
-    # Java 可执行文件路径。设为 null 或空字符串则走自动检测
+    # 全局 Java 路径（每个服务器可单独覆盖）
     "java_path": None,
-    # 服务端核心 jar 文件路径
-    "jar_path": "leaves.jar",
-    # 最小堆内存
-    "min_mem": "1G",
-    # 最大堆内存
-    "max_mem": "16G",
-    # 是否启用控制台交互（可输入服务器指令）
+    # 是否启用控制台交互
     "interactive": True,
 }
 
@@ -51,7 +47,6 @@ def load_config(storage_dir: str) -> dict[str, Any]:
             with open(path, "r", encoding="utf-8") as f:
                 loaded = json.load(f)
             if isinstance(loaded, dict):
-                # 只取 keys 存在于默认配置中的项，多余字段忽略
                 for k in DEFAULT_CONFIG:
                     if k in loaded:
                         config[k] = loaded[k]
@@ -69,6 +64,361 @@ def save_config(config: dict[str, Any], storage_dir: str) -> None:
     os.makedirs(storage_dir, exist_ok=True)
     with open(path, "w", encoding="utf-8") as f:
         json.dump(merged, f, ensure_ascii=False, indent=2)
+
+
+# =============================================================================
+# 服务器管理（版本隔离）
+# =============================================================================
+
+DEFAULT_SERVER_CONFIG: dict[str, Any] = {
+    "name": "",
+    "mc_version": "",
+    "jar": "server.jar",
+    "java_path": None,
+    "min_mem": "1G",
+    "max_mem": "4G",
+    "extra_jvm_args": [],
+    "extra_server_args": [],
+}
+
+
+def _servers_dir(storage_dir: str) -> str:
+    return os.path.join(storage_dir, "servers")
+
+
+def ensure_servers_folder(storage_dir: str) -> str:
+    """确保 servers/ 文件夹存在，返回其绝对路径。"""
+    path = _servers_dir(storage_dir)
+    os.makedirs(path, exist_ok=True)
+    return path
+
+
+def _server_config_path(server_dir: str) -> str:
+    return os.path.join(server_dir, ".server.json")
+
+
+def list_servers(servers_dir: str) -> list[dict[str, Any]]:
+    """
+    扫描 servers/ 目录，返回所有有效的服务器配置列表。
+    每个服务器子目录下必须有 .server.json 才被认为是有效服务器。
+    """
+    servers: list[dict[str, Any]] = []
+    if not os.path.isdir(servers_dir):
+        return servers
+
+    for entry in sorted(os.listdir(servers_dir)):
+        server_path = os.path.join(servers_dir, entry)
+        if not os.path.isdir(server_path):
+            continue
+        config_path = _server_config_path(server_path)
+        if not os.path.isfile(config_path):
+            continue
+        try:
+            with open(config_path, "r", encoding="utf-8") as f:
+                cfg = json.load(f)
+            if not isinstance(cfg, dict):
+                continue
+            # 补全默认值
+            merged = dict(DEFAULT_SERVER_CONFIG)
+            merged.update(cfg)
+            merged["_path"] = server_path   # 内部字段，不写出到文件
+            merged["_config_path"] = config_path
+            servers.append(merged)
+        except (json.JSONDecodeError, OSError):
+            continue
+
+    return servers
+
+
+def load_server_config(server_dir: str) -> dict[str, Any]:
+    """加载指定服务器目录的 .server.json。"""
+    config_path = _server_config_path(server_dir)
+    cfg = dict(DEFAULT_SERVER_CONFIG)
+    if os.path.isfile(config_path):
+        try:
+            with open(config_path, "r", encoding="utf-8") as f:
+                loaded = json.load(f)
+            if isinstance(loaded, dict):
+                cfg.update(loaded)
+        except (json.JSONDecodeError, OSError):
+            pass
+    return cfg
+
+
+def save_server_config(config: dict[str, Any], server_dir: str) -> None:
+    """保存服务器配置到 .server.json。"""
+    merged = dict(DEFAULT_SERVER_CONFIG)
+    merged.update(config)
+    # 去掉内部字段
+    for key in ("_path", "_config_path"):
+        merged.pop(key, None)
+    config_path = _server_config_path(server_dir)
+    os.makedirs(server_dir, exist_ok=True)
+    with open(config_path, "w", encoding="utf-8") as f:
+        json.dump(merged, f, ensure_ascii=False, indent=2)
+
+
+def _prompt_zip_path() -> Optional[str]:
+    """交互式询问压缩包路径，返回绝对路径，用户取消返回 None。"""
+    print()
+    print("  请输入压缩包路径（支持拖拽文件到窗口）：")
+    raw = input("  > ").strip()
+
+    if not raw:
+        return None
+
+    # 去掉拖拽时 Windows 自动加的双引号
+    raw = raw.strip('"')
+    path = os.path.abspath(raw)
+
+    if not os.path.isfile(path):
+        print(f"  [错误] 文件不存在: {path}")
+        return None
+
+    ext = os.path.splitext(path)[1].lower()
+    if ext not in (".zip", ".jar"):
+        print(f"  [错误] 不支持的文件格式: {ext}，仅支持 .zip")
+        return None
+
+    return path
+
+
+def _find_first_level_jars(directory: str) -> list[str]:
+    """
+    在目录的第一层查找 .jar 文件。
+    如果第一层没有 jar 但恰好只有一个子目录，则检查该子目录的第一层。
+    返回路径相对于 directory。
+    """
+    jars: list[str] = []
+    try:
+        entries = sorted(os.listdir(directory))
+    except OSError:
+        return jars
+
+    # 第一层扫描
+    for entry in entries:
+        entry_path = os.path.join(directory, entry)
+        if os.path.isfile(entry_path) and entry.lower().endswith(".jar"):
+            jars.append(entry)
+
+    if jars:
+        return jars
+
+    # 没有 jar，看是不是套了一层文件夹
+    subdirs = [
+        e for e in entries
+        if os.path.isdir(os.path.join(directory, e))
+    ]
+    if len(subdirs) == 1:
+        subdir = subdirs[0]
+        sub_path = os.path.join(directory, subdir)
+        try:
+            for entry in sorted(os.listdir(sub_path)):
+                entry_path = os.path.join(sub_path, entry)
+                if os.path.isfile(entry_path) and entry.lower().endswith(".jar"):
+                    jars.append(os.path.join(subdir, entry))
+        except OSError:
+            pass
+
+    return jars
+
+
+def _pick_jar_interactive(jars: list[str]) -> str:
+    """多个 jar 时让用户选择，返回 jar 的相对路径。"""
+    print()
+    print(f"  发现 {len(jars)} 个 .jar 文件，请选择服务端核心：")
+    print()
+    for i, j in enumerate(jars, 1):
+        print(f"  [{i}] {j}")
+    print()
+    while True:
+        try:
+            choice = input(f"  请选择 (1-{len(jars)}): ").strip()
+            idx = int(choice) - 1
+            if 0 <= idx < len(jars):
+                return jars[idx]
+        except ValueError:
+            pass
+        print(f"  无效选择。")
+
+
+def import_server_from_zip(zip_path: str, servers_dir: str, project_dir: str) -> Optional[str]:
+    """
+    从压缩包导入一个 Minecraft 服务器。
+
+    参数
+    ------
+    zip_path : str
+        压缩包文件路径。
+    servers_dir : str
+        servers/ 目录的绝对路径（服务器将被创建在这里）。
+    project_dir : str
+        项目根目录（用于放置临时文件夹）。
+
+    返回
+    ------
+    str or None
+        成功时返回服务器目录的绝对路径，失败返回 None。
+
+    流程
+    -----
+    1. 在项目目录创建临时文件夹 .import_temp
+    2. 解压压缩包到临时文件夹
+    3. 在第一层（含单层子目录兜底）查找 .jar 文件
+    4. 零个 → 报错；一个 → 自动使用；多个 → 用户选择
+    5. 以压缩包文件名（去扩展名）为服务器名，在 servers/ 下创建目录
+    6. 将选中 jar 所在目录的所有内容移动到服务器目录
+    7. 生成 .server.json
+    8. 清理临时文件夹
+    """
+    zip_path = os.path.abspath(zip_path)
+    if not os.path.isfile(zip_path):
+        print(f"  [错误] 文件不存在: {zip_path}")
+        return None
+
+    temp_dir = os.path.join(project_dir, ".import_temp")
+
+    try:
+        # ---- 清理旧 temp 并解压 ----
+        if os.path.isdir(temp_dir):
+            shutil.rmtree(temp_dir)
+        os.makedirs(temp_dir)
+
+        zip_name = os.path.basename(zip_path)
+        print(f"  [导入] 正在解压 {zip_name} ...")
+        try:
+            with zipfile.ZipFile(zip_path, "r") as zf:
+                zf.extractall(temp_dir)
+        except zipfile.BadZipFile:
+            print(f"  [错误] 文件不是有效的压缩包: {zip_name}")
+            return None
+
+        # ---- 查找 jar ----
+        jars = _find_first_level_jars(temp_dir)
+        if not jars:
+            print("  [错误] 压缩包第一层未找到任何 .jar 文件。")
+            print("         请确认压缩包内包含服务端核心 jar。")
+            return None
+
+        selected = jars[0] if len(jars) == 1 else _pick_jar_interactive(jars)
+        jar_name = os.path.basename(selected)
+
+        if len(jars) == 1:
+            print(f"  [导入] 自动识别核心: {selected}")
+        else:
+            print(f"  [导入] 已选择核心: {selected}")
+
+        # ---- 创建服务器目录 ----
+        base_name = os.path.splitext(os.path.basename(zip_path))[0]
+        server_dir = os.path.join(servers_dir, base_name)
+        counter = 1
+        while os.path.exists(server_dir):
+            server_dir = os.path.join(servers_dir, f"{base_name}_{counter}")
+            counter += 1
+        os.makedirs(server_dir)
+
+        # ---- 移动文件 ----
+        jar_rel_dir = os.path.dirname(selected)  # 空字符串或子目录名
+        if jar_rel_dir:
+            source = os.path.join(temp_dir, jar_rel_dir)
+            for item in os.listdir(source):
+                shutil.move(os.path.join(source, item), server_dir)
+        else:
+            for item in os.listdir(temp_dir):
+                shutil.move(os.path.join(temp_dir, item), server_dir)
+
+        # ---- 生成 .server.json ----
+        server_config = {
+            "name": base_name,
+            "mc_version": "",
+            "jar": jar_name,
+            "java_path": None,
+            "min_mem": "1G",
+            "max_mem": "4G",
+            "extra_jvm_args": [],
+            "extra_server_args": [],
+        }
+        save_server_config(server_config, server_dir)
+
+        print(f"  [导入] 服务器 \"{base_name}\" 导入成功！")
+        print(f"         目录: {server_dir}")
+        return server_dir
+
+    finally:
+        # 无论如何都清理临时文件夹
+        if os.path.isdir(temp_dir):
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
+
+def show_no_server_menu(servers_dir: str, project_dir: str) -> None:
+    """当 servers/ 下没有服务器时，显示导入/下载选项。"""
+    while True:
+        print()
+        print("  servers/ 文件夹中没有找到任何服务器。")
+        print()
+        print("  [1] 导入服务器压缩包")
+        print("  [2] 下载服务器")
+        print("  [0] 退出")
+        print()
+        choice = input("  请选择 (0-2): ").strip()
+
+        if choice == "0":
+            print("[退出] 用户选择退出")
+            sys.exit(0)
+
+        elif choice == "1":
+            zip_path = _prompt_zip_path()
+            if zip_path is None:
+                input("  按 Enter 返回菜单...")
+                continue
+
+            result = import_server_from_zip(zip_path, servers_dir, project_dir)
+            if result is not None:
+                print()
+                print("  导入完成！你可以重新启动程序来启动该服务器。")
+                print()
+                input("  按 Enter 返回...")
+                return   # 返回后外层重新扫描 servers/
+            else:
+                input("  按 Enter 返回菜单...")
+                continue
+
+        elif choice == "2":
+            print()
+            print("  [下载] 功能开发中。")
+            print("  你可以手动从以下地址下载服务端核心：")
+            print("    Paper:     https://papermc.io/downloads")
+            print("    Purpur:    https://purpurmc.org/downloads")
+            print("    Fabric:    https://fabricmc.net/use/server/")
+            print("    NeoForge:  https://neoforged.net/")
+            print()
+            input("  按 Enter 返回菜单...")
+            continue
+
+        else:
+            print(f"  无效选择，请输入 0-2。")
+
+
+def select_server_interactive(servers: list[dict[str, Any]]) -> dict[str, Any]:
+    """列出服务器让用户选择，返回选中服务器的配置。"""
+    print()
+    print(f"  找到 {len(servers)} 个服务器：")
+    print()
+    for i, s in enumerate(servers, 1):
+        ver = s.get("mc_version", "?")
+        jar = s.get("jar", "?")
+        mem = f"{s.get('min_mem', '?')} / {s.get('max_mem', '?')}"
+        print(f"  [{i}] {s['name']}  (MC {ver} | {jar} | {mem})")
+    print()
+    while True:
+        try:
+            choice = input("  请选择要启动的服务器 (1-{}): ".format(len(servers))).strip()
+            idx = int(choice) - 1
+            if 0 <= idx < len(servers):
+                return servers[idx]
+        except ValueError:
+            pass
+        print(f"  无效选择，请输入 1-{len(servers)} 之间的数字。")
 
 
 # =============================================================================
@@ -100,11 +450,9 @@ def _run_java_version(java_exe: str) -> Optional[str]:
             text=True,
             timeout=15,
         )
-        # java -version 输出在 stderr
         output = result.stderr or result.stdout
         for line in output.splitlines():
             line = line.strip()
-            # 匹配形如：openjdk version "21.0.9" 或 java version "1.8.0_401"
             if '"' in line and "version" in line:
                 start = line.index('"') + 1
                 end = line.index('"', start)
@@ -127,7 +475,6 @@ def _search_java_from_env() -> list[JavaInfo]:
         if val:
             candidates.append(os.path.join(val, "bin", "java.exe"))
 
-    # 扫描 PATH 中的 java.exe
     path_dirs = os.environ.get("PATH", "").split(os.pathsep)
     for d in path_dirs:
         d = d.strip()
@@ -165,7 +512,6 @@ def _search_java_from_default_paths() -> list[JavaInfo]:
         os.path.join(os.environ.get("LOCALAPPDATA", ""), "JetBrains"),
     ]
 
-    # 在 Program Files 下搜索 Java 目录结构
     patterns = [
         "Java/jdk-*/bin/java.exe",
         "Java/jdk*/bin/java.exe",
@@ -195,7 +541,6 @@ def _search_java_from_default_paths() -> list[JavaInfo]:
                     seen.add(norm)
                     found.append(JavaInfo(path=norm, version=version, detected_at=now))
 
-    # 在 JetBrains 目录下搜 jbr（捆绑的 JetBrains Runtime）
     jbr_pattern = "*/jbr/bin/java.exe"
     for root in search_roots:
         if not root or not os.path.isdir(root):
@@ -225,7 +570,6 @@ def detect_java_versions() -> list[JavaInfo]:
             seen.add(norm)
             merged.append(item)
 
-    # 按版本号（降序）排列
     merged.sort(key=lambda j: _version_sort_key(j.version), reverse=True)
     return merged
 
@@ -258,7 +602,6 @@ def load_java_list(storage_dir: str) -> list[JavaInfo]:
         with open(path, "r", encoding="utf-8") as f:
             data = json.load(f)
         if isinstance(data, dict):
-            # 新格式：{ "known_javas": [...], "last_selected": "..." }
             raw = data.get("known_javas", [])
         elif isinstance(data, list):
             raw = data
@@ -361,14 +704,12 @@ def resolve_java(
         else:
             selected = _interactive_select(found)
 
-        # 合并扫描结果到缓存（保留之前记录中仍然有效但本次未扫到的路径）
         seen_paths = {os.path.normpath(j.path) for j in found}
         extra = [j for j in saved if os.path.isfile(j.path)
                  and os.path.normpath(j.path) not in seen_paths]
         merged = found + extra
         save_java_list(merged, storage_dir, last_selected=selected.path)
     else:
-        # 更新 last_selected
         save_java_list(saved, storage_dir, last_selected=selected.path)
 
     return selected.path
@@ -395,9 +736,9 @@ def start_minecraft_server(
     参数
     ----------
     java_path : str
-        Java 可执行文件的路径（如 jdk-21.0.9/bin/java.exe）。
+        Java 可执行文件的路径。
     jar_path : str
-        服务端核心 jar 文件的路径（如 leaves.jar）。
+        服务端核心 jar 文件的路径。
     min_mem : str
         最小堆内存，默认 "1G"。
     max_mem : str
