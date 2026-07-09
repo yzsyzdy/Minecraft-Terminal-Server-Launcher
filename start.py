@@ -61,9 +61,12 @@ def main():
     # 5. 解析 Java 路径（优先使用服务器自己的配置）
     server_java = server_cfg.get("java_path") or config.get("java_path")
     try:
+        mc_ver = server_cfg.get("mc_version", "")
         java_abs = resolve_java(
             configured_path=server_java,
             storage_dir=project_dir,
+            mc_version=mc_ver,
+            project_dir=project_dir,
         )
     except FileNotFoundError as e:
         print(f"[错误] {e}")

@@ -11,6 +11,7 @@ import signal
 import json
 import glob
 import zipfile
+import tarfile
 import shutil
 import urllib.request
 import urllib.error
@@ -512,7 +513,7 @@ def select_server_interactive(
 # =============================================================================
 
 MSL_API_BASE = "https://api.mslmc.cn/v4"
-MSL_USER_AGENT = "MinecraftServerLauncher/1.0"
+MSL_USER_AGENT = "MinecraftServerLuncher"
 
 _CATEGORY_LABELS: dict[str, str] = {
     "pluginsCore": "插件端",
@@ -738,7 +739,7 @@ def _interactive_pick_server_type(categorized: dict[str, list[str]]) -> Optional
         print("  [错误] MSL API 返回的服务端列表为空")
         return None
     print()
-    print("  请选择服务端类型：")
+    print("  请选择服务端类型：(使用MSL镜像源,MSL开服器官网地址:https://www.mslmc.cn/)")
     print()
     current_category = ""
     idx = 1
@@ -1127,9 +1128,254 @@ def _interactive_select(javas: list[JavaInfo]) -> JavaInfo:
         print(f"  无效选择，请输入 1-{len(javas)} 之间的数字。")
 
 
+# =============================================================================
+# Java 版本兼容与 JDK 下载
+# =============================================================================
+
+# (mc版本下限, mc版本上限, 最低Java版本, 推荐Java版本, 备注)
+MC_JAVA_COMPAT: list[tuple[str, str, str, str, str]] = [
+    ("0",       "1.12.2",   "8",  "8",  "许多老牌 Mod（如 Forge 1.12.2）强制要求 Java 8"),
+    ("1.13",    "1.16.5",   "8",  "11", "Java 11 能提供更好的性能"),
+    ("1.17",    "1.17.1",   "16", "17", "从 1.17 开始，Java 8 不再兼容"),
+    ("1.18",    "1.20.4",   "17", "17", ""),
+    ("1.20.5",  "1.25",     "21", "21", "这是官方要求的强制版本"),
+    ("1.25",    "999",      "25", "25", "针对最新快照版或特定版本的要求"),
+]
+
+# JDK 镜像下载地址（来自 fastmirror.net）
+JDK_MIRROR_URLS: dict[str, dict[str, str]] = {
+    "17": {
+        "linux": "https://res.fastmirror.net/directlink/1/Java%20%E7%8E%AF%E5%A2%83/OpenJDK/Oracle%20GraalVM/graalvm-community-jdk-17.0.9_linux-x64_bin.tar.gz",
+        "windows": "https://res.fastmirror.net/directlink/1/Java%20%E7%8E%AF%E5%A2%83/OpenJDK/Oracle%20GraalVM/graalvm-community-jdk-17.0.9_windows-x64_bin.zip",
+    },
+    "21": {
+        "linux": "https://res.fastmirror.net/directlink/1/Java%20%E7%8E%AF%E5%A2%83/OpenJDK/Oracle%20GraalVM/graalvm-community-jdk-21.0.2_linux-x64_bin.tar.gz",
+        "windows": "https://res.fastmirror.net/directlink/1/Java%20%E7%8E%AF%E5%A2%83/OpenJDK/Oracle%20GraalVM/graalvm-community-jdk-21.0.2_windows-x64_bin.zip",
+    },
+    "25": {
+        "linux": "https://res.fastmirror.net/directlink/1/Java%20%E7%8E%AF%E5%A2%83/OpenJDK/Oracle%20GraalVM/graalvm-community-jdk-25.0.2_linux-x64_bin.tar.gz",
+        "windows": "https://res.fastmirror.net/directlink/1/Java%20%E7%8E%AF%E5%A2%83/OpenJDK/Oracle%20GraalVM/graalvm-community-jdk-25.0.2_windows-x64_bin.zip",
+    },
+}
+
+
+def _version_tuple(v: str) -> tuple:
+    """将 '1.20.5' 转为 (1, 20, 5) 用于版本比较。"""
+    parts = []
+    for seg in v.split("."):
+        # 去掉 pre/rc/snapshot 后缀
+        clean = seg.split("-")[0].split("pre")[0]
+        try:
+            parts.append(int(clean))
+        except ValueError:
+            parts.append(0)
+    # 补齐到 3 位
+    while len(parts) < 3:
+        parts.append(0)
+    return tuple(parts[:3])
+
+
+def _is_mc_in_range(mc_version: str, range_min: str, range_max: str) -> bool:
+    """判断 MC 版本是否在 [range_min, range_max] 范围内。"""
+    mv = _version_tuple(mc_version)
+    lo = _version_tuple(range_min)
+    hi = _version_tuple(range_max)
+    return lo <= mv <= hi
+
+
+def get_java_requirement(mc_version: str) -> Optional[dict]:
+    """
+    根据 MC 版本查询所需的 Java 版本。
+    返回 {"min": "21", "recommended": "21", "note": "..."} 或 None。
+    """
+    for lo, hi, min_j, rec_j, note in MC_JAVA_COMPAT:
+        if _is_mc_in_range(mc_version, lo, hi):
+            return {"min": min_j, "recommended": rec_j, "note": note}
+    return None
+
+
+def _os_platform() -> str:
+    """返回 'windows' 或 'linux'。"""
+    if sys.platform.startswith("win"):
+        return "windows"
+    return "linux"
+
+
+def _java_major_version(version_str: str) -> int:
+    """
+    从 Java 版本字符串解析主版本号。
+    '21.0.9' → 21, '1.8.0_401' → 8, '17.0.12' → 17
+    """
+    s = version_str.strip()
+    # Java 8 及更早版本格式为 1.x.y_z
+    if s.startswith("1."):
+        parts = s.split(".")
+        if len(parts) >= 2:
+            try:
+                return int(parts[1])
+            except ValueError:
+                pass
+    # Java 9+ 格式为 x.y.z
+    major = s.split(".")[0]
+    try:
+        return int(major)
+    except ValueError:
+        return 0
+
+
+def _check_java_compatibility(
+    java_version: str,
+    mc_version: str,
+    storage_dir: str,
+    project_dir: str,
+) -> Optional[str]:
+    """
+    检查 Java 版本是否满足 MC 版本需求。
+    如果不满足，询问用户是否继续或下载正确版本。
+    返回最终使用的 java 路径（可能是新下载的），或 None 表示用原来的。
+    """
+    if not mc_version:
+        return None
+
+    req = get_java_requirement(mc_version)
+    if not req:
+        return None
+
+    java_major = _java_major_version(java_version)
+    need_min = int(req["min"])
+    recommended = req["recommended"]
+
+    if java_major >= need_min:
+        return None  # 兼容，无需干预
+
+    print()
+    print(f"  [警告] Java 版本不兼容！")
+    print(f"         当前 Java:      {java_version} (主版本 {java_major})")
+    print(f"         服务器 MC 版本: {mc_version}")
+    print(f"         需要 Java {need_min} 或更高版本")
+    print(f"         推荐 Java {recommended}")
+    if req["note"]:
+        print(f"         提示: {req['note']}")
+    print()
+
+    # 检查是否可以自动下载
+    if recommended in JDK_MIRROR_URLS:
+        print(f"  [1] 自动下载 JDK {recommended}")
+        print(f"  [2] 忽略警告，继续使用当前 Java")
+        print(f"  [0] 取消启动")
+        print()
+        while True:
+            choice = input("  请选择 (0-2): ").strip()
+            if choice == "1":
+                jdk_exe = _download_jdk(recommended, project_dir or storage_dir)
+                if jdk_exe:
+                    ver = _run_java_version(jdk_exe)
+                    now = datetime.now(timezone.utc).isoformat()
+                    new_java = JavaInfo(path=jdk_exe, version=ver or recommended, detected_at=now)
+                    save_java_list([new_java], storage_dir, last_selected=jdk_exe)
+                    print(f"[Java] 已切换至: {jdk_exe} (版本 {ver or recommended})")
+                    return jdk_exe
+                print()
+                print("  [错误] 下载失败，请重试或选择其他选项。")
+                continue
+            elif choice == "2":
+                print(f"  [Java] 忽略警告，使用: {java_version}")
+                return None
+            elif choice == "0":
+                raise FileNotFoundError("用户取消了启动")
+            else:
+                print("  无效选择。")
+    else:
+        print(f"  （无法自动下载 JDK {recommended}，请手动安装）")
+        ans = input("  是否忽略警告继续？(y/N): ").strip().lower()
+        if ans != "y":
+            raise FileNotFoundError("用户取消了启动")
+        return None
+
+
+def _download_jdk(java_version: str, project_dir: str) -> Optional[str]:
+    """
+    从镜像下载指定的 JDK 并解压。
+    返回解压后 bin/java.exe 的路径，失败返回 None。
+    """
+    os_name = _os_platform()
+    urls = JDK_MIRROR_URLS.get(java_version)
+    if not urls:
+        print(f"  [错误] 不支持自动下载 JDK {java_version}")
+        return None
+
+    url = urls.get(os_name)
+    if not url:
+        print(f"  [错误] JDK {java_version} 不支持当前平台 ({os_name})")
+        return None
+
+    jdk_dir = os.path.join(project_dir, f"jdk-{java_version}")
+    if os.path.isdir(jdk_dir):
+        # 检查是否已下载
+        java_exe = os.path.join(jdk_dir, "bin", "java.exe") if os_name == "windows" else os.path.join(jdk_dir, "bin", "java")
+        if os.path.isfile(java_exe):
+            print(f"  [JDK] 已存在: {jdk_dir}")
+            return java_exe
+
+    print(f"  [JDK] 正在下载 GraalVM JDK {java_version}（{os_name}）...")
+    print(f"        来源: fastmirror镜像服务器")
+
+    ext = ".zip" if os_name == "windows" else ".tar.gz"
+    download_path = os.path.join(project_dir, f"jdk-{java_version}{ext}")
+
+    success = _download_with_progress(url, download_path, desc=f"JDK {java_version}")
+    if not success:
+        return None
+
+    print(f"  [JDK] 正在解压...")
+    try:
+        if os_name == "windows":
+            with zipfile.ZipFile(download_path, "r") as zf:
+                # 找到 jar 目录
+                all_members = zf.infolist()
+                # 找到根目录名
+                root_dirs = set()
+                for m in all_members:
+                    parts = m.filename.split("/")
+                    if parts[0]:
+                        root_dirs.add(parts[0])
+                # 提取
+                zf.extractall(project_dir)
+                if root_dirs:
+                    extracted_root = os.path.join(project_dir, list(root_dirs)[0])
+                    if os.path.isdir(extracted_root) and not os.path.isdir(jdk_dir):
+                        shutil.move(extracted_root, jdk_dir)
+        else:
+            import tarfile
+            with tarfile.open(download_path, "r:gz") as tf:
+                tf.extractall(project_dir)
+            # 找到解压出来的目录
+            for entry in os.listdir(project_dir):
+                entry_path = os.path.join(project_dir, entry)
+                if os.path.isdir(entry_path) and "jdk" in entry.lower() and entry_path != jdk_dir:
+                    shutil.move(entry_path, jdk_dir)
+                    break
+    except Exception as e:
+        print(f"  [错误] 解压失败: {e}")
+        return None
+    finally:
+        if os.path.isfile(download_path):
+            os.remove(download_path)
+
+    java_exe = os.path.join(jdk_dir, "bin", "java.exe") if os_name == "windows" else os.path.join(jdk_dir, "bin", "java")
+    if not os.path.isfile(java_exe):
+        print(f"  [错误] 解压后未找到 java 可执行文件")
+        return None
+
+    print(f"  [JDK] 下载完成: {java_exe}")
+    return java_exe
+
+
 def resolve_java(
     configured_path: Optional[str] = None,
     storage_dir: Optional[str] = None,
+    mc_version: str = "",
+    project_dir: str = "",
 ) -> str:
     """
     自动解析可用的 Java 路径。
@@ -1176,10 +1422,39 @@ def resolve_java(
         print("[Java] 未找到本地可用 Java 记录，正在扫描系统...")
         found = detect_java_versions()
         if not found:
-            raise FileNotFoundError(
-                "未在系统中找到任何 Java 安装。\n"
-                "  请先安装 JDK 21 或更高版本：https://adoptium.net/"
-            )
+            # 没有找到任何 Java，查看 MC 版本需求并询问是否下载
+            req = None
+            if mc_version:
+                req = get_java_requirement(mc_version)
+            print("  [Java] 未在系统中找到任何 Java 安装。")
+            if req:
+                print(f"  [Java] 当前服务器 MC {mc_version} 需要 Java {req['min']} 或更高版本")
+                print(f"         推荐 Java {req['recommended']}")
+                if req["note"]:
+                    print(f"         提示: {req['note']}")
+            else:
+                print("  [Java] 推荐安装 JDK 21 或更高版本。")
+
+            # 检查镜像是否有可下载的 JDK
+            target_ver = req["recommended"] if req else "21"
+            if target_ver in JDK_MIRROR_URLS:
+                print()
+                ans = input(f"  是否自动下载 JDK {target_ver}？(y/N): ").strip().lower()
+                if ans == "y":
+                    jdk_exe = _download_jdk(target_ver, project_dir or storage_dir)
+                    if jdk_exe:
+                        ver = _run_java_version(jdk_exe)
+                        now = datetime.now(timezone.utc).isoformat()
+                        new_java = JavaInfo(path=jdk_exe, version=ver or target_ver, detected_at=now)
+                        found = [new_java]
+                        save_java_list(found, storage_dir, last_selected=jdk_exe)
+                        print(f"[Java] 已下载: {jdk_exe} (版本 {ver or target_ver})")
+
+            if not found:
+                raise FileNotFoundError(
+                    "未在系统中找到任何 Java 安装。\n"
+                    "  请先安装 JDK 21 或更高版本：https://adoptium.net/"
+                )
 
         if len(found) == 1:
             selected = found[0]
@@ -1195,6 +1470,12 @@ def resolve_java(
     else:
         save_java_list(saved, storage_dir, last_selected=selected.path)
 
+    # Java 版本兼容性校验
+    new_path = _check_java_compatibility(
+        selected.version, mc_version, storage_dir, project_dir,
+    )
+    if new_path:
+        return new_path
     return selected.path
 
 
