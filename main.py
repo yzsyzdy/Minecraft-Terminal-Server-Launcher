@@ -11,8 +11,64 @@ import signal
 import json
 import glob
 from datetime import datetime, timezone
-from dataclasses import dataclass, asdict, fields
-from typing import Optional
+from dataclasses import dataclass, asdict
+from typing import Optional, Any
+
+
+# =============================================================================
+# 配置管理（config.json）
+# =============================================================================
+
+DEFAULT_CONFIG: dict[str, Any] = {
+    # Java 可执行文件路径。设为 null 或空字符串则走自动检测
+    "java_path": None,
+    # 服务端核心 jar 文件路径
+    "jar_path": "leaves.jar",
+    # 最小堆内存
+    "min_mem": "1G",
+    # 最大堆内存
+    "max_mem": "16G",
+    # 是否启用控制台交互（可输入服务器指令）
+    "interactive": True,
+}
+
+
+def _config_path(storage_dir: str) -> str:
+    return os.path.join(storage_dir, "config.json")
+
+
+def load_config(storage_dir: str) -> dict[str, Any]:
+    """
+    加载 config.json。如果文件不存在则自动创建默认配置并返回。
+
+    返回的字典保证包含 DEFAULT_CONFIG 中的所有键。
+    """
+    path = _config_path(storage_dir)
+    config = dict(DEFAULT_CONFIG)
+
+    if os.path.isfile(path):
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                loaded = json.load(f)
+            if isinstance(loaded, dict):
+                # 只取 keys 存在于默认配置中的项，多余字段忽略
+                for k in DEFAULT_CONFIG:
+                    if k in loaded:
+                        config[k] = loaded[k]
+        except (json.JSONDecodeError, OSError):
+            pass
+
+    return config
+
+
+def save_config(config: dict[str, Any], storage_dir: str) -> None:
+    """保存配置到 config.json。缺失的键用默认值补齐。"""
+    merged = dict(DEFAULT_CONFIG)
+    merged.update(config)
+    path = _config_path(storage_dir)
+    os.makedirs(storage_dir, exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(merged, f, ensure_ascii=False, indent=2)
 
 
 # =============================================================================

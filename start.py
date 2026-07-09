@@ -1,69 +1,73 @@
 """
 Minecraft 服务器启动器
 
-基于 start.bat 逻辑，用 Python 重新实现。
-修改下方路径配置后直接运行即可。
+从 config.json 读取配置并启动服务器。
+首次运行会自动生成默认 config.json。
 """
 
 import os
 import sys
 
-from main import start_minecraft_server, start_server_interactive, resolve_java
-
-
-# ===== 配置区（根据你的实际路径修改） =====
-
-# Java 可执行文件路径（留空或设为 None 则自动检测）
-JAVA_PATH = os.path.join(os.path.dirname(__file__), "jdk-21.0.9", "bin", "java.exe")
-
-# 服务端核心 jar 文件路径
-JAR_PATH = os.path.join(os.path.dirname(__file__), "leaves.jar")
-
-# 内存配置
-MIN_MEM = "1G"
-MAX_MEM = "16G"
-
-# 是否启用控制台交互（支持输入服务器指令）
-INTERACTIVE = True
+from main import (
+    load_config,
+    save_config,
+    resolve_java,
+    start_minecraft_server,
+    start_server_interactive,
+)
 
 
 def main():
-    jar_abs = os.path.abspath(JAR_PATH)
+    project_dir = os.path.dirname(os.path.abspath(__file__))
+
+    # 加载配置，不存在则自动创建默认文件
+    config = load_config(project_dir)
+    save_config(config, project_dir)
+
+    jar_path = config["jar_path"]
+    jar_abs = os.path.abspath(os.path.join(project_dir, jar_path))
     if not os.path.isfile(jar_abs):
-        print(f"[错误] 未找到服务端核心: {JAR_PATH}")
+        print(f"[错误] 未找到服务端核心: {jar_path}")
+        print(f"       期望路径: {jar_abs}")
+        print("  请修改 config.json 中的 jar_path。")
         sys.exit(1)
 
-    # 解析 Java 路径：如果配置的路径不存在，则自动检测
+    # 解析 Java 路径
     try:
         java_abs = resolve_java(
-            configured_path=JAVA_PATH,
-            storage_dir=os.path.dirname(__file__),
+            configured_path=config.get("java_path"),
+            storage_dir=project_dir,
         )
     except FileNotFoundError as e:
         print(f"[错误] {e}")
         sys.exit(1)
 
+    min_mem = config.get("min_mem", "1G")
+    max_mem = config.get("max_mem", "16G")
+    interactive = config.get("interactive", True)
+
     print("=" * 50)
     print("  Minecraft Leaves Server 1.21.1")
     print(f"  Java:     {java_abs}")
-    print(f"  分配内存:  最小 {MIN_MEM} / 最大 {MAX_MEM}")
+    print(f"  核心:     {jar_abs}")
+    print(f"  内存:     最小 {min_mem} / 最大 {max_mem}")
     print("=" * 50)
     print()
 
     try:
-        if INTERACTIVE:
+        if interactive:
             exit_code = start_server_interactive(
                 java_path=java_abs,
                 jar_path=jar_abs,
-                min_mem=MIN_MEM,
-                max_mem=MAX_MEM,
+                min_mem=min_mem,
+                max_mem=max_mem,
             )
         else:
             exit_code = start_minecraft_server(
                 java_path=java_abs,
                 jar_path=jar_abs,
-                min_mem=MIN_MEM,
-                max_mem=MAX_MEM,
+                min_mem=min_mem,
+                max_mem=max_mem,
             )
     except FileNotFoundError as e:
         print(f"[错误] {e}")
