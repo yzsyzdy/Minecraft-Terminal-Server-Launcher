@@ -563,16 +563,105 @@ def _server_display_name(server_id: str) -> str:
     return _SERVER_DISPLAY_NAMES.get(server_id, server_id.capitalize())
 
 
-def _msl_headers() -> dict[str, str]:
-    return {"User-Agent": MSL_USER_AGENT}
+# ---------------------------------------------------------------------------
+# MSL API 缓存（每日刷新）
+# ---------------------------------------------------------------------------
+
+def _msl_cache_path(project_dir: str) -> str:
+    return os.path.join(project_dir, "msl_cache.json")
+
+
+def _today_str() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+
+def _msl_load_cache(project_dir: str) -> dict:
+    """加载 MSL 缓存文件，不存在返回空字典。"""
+    path = _msl_cache_path(project_dir)
+    if not os.path.isfile(path):
+        return {}
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except (json.JSONDecodeError, OSError):
+        return {}
+
+
+def _msl_save_cache(cache: dict, project_dir: str) -> None:
+    """保存 MSL 缓存文件。"""
+    path = _msl_cache_path(project_dir)
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(cache, f, ensure_ascii=False, indent=2)
+
+
+def _msl_cache_fetch(
+    cache_key: str,
+    path: str,
+    project_dir: str,
+) -> Any:
+    """缓存优先的 MSL 请求。同一天内使用缓存，跨天重新请求。"""
+    cache = _msl_load_cache(project_dir)
+    entry = cache.get(cache_key)
+    today = _today_str()
+
+    if entry and isinstance(entry, dict) and entry.get("cached_at") == today:
+        print(f"  [缓存] 使用本地缓存 ({today})")
+        return entry.get("data")
+
+    import urllib.request as ureq
+    import urllib.error as uerr
+
+    url = f"{MSL_API_BASE}{path}"
+    try:
+        req = ureq.Request(url, headers={"User-Agent": MSL_USER_AGENT})
+        with ureq.urlopen(req, timeout=30) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+    except uerr.HTTPError as e:
+        print(f"  [错误] MSL API 返回 HTTP {e.code}: {e.reason}")
+        return None
+    except uerr.URLError as e:
+        print(f"  [错误] 网络请求失败: {e.reason}")
+        return None
+    except (json.JSONDecodeError, OSError) as e:
+        print(f"  [错误] 响应解析失败: {e}")
+        return None
+
+    if not isinstance(data, dict):
+        print(f"  [错误] MSL API 返回格式异常")
+        return None
+    if data.get("code") != 200:
+        print(f"  [错误] MSL API: {data.get('message', '未知错误')}")
+        return None
+
+    result = data.get("data")
+    cache[cache_key] = {"cached_at": today, "data": result}
+    _msl_save_cache(cache, project_dir)
+    return result
+
+
+def msl_get_server_types(project_dir: str = "") -> Optional[dict[str, list[str]]]:
+    """获取（缓存优先）分类后的服务端类型列表。"""
+    if project_dir:
+        return _msl_cache_fetch("server_types", "/mirrors", project_dir)
+    return _msl_request("/mirrors")
+
+
+def msl_get_versions(server_type: str, project_dir: str = "") -> Optional[dict]:
+    """获取（缓存优先）指定服务端支持的 MC 版本。"""
+    cache_key = f"versions_{server_type}"
+    if project_dir:
+        return _msl_cache_fetch(cache_key, f"/mirrors/{server_type}", project_dir)
+    return _msl_request(f"/mirrors/{server_type}")
 
 
 def _msl_request(path: str) -> Any:
+    """直接请求 MSL API（无缓存），用于下载地址等非缓存场景。"""
     import urllib.request as ureq
     import urllib.error as uerr
     url = f"{MSL_API_BASE}{path}"
     try:
-        req = ureq.Request(url, headers=_msl_headers())
+        req = ureq.Request(url, headers={"User-Agent": MSL_USER_AGENT})
         with ureq.urlopen(req, timeout=30) as resp:
             data = json.loads(resp.read().decode("utf-8"))
     except uerr.HTTPError as e:
@@ -591,14 +680,6 @@ def _msl_request(path: str) -> Any:
         print(f"  [错误] MSL API: {data.get('message', '未知错误')}")
         return None
     return data.get("data")
-
-
-def msl_get_server_types() -> Optional[dict[str, list[str]]]:
-    return _msl_request("/mirrors")
-
-
-def msl_get_versions(server_type: str) -> Optional[dict]:
-    return _msl_request(f"/mirrors/{server_type}")
 
 
 def msl_get_download_url(server_type: str, version: str) -> Optional[dict]:
@@ -713,11 +794,47 @@ def _interactive_pick_version(versions: list[str], description: str) -> Optional
         print(f"  无效选择。")
 
 
+def _prompt_post_download_config(server_name: str) -> dict:
+    """下载完成后询问用户 Java 和内存配置。"""
+    print()
+    print("  服务器下载完成，请配置运行时参数（直接回车使用默认值）：")
+    print()
+
+    java_input = input(f"  Java 路径（回车自动检测）: ").strip()
+    java_path = java_input if java_input else None
+
+    while True:
+        min_input = input(f"  最小内存 [1G]: ").strip()
+        if not min_input:
+            min_mem = "1G"
+            break
+        if min_input.upper().endswith(("G", "M")):
+            min_mem = min_input.upper()
+            break
+        print("  格式错误，请输入如 1G、2048M")
+
+    while True:
+        max_input = input(f"  最大内存 [4G]: ").strip()
+        if not max_input:
+            max_mem = "4G"
+            break
+        if max_input.upper().endswith(("G", "M")):
+            max_mem = max_input.upper()
+            break
+        print("  格式错误，请输入如 4G、4096M")
+
+    return {
+        "java_path": java_path,
+        "min_mem": min_mem,
+        "max_mem": max_mem,
+    }
+
+
 def show_download_server_menu(servers_dir: str, project_dir: str) -> Optional[str]:
     print()
     print("  [下载] 正在获取可用服务端列表...")
     print()
-    categorized = msl_get_server_types()
+    categorized = msl_get_server_types(project_dir)
     if not categorized:
         print("  [错误] 无法获取服务端列表，请检查网络连接。")
         return None
@@ -725,7 +842,7 @@ def show_download_server_menu(servers_dir: str, project_dir: str) -> Optional[st
     if server_id is None:
         return None
     print(f"  [下载] 正在获取 {_server_display_name(server_id)} 的版本列表...")
-    version_data = msl_get_versions(server_id)
+    version_data = msl_get_versions(server_id, project_dir)
     if not version_data:
         print(f"  [错误] 无法获取 {_server_display_name(server_id)} 的版本信息")
         return None
@@ -766,13 +883,14 @@ def show_download_server_menu(servers_dir: str, project_dir: str) -> Optional[st
         print("  [错误] 下载的文件无效")
         shutil.rmtree(server_dir, ignore_errors=True)
         return None
+    post_cfg = _prompt_post_download_config(server_name)
     server_config = {
         "name": server_name,
         "mc_version": selected_version,
         "jar": jar_filename,
-        "java_path": None,
-        "min_mem": "1G",
-        "max_mem": "4G",
+        "java_path": post_cfg["java_path"],
+        "min_mem": post_cfg["min_mem"],
+        "max_mem": post_cfg["max_mem"],
         "extra_jvm_args": [],
         "extra_server_args": [],
     }

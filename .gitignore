@@ -7,6 +7,9 @@ servers/
 # Java 检测缓存（机器相关）
 java_list.json
 
+# MSL API 缓存（每日快照，无需提交）
+msl_cache.json
+
 # Python 缓存
 __pycache__/
 *.pyc
