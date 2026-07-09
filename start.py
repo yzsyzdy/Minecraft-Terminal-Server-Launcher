@@ -8,12 +8,12 @@ Minecraft 服务器启动器
 import os
 import sys
 
-from main import start_minecraft_server, start_server_interactive
+from main import start_minecraft_server, start_server_interactive, resolve_java
 
 
 # ===== 配置区（根据你的实际路径修改） =====
 
-# Java 可执行文件路径
+# Java 可执行文件路径（留空或设为 None 则自动检测）
 JAVA_PATH = os.path.join(os.path.dirname(__file__), "jdk-21.0.9", "bin", "java.exe")
 
 # 服务端核心 jar 文件路径
@@ -28,16 +28,24 @@ INTERACTIVE = True
 
 
 def main():
-    if not os.path.isfile(JAVA_PATH):
-        print(f"[错误] 未找到 Java: {JAVA_PATH}")
-        sys.exit(1)
-    if not os.path.isfile(JAR_PATH):
+    jar_abs = os.path.abspath(JAR_PATH)
+    if not os.path.isfile(jar_abs):
         print(f"[错误] 未找到服务端核心: {JAR_PATH}")
+        sys.exit(1)
+
+    # 解析 Java 路径：如果配置的路径不存在，则自动检测
+    try:
+        java_abs = resolve_java(
+            configured_path=JAVA_PATH,
+            storage_dir=os.path.dirname(__file__),
+        )
+    except FileNotFoundError as e:
+        print(f"[错误] {e}")
         sys.exit(1)
 
     print("=" * 50)
     print("  Minecraft Leaves Server 1.21.1")
-    print(f"  Java 版本: 21.0.9")
+    print(f"  Java:     {java_abs}")
     print(f"  分配内存:  最小 {MIN_MEM} / 最大 {MAX_MEM}")
     print("=" * 50)
     print()
@@ -45,15 +53,15 @@ def main():
     try:
         if INTERACTIVE:
             exit_code = start_server_interactive(
-                java_path=JAVA_PATH,
-                jar_path=JAR_PATH,
+                java_path=java_abs,
+                jar_path=jar_abs,
                 min_mem=MIN_MEM,
                 max_mem=MAX_MEM,
             )
         else:
             exit_code = start_minecraft_server(
-                java_path=JAVA_PATH,
-                jar_path=JAR_PATH,
+                java_path=java_abs,
+                jar_path=jar_abs,
                 min_mem=MIN_MEM,
                 max_mem=MAX_MEM,
             )
