@@ -12,6 +12,8 @@ import json
 import glob
 import zipfile
 import shutil
+import urllib.request
+import urllib.error
 from datetime import datetime, timezone
 from dataclasses import dataclass, asdict
 from typing import Optional, Any
@@ -425,31 +427,368 @@ def show_no_server_menu(servers_dir: str, project_dir: str) -> None:
             print(f"  无效选择，请输入 0-2。")
 
 
-def select_server_interactive(servers: list[dict[str, Any]]) -> dict[str, Any]:
-    """列出服务器让用户选择，返回选中服务器的配置。"""
-    print()
-    print(f"  找到 {len(servers)} 个服务器：")
-    print()
-    for i, s in enumerate(servers, 1):
-        ver = s.get("mc_version", "?")
-        jar = s.get("jar", "?")
-        mem = f"{s.get('min_mem', '?')} / {s.get('max_mem', '?')}"
-        print(f"  [{i}] {s['name']}  (MC {ver} | {jar} | {mem})")
-    print()
+def select_server_interactive(
+    servers: list[dict[str, Any]],
+    servers_dir: str = "",
+    project_dir: str = "",
+) -> Optional[dict[str, Any]]:
+    """
+    列出服务器让用户选择，末尾附加导入/下载新服务器选项。
+
+    返回选中服务器的配置字典。
+    当用户选择导入/下载后，内部处理并更新 servers 列表后重新显示。
+    传入 servers_dir / project_dir 才会显示导入/下载选项。
+    """
+    can_add_new = bool(servers_dir and project_dir)
+
     while True:
+        print()
+        print(f"  找到 {len(servers)} 个服务器：")
+        print()
+        for i, s in enumerate(servers, 1):
+            ver = s.get("mc_version", "?")
+            jar = s.get("jar", "?")
+            mem = f"{s.get('min_mem', '?')} / {s.get('max_mem', '?')}"
+            print(f"  [{i}] {s['name']}  (MC {ver} | {jar} | {mem})")
+
+        idx_import = len(servers) + 1
+        idx_download = len(servers) + 2
+        max_choice = idx_download
+
+        print()
+        if can_add_new:
+            print(f"  [{idx_import}] 导入新服务器（压缩包）")
+            print(f"  [{idx_download}] 下载新服务器")
+        print("  [0] 退出")
+        print()
+
+        prompt = f"  请选择 (0-{max_choice}): " if can_add_new else f"  请选择 (1-{len(servers)}): "
+        choice = input(prompt).strip()
+
+        if choice == "0":
+            print("[退出] 用户选择退出")
+            sys.exit(0)
+
+        # 导入
+        if can_add_new:
+            try:
+                int_choice = int(choice)
+                if int_choice == idx_import:
+                    zip_path = _prompt_zip_path()
+                    if zip_path is None:
+                        input("  按 Enter 返回菜单...")
+                        continue
+                    result = import_server_from_zip(zip_path, servers_dir, project_dir)
+                    if result is not None:
+                        servers.clear()
+                        servers.extend(list_servers(servers_dir))
+                    else:
+                        input("  按 Enter 返回菜单...")
+                    continue
+                elif int_choice == idx_download:
+                    result = show_download_server_menu(servers_dir, project_dir)
+                    if result is not None:
+                        servers.clear()
+                        servers.extend(list_servers(servers_dir))
+                    else:
+                        input("  按 Enter 返回菜单...")
+                    continue
+            except ValueError:
+                pass
+
+        # 选择已有服务器
         try:
-            choice = input("  请选择要启动的服务器 (1-{}): ".format(len(servers))).strip()
             idx = int(choice) - 1
             if 0 <= idx < len(servers):
                 return servers[idx]
         except ValueError:
             pass
-        print(f"  无效选择，请输入 1-{len(servers)} 之间的数字。")
+
+        print(f"  无效选择，请输入 0-{max_choice} 之间的数字。")
+
+
+# =============================================================================
+# 服务端下载模块（MSL API V4）
+# =============================================================================
+
+MSL_API_BASE = "https://api.mslmc.cn/v4"
+MSL_USER_AGENT = "MinecraftServerLauncher/1.0"
+
+_CATEGORY_LABELS: dict[str, str] = {
+    "pluginsCore": "插件端",
+    "pluginsAndModsCore_Forge": "插件+模组端 (Forge)",
+    "pluginsAndModsCore_Fabric": "插件+模组端 (Fabric)",
+    "modsCore_Forge": "模组端 (Forge)",
+    "modsCore_Fabric": "模组端 (Fabric)",
+    "vanillaCore": "原版端",
+    "bedrockCore": "基岩版",
+    "proxyCore": "代理端",
+}
+
+_SERVER_DISPLAY_NAMES: dict[str, str] = {
+    "paper": "Paper",
+    "purpur": "Purpur",
+    "leaf": "Leaf",
+    "leaves": "Leaves",
+    "spigot": "Spigot",
+    "bukkit": "Bukkit",
+    "folia": "Folia",
+    "pufferfish": "Pufferfish",
+    "pufferfish_purpur": "Pufferfish+Purpur",
+    "spongevanilla": "SpongeVanilla",
+    "arclight-forge": "Arclight (Forge)",
+    "arclight-fabric": "Arclight (Fabric)",
+    "arclight-neoforge": "Arclight (NeoForge)",
+    "youer": "Youer",
+    "mohist": "Mohist",
+    "catserver": "CatServer",
+    "banner": "Banner",
+    "spongeforge": "SpongeForge",
+    "neoforge": "NeoForge",
+    "forge": "Forge",
+    "fabric": "Fabric",
+    "quilt": "Quilt",
+    "vanilla": "Vanilla",
+    "vanilla-snapshot": "Vanilla Snapshot",
+    "bedrock-server": "Bedrock Server",
+    "nukkitx": "NukkitX",
+    "velocity": "Velocity",
+    "bungeecord": "BungeeCord",
+    "lightfall": "Lightfall",
+    "travertine": "Travertine",
+}
+
+
+def _server_display_name(server_id: str) -> str:
+    return _SERVER_DISPLAY_NAMES.get(server_id, server_id.capitalize())
+
+
+def _msl_headers() -> dict[str, str]:
+    return {"User-Agent": MSL_USER_AGENT}
+
+
+def _msl_request(path: str) -> Any:
+    import urllib.request as ureq
+    import urllib.error as uerr
+    url = f"{MSL_API_BASE}{path}"
+    try:
+        req = ureq.Request(url, headers=_msl_headers())
+        with ureq.urlopen(req, timeout=30) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+    except uerr.HTTPError as e:
+        print(f"  [错误] MSL API 返回 HTTP {e.code}: {e.reason}")
+        return None
+    except uerr.URLError as e:
+        print(f"  [错误] 网络请求失败: {e.reason}")
+        return None
+    except (json.JSONDecodeError, OSError) as e:
+        print(f"  [错误] 响应解析失败: {e}")
+        return None
+    if not isinstance(data, dict):
+        print(f"  [错误] MSL API 返回格式异常")
+        return None
+    if data.get("code") != 200:
+        print(f"  [错误] MSL API: {data.get('message', '未知错误')}")
+        return None
+    return data.get("data")
+
+
+def msl_get_server_types() -> Optional[dict[str, list[str]]]:
+    return _msl_request("/mirrors")
+
+
+def msl_get_versions(server_type: str) -> Optional[dict]:
+    return _msl_request(f"/mirrors/{server_type}")
+
+
+def msl_get_download_url(server_type: str, version: str) -> Optional[dict]:
+    return _msl_request(f"/download/server/{server_type}/{version}")
+
+
+def _download_with_progress(url: str, target_path: str, desc: str = "") -> bool:
+    import urllib.request as ureq
+    import urllib.error as uerr
+    try:
+        req = ureq.Request(url, headers={"User-Agent": MSL_USER_AGENT})
+        with ureq.urlopen(req, timeout=300) as resp:
+            total = resp.length
+            downloaded = 0
+            bar_width = 30
+            chunk_size = 8192
+            os.makedirs(os.path.dirname(target_path), exist_ok=True)
+            with open(target_path, "wb") as f:
+                while True:
+                    chunk = resp.read(chunk_size)
+                    if not chunk:
+                        break
+                    f.write(chunk)
+                    downloaded += len(chunk)
+                    if total and total > 0:
+                        pct = downloaded / total
+                        filled = int(bar_width * pct)
+                        bar = "\u2588" * filled + "\u2591" * (bar_width - filled)
+                        print(f"    {desc} [{bar}] {pct * 100:5.1f}%", end="\r", flush=True)
+                    else:
+                        mb = downloaded / 1024 / 1024
+                        print(f"    {desc} 已下载 {mb:.1f} MB...", end="\r", flush=True)
+        print()
+        return True
+    except uerr.HTTPError as e:
+        print(f"\n  [错误] 下载失败 (HTTP {e.code})")
+        return False
+    except uerr.URLError as e:
+        print(f"\n  [错误] 下载失败: {e.reason}")
+        return False
+    except OSError as e:
+        print(f"\n  [错误] 文件写入失败: {e}")
+        return False
+
+
+def _interactive_pick_server_type(categorized: dict[str, list[str]]) -> Optional[str]:
+    all_servers: list[tuple[str, str]] = []
+    for category, server_list in categorized.items():
+        label = _CATEGORY_LABELS.get(category, category)
+        if not isinstance(server_list, list):
+            continue
+        for sid in server_list:
+            if isinstance(sid, str):
+                all_servers.append((sid, label))
+    if not all_servers:
+        print("  [错误] MSL API 返回的服务端列表为空")
+        return None
+    print()
+    print("  请选择服务端类型：")
+    print()
+    current_category = ""
+    idx = 1
+    index_map: list[tuple[int, str]] = []
+    for sid, cat in all_servers:
+        if cat != current_category:
+            print(f"  [{cat}]")
+            current_category = cat
+        display = _server_display_name(sid)
+        print(f"      [{idx}] {display}")
+        index_map.append((idx, sid))
+        idx += 1
+    print()
+    while True:
+        try:
+            choice = input(f"  请输入编号 (1-{len(index_map)}): ").strip()
+            num = int(choice)
+            for i, sid in index_map:
+                if i == num:
+                    return sid
+        except ValueError:
+            pass
+        print(f"  无效选择，请输入 1-{len(index_map)} 之间的数字。")
+
+
+def _interactive_pick_version(versions: list[str], description: str) -> Optional[str]:
+    if not versions:
+        print("  [错误] 该服务端没有可用的版本")
+        return None
+    print()
+    if description:
+        print(f"  {description}")
+        print()
+    print(f"  可用版本（共 {len(versions)} 个），默认下载最新版：")
+    print()
+    stable = [v for v in versions if not any(x in v.lower() for x in ("pre", "rc", "snapshot", "alpha", "beta"))]
+    show = stable[:20] if stable else versions[:20]
+    for i, ver in enumerate(show, 1):
+        marker = " ← 最新" if i == 1 else ""
+        print(f"  [{i}] {ver}{marker}")
+    print(f"  [L] 直接下载最新版 ({show[0]})")
+    print()
+    while True:
+        choice = input(f"  请输入编号 (1-{len(show)} 或 L): ").strip().lower()
+        if choice == "l":
+            return show[0]
+        try:
+            idx = int(choice) - 1
+            if 0 <= idx < len(show):
+                return show[idx]
+        except ValueError:
+            pass
+        print(f"  无效选择。")
+
+
+def show_download_server_menu(servers_dir: str, project_dir: str) -> Optional[str]:
+    print()
+    print("  [下载] 正在获取可用服务端列表...")
+    print()
+    categorized = msl_get_server_types()
+    if not categorized:
+        print("  [错误] 无法获取服务端列表，请检查网络连接。")
+        return None
+    server_id = _interactive_pick_server_type(categorized)
+    if server_id is None:
+        return None
+    print(f"  [下载] 正在获取 {_server_display_name(server_id)} 的版本列表...")
+    version_data = msl_get_versions(server_id)
+    if not version_data:
+        print(f"  [错误] 无法获取 {_server_display_name(server_id)} 的版本信息")
+        return None
+    versions = version_data.get("versions", [])
+    description = version_data.get("description", "")
+    selected_version = _interactive_pick_version(versions, description)
+    if selected_version is None:
+        return None
+    print(f"  [下载] 已选择: {_server_display_name(server_id)} {selected_version}")
+    print(f"  [下载] 正在获取下载地址...")
+    download_info = msl_get_download_url(server_id, selected_version)
+    if not download_info:
+        print("  [错误] 无法获取下载地址")
+        print("  MSL API 下载接口有频率限制：每小时 30 次，每天 60 次")
+        return None
+    url = download_info.get("url", "")
+    if not url:
+        print("  [错误] 下载地址为空")
+        return None
+    server_name = f"{server_id}-{selected_version}"
+    server_dir = os.path.join(servers_dir, server_name)
+    counter = 1
+    while os.path.exists(server_dir):
+        server_dir = os.path.join(servers_dir, f"{server_name}_{counter}")
+        counter += 1
+    os.makedirs(server_dir)
+    jar_filename = os.path.basename(url.split("?")[0])
+    if not jar_filename.endswith(".jar"):
+        jar_filename = f"{server_id}.jar"
+    jar_path = os.path.join(server_dir, jar_filename)
+    print(f"  [下载] 正在下载 {_server_display_name(server_id)} {selected_version}")
+    print(f"         保存到: {jar_path}")
+    success = _download_with_progress(url, jar_path, desc="下载中")
+    if not success:
+        shutil.rmtree(server_dir, ignore_errors=True)
+        return None
+    if not os.path.isfile(jar_path) or os.path.getsize(jar_path) == 0:
+        print("  [错误] 下载的文件无效")
+        shutil.rmtree(server_dir, ignore_errors=True)
+        return None
+    server_config = {
+        "name": server_name,
+        "mc_version": selected_version,
+        "jar": jar_filename,
+        "java_path": None,
+        "min_mem": "1G",
+        "max_mem": "4G",
+        "extra_jvm_args": [],
+        "extra_server_args": [],
+    }
+    save_server_config(server_config, server_dir)
+    size_mb = os.path.getsize(jar_path) / 1024 / 1024
+    print(f"  [下载] 下载完成！({size_mb:.1f} MB)")
+    if download_info.get("sha256"):
+        print(f"          SHA256: {download_info['sha256']}")
+    print(f"          服务器目录: {server_dir}")
+    return server_dir
 
 
 # =============================================================================
 # Java 自动检测模块
 # =============================================================================
+
 
 @dataclass
 class JavaInfo:

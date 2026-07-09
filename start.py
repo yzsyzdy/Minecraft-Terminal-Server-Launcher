@@ -15,6 +15,7 @@ from main import (
     list_servers,
     load_server_config,
     show_no_server_menu,
+    show_download_server_menu,
     select_server_interactive,
     resolve_java,
     start_minecraft_server,
@@ -23,6 +24,7 @@ from main import (
 
 
 def main():
+    os.system("cls")
     project_dir = os.path.dirname(os.path.abspath(__file__))
 
     # 1. 加载全局配置
@@ -47,8 +49,12 @@ def main():
             print("[退出] servers/ 中没有服务器，程序退出。")
             sys.exit(0)
 
-    # 4. 选择服务器
-    selected = select_server_interactive(servers)
+    # 4. 选择服务器（含导入/下载新服务器的选项）
+    selected = select_server_interactive(
+        servers,
+        servers_dir=servers_dir,
+        project_dir=project_dir,
+    )
     server_path = selected["_path"]
     server_cfg = load_server_config(server_path)
 
