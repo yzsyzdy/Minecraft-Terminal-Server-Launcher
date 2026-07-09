@@ -242,6 +242,33 @@ def _pick_jar_interactive(jars: list[str]) -> str:
         print(f"  无效选择。")
 
 
+def _extract_with_progress(zip_path: str, target_dir: str) -> None:
+    """解压 zip 并显示 ASCII 进度条。"""
+    with zipfile.ZipFile(zip_path, "r") as zf:
+        members = zf.infolist()
+        # 排除目录，只算实际文件的大小
+        total = sum(m.file_size for m in members if not m.is_dir())
+        extracted = 0
+        bar_width = 30
+
+        print()
+        for member in members:
+            zf.extract(member, target_dir)
+            if not member.is_dir():
+                extracted += member.file_size
+
+            if total > 0:
+                pct = extracted / total
+                filled = int(bar_width * pct)
+                bar = "\u2588" * filled + "\u2591" * (bar_width - filled)
+                print(
+                    f"    \u89e3\u538b [{bar}] {pct * 100:5.1f}%",
+                    end="\r",
+                    flush=True,
+                )
+        print()
+
+
 def import_server_from_zip(zip_path: str, servers_dir: str, project_dir: str) -> Optional[str]:
     """
     从压缩包导入一个 Minecraft 服务器。
@@ -285,10 +312,9 @@ def import_server_from_zip(zip_path: str, servers_dir: str, project_dir: str) ->
         os.makedirs(temp_dir)
 
         zip_name = os.path.basename(zip_path)
-        print(f"  [导入] 正在解压 {zip_name} ...")
+        print(f"  [导入] 正在解压 {zip_name}")
         try:
-            with zipfile.ZipFile(zip_path, "r") as zf:
-                zf.extractall(temp_dir)
+            _extract_with_progress(zip_path, temp_dir)
         except zipfile.BadZipFile:
             print(f"  [错误] 文件不是有效的压缩包: {zip_name}")
             return None

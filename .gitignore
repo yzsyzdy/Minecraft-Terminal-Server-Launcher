@@ -1,0 +1,12 @@
+# 导入解压临时目录
+.import_temp/
+
+# 服务器实例（每个服务器有自己的数据，不纳入版本控制）
+servers/
+
+# Java 检测缓存（机器相关）
+java_list.json
+
+# Python 缓存
+__pycache__/
+*.pyc

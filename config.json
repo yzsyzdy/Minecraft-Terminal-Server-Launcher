@@ -1,7 +1,4 @@
 {
   "java_path": null,
-  "jar_path": "leaves.jar",
-  "min_mem": "1G",
-  "max_mem": "6G",
   "interactive": true
 }
