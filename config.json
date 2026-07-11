@@ -1,4 +1,5 @@
 {
   "java_path": null,
-  "interactive": true
+  "interactive": true,
+  "curseforge_api_key": ""
 }
