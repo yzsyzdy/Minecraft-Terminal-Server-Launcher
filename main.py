@@ -18,6 +18,7 @@ from server_manager import (
     load_server_config,
     save_server_config,
     import_server_from_zip,
+    classify_server_type,
     DEFAULT_SERVER_CONFIG,
 )
 from download_msl import (

@@ -173,6 +173,65 @@ def _extract_with_progress(zip_path: str, target_dir: str) -> None:
         print()
 
 
+# ---------------------------------------------------------------------------
+# 服务端类型分类
+# ---------------------------------------------------------------------------
+
+_PLUGIN_IDS = {"paper", "purpur", "leaf", "leaves", "spigot", "bukkit", "folia",
+               "pufferfish", "pufferfish_purpur", "spongevanilla"}
+_HYBRID_IDS = {"arclight", "arclight-forge", "arclight-fabric", "arclight-neoforge",
+               "mohist", "catserver", "youer", "banner", "spongeforge"}
+_MOD_IDS = {"neoforge", "forge", "fabric", "quilt"}
+_VANILLA_IDS = {"vanilla", "vanilla-snapshot"}
+_PROXY_IDS = {"velocity", "bungeecord", "lightfall", "travertine"}
+_BEDROCK_IDS = {"bedrock-server", "nukkitx"}
+
+# jar 文件名到类型的映射（用于导入的服务器）
+_JAR_HINTS: dict[str, str] = {
+    "paper": "plugin", "purpur": "plugin", "leaves": "plugin", "spigot": "plugin",
+    "bukkit": "plugin", "folia": "plugin", "pufferfish": "plugin",
+    "fabric-server": "mod", "forge-": "mod", "neoforge-": "mod",
+    "quilt-server": "mod",
+    "mohist": "hybrid", "catserver": "hybrid", "arclight": "hybrid",
+    "server": "vanilla",
+    "velocity": "proxy", "bungeecord": "proxy",
+}
+
+
+def classify_server_type(server_cfg: dict, server_dir: str) -> str:
+    """
+    判断服务器类型。返回以下之一：
+    "plugin", "mod", "hybrid", "vanilla", "proxy", "bedrock", "unknown"
+    """
+    name = (server_cfg.get("name") or "").lower()
+    jar = (server_cfg.get("jar") or "").lower()
+
+    # 从 name 提取可能的 server_id（格式：paper-1.21.1）
+    parts = name.split("-")
+    candidate = parts[0] if parts else ""
+
+    # 查分类表
+    if candidate in _PLUGIN_IDS:
+        return "plugin"
+    if candidate in _HYBRID_IDS or candidate in {"arclight"} and any(x in name for x in ("forge", "fabric", "neoforge")):
+        return "hybrid"
+    if candidate in _MOD_IDS:
+        return "mod"
+    if candidate in _VANILLA_IDS:
+        return "vanilla"
+    if candidate in _PROXY_IDS:
+        return "proxy"
+    if candidate in _BEDROCK_IDS:
+        return "bedrock"
+
+    # 从 jar 文件名猜测
+    for hint, stype in _JAR_HINTS.items():
+        if hint in jar:
+            return stype
+
+    return "unknown"
+
+
 def import_server_from_zip(zip_path: str, servers_dir: str, project_dir: str) -> Optional[str]:
     """从压缩包导入服务器。返回服务器目录路径，失败返回 None。"""
     zip_path = os.path.abspath(zip_path)
