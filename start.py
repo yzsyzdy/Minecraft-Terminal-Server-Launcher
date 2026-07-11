@@ -14,6 +14,47 @@ from java_tools import resolve_java
 from server_launcher import start_minecraft_server, start_server_interactive
 
 
+def _is_eula_unagreed(server_path: str) -> bool:
+    """检查 eula.txt 是否存在且内容为 eula=false。"""
+    eula_path = os.path.join(server_path, "eula.txt")
+    if not os.path.isfile(eula_path):
+        return False
+    try:
+        with open(eula_path, "r", encoding="utf-8") as f:
+            content = f.read()
+        return "eula=false" in content
+    except OSError:
+        return False
+
+
+def _agree_to_eula(server_path: str) -> bool:
+    """将 eula.txt 中的 eula=false 改为 eula=true。成功返回 True。"""
+    eula_path = os.path.join(server_path, "eula.txt")
+    try:
+        with open(eula_path, "r", encoding="utf-8") as f:
+            content = f.read()
+        content = content.replace("eula=false", "eula=true")
+        with open(eula_path, "w", encoding="utf-8") as f:
+            f.write(content)
+        return True
+    except OSError:
+        return False
+
+
+def _prompt_eula(name: str) -> bool:
+    """询问用户是否同意 Minecraft EULA。返回 True 表示同意。"""
+    print()
+    print("  =============================================")
+    print("   Minecraft 最终用户许可协议 (EULA)")
+    print("   https://aka.ms/MinecraftEULA")
+    print("  =============================================")
+    print()
+    print(f"  服务器 \"{name}\" 需要您同意 EULA 才能运行。")
+    print()
+    ans = input("  是否同意 Minecraft EULA？(y/N): ").strip().lower()
+    return ans == "y"
+
+
 def main():
     project_dir = os.path.dirname(os.path.abspath(__file__))
 
@@ -72,27 +113,51 @@ def main():
     print(f"  内存:      最小 {min_mem} / 最大 {max_mem}")
     print()
 
-    try:
-        if interactive:
-            exit_code = start_server_interactive(
-                java_path=java_abs, jar_path=jar_abs,
-                min_mem=min_mem, max_mem=max_mem,
-                extra_jvm_args=extra_jvm, extra_server_args=extra_srv,
-            )
-        else:
-            exit_code = start_minecraft_server(
-                java_path=java_abs, jar_path=jar_abs,
-                min_mem=min_mem, max_mem=max_mem,
-                extra_jvm_args=extra_jvm, extra_server_args=extra_srv,
-            )
-    except FileNotFoundError as e:
-        print(f"[错误] {e}")
-        sys.exit(1)
-    except KeyboardInterrupt:
-        print("\n[关闭] 用户中断")
-        sys.exit(0)
+    # 启动循环（支持 EULA 同意后自动重启）
+    first_start = True
+    while True:
+        try:
+            if interactive:
+                exit_code = start_server_interactive(
+                    java_path=java_abs, jar_path=jar_abs,
+                    min_mem=min_mem, max_mem=max_mem,
+                    extra_jvm_args=extra_jvm, extra_server_args=extra_srv,
+                )
+            else:
+                exit_code = start_minecraft_server(
+                    java_path=java_abs, jar_path=jar_abs,
+                    min_mem=min_mem, max_mem=max_mem,
+                    extra_jvm_args=extra_jvm, extra_server_args=extra_srv,
+                )
+        except FileNotFoundError as e:
+            print(f"[错误] {e}")
+            sys.exit(1)
+        except KeyboardInterrupt:
+            print("\n[关闭] 用户中断")
+            sys.exit(0)
 
-    print(f"\n[完成] 服务器 \"{name}\" 已关闭，退出码: {exit_code}")
+        # 检查 EULA
+        if exit_code != 0 and _is_eula_unagreed(server_path):
+            print()
+            print(f"  [EULA] 服务器因未同意 EULA 而退出。")
+            if _prompt_eula(name):
+                if _agree_to_eula(server_path):
+                    print("  [EULA] 已同意，正在自动重启服务器...")
+                    print()
+                    first_start = False
+                    continue  # 自动重启
+                else:
+                    print("  [EULA] 修改 eula.txt 失败，请手动修改。")
+            else:
+                print("  [EULA] 已拒绝。")
+
+        # 正常退出或无需 EULA 处理
+        break
+
+    if first_start:
+        print(f"\n[完成] 服务器 \"{name}\" 已关闭，退出码: {exit_code}")
+    else:
+        print(f"\n[完成] 服务器 \"{name}\" 已关闭，退出码: {exit_code}")
     sys.exit(exit_code)
 
 
