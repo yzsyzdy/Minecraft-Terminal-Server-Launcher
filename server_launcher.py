@@ -1,5 +1,5 @@
 """
-Minecraft 服务器启动模块
+MSTL — 服务器启动模块
 
 提供启动服务器的核心函数（JVM 参数、进程管理）。
 """
@@ -8,7 +8,18 @@ import subprocess
 import sys
 import os
 import signal
+import platform
 from typing import Optional
+
+
+def console_title(title: str) -> None:
+    """设置控制台窗口标题（Windows），其他系统忽略。"""
+    if platform.system() == "Windows":
+        try:
+            import ctypes
+            ctypes.windll.kernel32.SetConsoleTitleW(title)
+        except Exception:
+            pass
 
 
 def start_minecraft_server(
@@ -21,7 +32,8 @@ def start_minecraft_server(
     extra_jvm_args: Optional[list[str]] = None,
     extra_server_args: Optional[list[str]] = None,
 ) -> int:
-    """启动 Minecraft 服务器（非交互模式，仅输出日志）。返回进程退出码。"""
+    """启动服务器（非交互模式，仅输出日志）。返回进程退出码。"""
+    console_title("MSTL — 服务器控制台 (非交互)")
     java_path = os.path.abspath(java_path)
     jar_path = os.path.abspath(jar_path)
     if not os.path.isfile(java_path):
@@ -91,6 +103,7 @@ def start_server_interactive(
     extra_server_args: Optional[list[str]] = None,
 ) -> int:
     """启动服务器并支持控制台交互输入。"""
+    console_title("MSTL — 服务器控制台")
     java_path = os.path.abspath(java_path)
     jar_path = os.path.abspath(jar_path)
     if not os.path.isfile(java_path):

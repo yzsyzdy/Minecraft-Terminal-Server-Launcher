@@ -16,7 +16,7 @@ from typing import Any, Optional
 from server_manager import save_server_config
 
 MSL_API_BASE = "https://api.mslmc.cn/v4"
-MSL_USER_AGENT = "MinecraftServerLauncher/1.0"
+MSL_USER_AGENT = "MSTL/1.0"
 
 _CATEGORY_LABELS: dict[str, str] = {
     "pluginsCore": "插件端",

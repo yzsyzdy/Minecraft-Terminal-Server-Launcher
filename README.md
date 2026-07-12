@@ -1,4 +1,4 @@
-# Minecraft 服务器启动器
+# MSTL — Minecraft Terminal Server Launcher
 
 一个轻量级的 Minecraft 服务端管理器，支持多服务器实例、版本隔离、自动 Java 检测与 JDK 下载、MSL 镜像源高速下载。
 

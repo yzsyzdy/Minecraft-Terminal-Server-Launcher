@@ -1,5 +1,5 @@
 """
-Minecraft 服务器启动器
+MSTL — Minecraft Terminal Server Launcher
 
 从 config.json 读取配置，管理 servers/ 下的多服务器实例。
 """
@@ -55,15 +55,26 @@ def _prompt_eula(name: str) -> bool:
     return ans == "y"
 
 
+def _project_dir() -> str:
+    """确定项目根目录。
+    
+    源码模式用 __file__，打包模式（Nuitka/PyInstaller）用 sys.executable，
+    保证 config.json/servers/ 创建在 exe 同级目录。
+    """
+    if getattr(sys, "frozen", False):
+        return os.path.dirname(os.path.abspath(sys.executable))
+    return os.path.dirname(os.path.abspath(__file__))
+
+
 def main():
-    project_dir = os.path.dirname(os.path.abspath(__file__))
+    project_dir = _project_dir()
 
     config = load_config(project_dir)
     save_config(config, project_dir)
 
     servers_dir = ensure_servers_folder(project_dir)
     print("=" * 50)
-    print("  Minecraft 服务器启动器")
+    print("  MSTL — Minecraft Terminal Server Launcher")
     print(f"  服务器目录: {servers_dir}")
     print("=" * 50)
 

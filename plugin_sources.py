@@ -11,7 +11,7 @@ import urllib.request
 import urllib.error
 from typing import Any, Optional
 
-USER_AGENT = "MinecraftServerLauncher/1.0 (plugin downloader)"
+USER_AGENT = "MSTL/1.0 (plugin downloader)"
 
 # ---------------------------------------------------------------------------
 # 通用结构
