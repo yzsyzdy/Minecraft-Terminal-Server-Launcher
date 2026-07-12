@@ -8,6 +8,9 @@ API 端点：https://api.mslmc.cn/v4
 import os
 import json
 import shutil
+import time
+import threading
+import concurrent.futures
 import urllib.request
 import urllib.error
 from datetime import datetime, timezone
@@ -139,10 +142,53 @@ def msl_get_download_url(server_type: str, version: str) -> Optional[dict]:
 
 
 # ---------------------------------------------------------------------------
-# 下载进度
+# 多线程下载
 # ---------------------------------------------------------------------------
 
+_DEFAULT_DOWNLOAD_THREADS = 16
+_MIN_CHUNK_SIZE = 1 * 1024 * 1024  # 小于 1MB 的文件不做多线程
+
+
+def _check_range_support(url: str) -> tuple[bool, int]:
+    """检查服务器是否支持 Range 请求，返回 (支持?, 文件大小)。"""
+    try:
+        req = urllib.request.Request(url, method="HEAD",
+                                     headers={"User-Agent": MSL_USER_AGENT})
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            accept_ranges = resp.headers.get("Accept-Ranges", "")
+            content_length = resp.headers.get("Content-Length")
+            size = int(content_length) if content_length else 0
+            return "bytes" in accept_ranges, size
+    except Exception:
+        return False, 0
+
+
+def _download_chunk(url: str, start: int, end: int, target_path: str,
+                    shared: dict, lock: threading.Lock) -> bool:
+    """下载一个文件分块，直接写入目标文件的对应偏移位置。"""
+    range_header = f"bytes={start}-{end}"
+    req = urllib.request.Request(url, headers={
+        "User-Agent": MSL_USER_AGENT,
+        "Range": range_header,
+    })
+    try:
+        with urllib.request.urlopen(req, timeout=300) as resp:
+            with open(target_path, "rb+") as f:
+                f.seek(start)
+                while True:
+                    chunk = resp.read(65536)
+                    if not chunk:
+                        break
+                    f.write(chunk)
+                    with lock:
+                        shared["downloaded"] += len(chunk)
+        return True
+    except Exception:
+        return False
+
+
 def _download_with_progress(url: str, target_path: str, desc: str = "") -> bool:
+    """单线程下载（作为多线程的回退方案）。"""
     try:
         req = urllib.request.Request(url, headers={"User-Agent": MSL_USER_AGENT})
         with urllib.request.urlopen(req, timeout=300) as resp:
@@ -150,7 +196,7 @@ def _download_with_progress(url: str, target_path: str, desc: str = "") -> bool:
             downloaded = 0
             bar_width = 30
             chunk_size = 8192
-            os.makedirs(os.path.dirname(target_path), exist_ok=True)
+            os.makedirs(os.path.dirname(target_path) or ".", exist_ok=True)
             with open(target_path, "wb") as f:
                 while True:
                     chunk = resp.read(chunk_size)
@@ -170,6 +216,113 @@ def _download_with_progress(url: str, target_path: str, desc: str = "") -> bool:
     except (urllib.error.HTTPError, urllib.error.URLError, OSError) as e:
         print(f"\n  [错误] 下载失败: {e}")
         return False
+
+
+def multithreaded_download(url: str, target_path: str, desc: str = "",
+                           num_threads: int = _DEFAULT_DOWNLOAD_THREADS) -> bool:
+    """
+    多线程下载单个文件。
+
+    自动检测服务器是否支持 Range 请求。支持时将文件切分为多块并发下载，
+    不支持或文件过小时回退到单线程。
+    失败的分块会自动重试最多 2 次。
+    """
+    supports_range, file_size = _check_range_support(url)
+
+    # 回退条件：不支持 Range / 文件太小 / 无法获取大小
+    if not supports_range or file_size < _MIN_CHUNK_SIZE or file_size <= 0:
+        return _download_with_progress(url, target_path, desc)
+
+    # 根据实际大小计算合理线程数（每个线程至少下载 _MIN_CHUNK_SIZE）
+    actual_threads = min(num_threads, max(1, file_size // _MIN_CHUNK_SIZE))
+    if actual_threads <= 1:
+        return _download_with_progress(url, target_path, desc)
+
+    chunk_size = file_size // actual_threads
+
+    # 预分配文件空间
+    os.makedirs(os.path.dirname(target_path) or ".", exist_ok=True)
+    with open(target_path, "wb") as f:
+        f.truncate(file_size)
+
+    # 构建分块偏移列表
+    chunks: list[tuple[int, int]] = []
+    for i in range(actual_threads):
+        start = i * chunk_size
+        if i < actual_threads - 1:
+            end = start + chunk_size - 1
+        else:
+            end = file_size - 1
+        chunks.append((start, end))
+
+    # 共享进度状态
+    shared: dict[str, Any] = {"downloaded": 0}
+    lock = threading.Lock()
+    bar_width = 30
+
+    print(f"    {desc} 多线程下载 ({actual_threads}线程)...")
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=actual_threads) as executor:
+        futures = [
+            executor.submit(_download_chunk, url, start, end, target_path,
+                            shared, lock)
+            for start, end in chunks
+        ]
+
+        # 实时输出进度
+        while not all(f.done() for f in futures):
+            with lock:
+                downloaded = shared["downloaded"]
+            if file_size > 0:
+                pct = downloaded / file_size
+                filled = int(bar_width * pct)
+                bar = "\u2588" * filled + "\u2591" * (bar_width - filled)
+                print(f"    {desc} [{bar}] {pct * 100:5.1f}%  "
+                      f"({downloaded/1024/1024:.1f}/{file_size/1024/1024:.1f} MB)",
+                      end="\r", flush=True)
+            else:
+                print(f"    {desc} 已下载 {downloaded/1024/1024:.1f} MB...",
+                      end="\r", flush=True)
+            time.sleep(0.15)
+
+        # 检查各分块结果，失败时重试（最多 2 次额外尝试）
+        for attempt in range(3):
+            failed_indices = [
+                i for i, f in enumerate(futures)
+                if f.exception() or f.result() is False
+            ]
+            if not failed_indices:
+                break
+            if attempt < 2:
+                retry_futures = [
+                    executor.submit(_download_chunk, url, chunks[i][0], chunks[i][1],
+                                    target_path, shared, lock)
+                    for i in failed_indices
+                ]
+                for rf in concurrent.futures.as_completed(retry_futures):
+                    pass
+                futures = retry_futures
+            else:
+                try:
+                    os.remove(target_path)
+                except OSError:
+                    pass
+                print(f"\n  [错误] 下载失败，"
+                      f"{len(failed_indices)}/{len(chunks)} 个分块下载失败")
+                return False
+
+    final_bar = "\u2588" * bar_width
+    print(f"    {desc} [{final_bar}] 100.0%  "
+          f"({file_size/1024/1024:.1f}/{file_size/1024/1024:.1f} MB)")
+    return True
+
+
+def set_download_threads(count: int) -> None:
+    """设置全局默认下载线程数。"""
+    global _DEFAULT_DOWNLOAD_THREADS
+    if count < 1:
+        count = 1
+    _DEFAULT_DOWNLOAD_THREADS = count
 
 
 # ---------------------------------------------------------------------------
@@ -307,7 +460,7 @@ def show_download_server_menu(servers_dir: str, project_dir: str) -> Optional[st
 
     print(f"  [下载] 正在下载 {_server_display_name(server_id)} {selected_version}")
     print(f"         保存到: {jar_path}")
-    if not _download_with_progress(url, jar_path, desc="下载中"):
+    if not multithreaded_download(url, jar_path, desc="下载中"):
         shutil.rmtree(server_dir, ignore_errors=True); return None
     if not os.path.isfile(jar_path) or os.path.getsize(jar_path) == 0:
         print("  [错误] 下载的文件无效")

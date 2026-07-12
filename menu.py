@@ -56,6 +56,8 @@ def _list_plugins(plugins_dir: str) -> tuple[list[str], list[str]]:
 
 def _search_and_download_plugin(server_name: str, plugins_dir: str) -> None:
     """搜索插件并下载。自动查询 SpigotMC、Modrinth、Hangar，按下载量排序。"""
+    from clear import clear_screen
+    clear_screen()
     from plugin_sources import search_all, download_plugin
 
     print()
@@ -119,6 +121,8 @@ def _search_and_download_plugin(server_name: str, plugins_dir: str) -> None:
 
 def _show_plugin_menu(server_cfg: dict, server_dir: str) -> None:
     """插件管理菜单。"""
+    from clear import clear_screen
+    clear_screen()
     name = server_cfg.get("name", "?")
     plugins_dir = _get_plugins_dir(server_dir)
 
@@ -126,6 +130,7 @@ def _show_plugin_menu(server_cfg: dict, server_dir: str) -> None:
     os.makedirs(plugins_dir, exist_ok=True)
 
     while True:
+        clear_screen()
         enabled, disabled = _list_plugins(plugins_dir)
         total = len(enabled) + len(disabled)
 
@@ -228,7 +233,6 @@ def _show_plugin_menu(server_cfg: dict, server_dir: str) -> None:
                 print(f"  [添加插件] 服务器: {name}")
                 print()
                 print("  [1] 导入 jar 文件")
-                print("  [1] 导入 jar 文件")
                 print("  [2] 从 SpigotMC/Modrinth/Hangar 搜索下载")
                 print("  [0] 返回")
                 print()
@@ -269,15 +273,264 @@ def _show_plugin_menu(server_cfg: dict, server_dir: str) -> None:
             print(f"  无效选择。")
 
 
+def _get_mods_dir(server_dir: str) -> str:
+    return os.path.join(server_dir, "mods")
+
+
+def _list_mods(mods_dir: str) -> tuple[list[str], list[str]]:
+    """扫描 mods/ 目录，返回 (启用的 .jar, 禁用的 .jar.disabled)。"""
+    enabled: list[str] = []
+    disabled: list[str] = []
+    if not os.path.isdir(mods_dir):
+        return enabled, disabled
+    try:
+        for entry in sorted(os.listdir(mods_dir)):
+            low = entry.lower()
+            if low.endswith(".jar") and not entry.endswith(".disabled"):
+                enabled.append(entry)
+            elif low.endswith(".jar.disabled"):
+                disabled.append(entry)
+            elif low.endswith(".disabled"):
+                base = entry[:-9]
+                if base.lower().endswith(".jar"):
+                    disabled.append(entry)
+    except OSError:
+        pass
+    return enabled, disabled
+
+
+def _search_and_download_mod(name: str, mods_dir: str,
+                              mc_version: str, loader: str) -> None:
+    """搜索模组并下载，自动按服务器版本和加载器过滤。"""
+    from clear import clear_screen
+    clear_screen()
+    from mod_sources import search_all_mods, download_mod, set_curseforge_api_key
+    from config import load_config
+
+    print()
+    query = input("  请输入模组名称或关键词: ").strip()
+    if not query:
+        return
+
+    # 传递 CurseForge API key
+    cfg = load_config(os.path.dirname(os.path.dirname(mods_dir)))
+    cf_key = cfg.get("curseforge_api_key", "")
+    if cf_key:
+        set_curseforge_api_key(cf_key)
+
+    version_info = f"{loader} {mc_version}" if mc_version else loader
+    print(f"  [搜索] 正在查询 Modrinth + CurseForge（过滤: {version_info}）...")
+    src_results = search_all_mods(query, mc_version, loader, limit=10)
+
+    is_fallback = src_results.pop("_fallback", False)
+
+    src_used = list(src_results.keys())
+    if not src_used:
+        print(f"  未找到匹配的模组。")
+        if not cf_key:
+            print("  提示：如需搜索 CurseForge，请在 config.json 中配置 curseforge_api_key")
+        input("  按 Enter 返回...")
+        return
+
+    if not cf_key:
+        print("  提示：仅搜索了 Modrinth（未配置 CurseForge API key）")
+    if is_fallback:
+        print(f"  [提示] 在当前版本范围未找到足够结果，已自动放宽搜索范围。")
+
+    # 合并并按下载量排序
+    flat: list[tuple[int, str, dict]] = []
+    for label, items in src_results.items():
+        for item in items:
+            dl = item.get("downloads", 0) or 0
+            flat.append((dl, label, item))
+    flat.sort(key=lambda x: x[0], reverse=True)
+
+    print()
+    print(f"  找到 {len(flat)} 个结果（按下载量排序）：")
+    print()
+    for i, (dl, src, r) in enumerate(flat, 1):
+        name_m = r.get("name", "?")
+        author = r.get("author", "?")
+        desc = (r.get("description") or "")[:60]
+        dl_str = f"{dl:,}" if dl >= 1000 else str(dl)
+        print(f"  [{i:2d}] [{src:10s}] {name_m}")
+        print(f"        作者: {author}  |  下载: {dl_str}")
+        if desc:
+            print(f"        {desc}")
+        print()
+
+    while True:
+        try:
+            c = input(f"  输入编号下载 (1-{len(flat)}, 0 返回): ").strip()
+            if c == "0":
+                return
+            idx = int(c) - 1
+            if 0 <= idx < len(flat):
+                _, src_label, result = flat[idx]
+                print(f"  [下载] 正在从 {src_label} 下载 {result['name']} ...")
+                filename = download_mod(result, mods_dir, mc_version, loader)
+                if filename:
+                    print(f"  [下载] 已保存: {filename}")
+                else:
+                    print(f"  [错误] 下载失败，可能需要手动下载。")
+                input("  按 Enter 返回...")
+                return
+        except ValueError:
+            pass
+        print("  无效选择。")
+
+
 def _show_mod_menu(server_cfg: dict, server_dir: str) -> None:
-    """模组管理菜单（stub）。"""
+    """模组管理菜单。"""
     name = server_cfg.get("name", "?")
-    print()
-    print(f"  [模组管理] 服务器: {name}")
-    print()
-    print("  功能开发中。")
-    print()
-    input("  按 Enter 返回...")
+    mc_version = server_cfg.get("mc_version", "")
+    # 从名称中提取加载器（如 fabric-1.21.1 -> fabric）
+    from mod_sources import extract_mod_loader
+    loader = extract_mod_loader(name)
+
+    mods_dir = _get_mods_dir(server_dir)
+    os.makedirs(mods_dir, exist_ok=True)
+
+    while True:
+        from clear import clear_screen
+        clear_screen()
+        enabled, disabled = _list_mods(mods_dir)
+        total = len(enabled) + len(disabled)
+
+        print()
+        print(f"  [模组管理] 服务器: {name}")
+        print(f"  版本: MC {mc_version}  |  加载器: {loader}")
+        print(f"  模组目录: {mods_dir}")
+        print()
+
+        if total == 0:
+            print("  该服务器尚未安装任何模组。")
+        else:
+            print(f"  模组列表（共 {total} 个）：")
+            print()
+            for m in enabled:
+                print(f"      [E] {m}")
+            for m in disabled:
+                print(f"      [D] {m}")
+            print()
+        print("  [E] = 启用  [D] = 已禁用")
+        print()
+        print("  [1] 删除模组")
+        print("  [2] 禁用/启用模组")
+        print("  [3] 添加模组")
+        print("  [0] 返回")
+        print()
+
+        choice = input("  请选择 (0-3): ").strip()
+
+        if choice == "0":
+            return
+
+        elif choice == "1":
+            # 删除模组
+            if total == 0:
+                print("  没有模组可删除。")
+                input("  按 Enter 返回...")
+                continue
+            target = input("  输入要删除的模组文件名: ").strip()
+            if not target:
+                continue
+            full_path = os.path.join(mods_dir, target)
+            if not os.path.isfile(full_path):
+                print(f"  未找到文件: {target}")
+                input("  按 Enter 返回...")
+                continue
+            confirm = input(f"  确认删除 {target} ? (y/N): ").strip().lower()
+            if confirm == "y":
+                try:
+                    os.remove(full_path)
+                    print(f"  已删除: {target}")
+                except OSError as e:
+                    print(f"  删除失败: {e}")
+            else:
+                print("  已取消。")
+            input("  按 Enter 返回...")
+
+        elif choice == "2":
+            # 禁用/启用模组
+            if total == 0:
+                print("  没有模组可操作。")
+                input("  按 Enter 返回...")
+                continue
+            target = input("  输入模组文件名: ").strip()
+            if not target:
+                continue
+            full_path = os.path.join(mods_dir, target)
+            if not os.path.isfile(full_path):
+                print(f"  未找到文件: {target}")
+                input("  按 Enter 返回...")
+                continue
+
+            if target.lower().endswith(".jar.disabled") or target.endswith(".disabled"):
+                new_name = target[:-9] if target.endswith(".disabled") else target
+                if new_name == target:
+                    print("  无法识别模组状态。")
+                    input("  按 Enter 返回...")
+                    continue
+                try:
+                    os.rename(full_path, os.path.join(mods_dir, new_name))
+                    print(f"  已启用: {new_name}")
+                except OSError as e:
+                    print(f"  操作失败: {e}")
+            else:
+                new_name = target + ".disabled"
+                try:
+                    os.rename(full_path, os.path.join(mods_dir, new_name))
+                    print(f"  已禁用: {new_name}")
+                except OSError as e:
+                    print(f"  操作失败: {e}")
+            input("  按 Enter 返回...")
+
+        elif choice == "3":
+            # 添加模组
+            while True:
+                print()
+                print(f"  [添加模组] 服务器: {name}")
+                print()
+                print("  [1] 导入 jar 文件")
+                print("  [2] 从 Modrinth/CurseForge 搜索下载")
+                print("  [0] 返回")
+                print()
+                sub = input("  请选择 (0-2): ").strip()
+
+                if sub == "0":
+                    break
+
+                elif sub == "1":
+                    print()
+                    print("  请输入 jar 文件路径（支持拖拽）：")
+                    jar_path = input("  > ").strip().strip('"')
+                    if not jar_path:
+                        continue
+                    jar_abs = os.path.abspath(jar_path)
+                    if not os.path.isfile(jar_abs):
+                        print(f"  文件不存在: {jar_abs}")
+                        input("  按 Enter 返回...")
+                        continue
+                    if not jar_abs.lower().endswith(".jar"):
+                        print("  文件不是 .jar 格式。")
+                        input("  按 Enter 返回...")
+                        continue
+                    try:
+                        shutil.copy2(jar_abs, mods_dir)
+                        print(f"  已导入: {os.path.basename(jar_abs)}")
+                    except OSError as e:
+                        print(f"  复制失败: {e}")
+                    input("  按 Enter 返回...")
+
+                elif sub == "2":
+                    _search_and_download_mod(name, mods_dir, mc_version, loader)
+
+                else:
+                    print("  无效选择。")
+
+        else:
+            print("  无效选择。")
 
 
 def _run_management_for_server(server_cfg: dict, server_dir: str) -> None:
@@ -330,6 +583,8 @@ def _run_management_for_server(server_cfg: dict, server_dir: str) -> None:
 def _pick_server_for_management(servers: list[dict], servers_dir: str) -> None:
     """让用户选择要管理插件/模组的服务器。"""
     while True:
+        from clear import clear_screen
+        clear_screen()
         print()
         print("  选择要管理的服务器：")
         print()
@@ -362,6 +617,8 @@ def _pick_server_for_management(servers: list[dict], servers_dir: str) -> None:
 def show_no_server_menu(servers_dir: str, project_dir: str) -> None:
     """servers/ 为空时显示导入/下载选项。"""
     while True:
+        from clear import clear_screen
+        clear_screen()
         print()
         print("  servers/ 文件夹中没有找到任何服务器。")
         print()
@@ -410,9 +667,11 @@ def select_server_interactive(
     列出服务器，末尾附加导入/下载/管理选项。
     返回选中服务器的配置，或 None 表示返回重新扫描。
     """
+    from clear import clear_screen
     can_add_new = bool(servers_dir and project_dir)
 
     while True:
+        clear_screen()
         print()
         print(f"  找到 {len(servers)} 个服务器：")
         print()

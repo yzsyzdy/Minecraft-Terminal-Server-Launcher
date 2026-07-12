@@ -67,6 +67,8 @@ def _project_dir() -> str:
 
 
 def main():
+    from clear import clear_screen
+    clear_screen()
     project_dir = _project_dir()
 
     config = load_config(project_dir)
@@ -148,7 +150,7 @@ def main():
             sys.exit(0)
 
         # 检查 EULA
-        if exit_code != 0 and _is_eula_unagreed(server_path):
+        if _is_eula_unagreed(server_path):
             print()
             print(f"  [EULA] 服务器因未同意 EULA 而退出。")
             if _prompt_eula(name):

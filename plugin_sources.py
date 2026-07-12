@@ -35,20 +35,9 @@ def _fetch_json(url: str, timeout: int = 15) -> Optional[Any]:
 
 
 def _download_jar(url: str, target_path: str) -> bool:
-    """下载 jar 文件到目标路径。"""
-    try:
-        req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
-        with urllib.request.urlopen(req, timeout=120) as resp:
-            os.makedirs(os.path.dirname(target_path), exist_ok=True)
-            with open(target_path, "wb") as f:
-                while True:
-                    chunk = resp.read(8192)
-                    if not chunk:
-                        break
-                    f.write(chunk)
-        return True
-    except (urllib.error.HTTPError, urllib.error.URLError, OSError):
-        return False
+    """下载 jar 文件到目标路径（使用多线程下载）。"""
+    from download_msl import multithreaded_download
+    return multithreaded_download(url, target_path, desc="下载中")
 
 
 # ---------------------------------------------------------------------------
@@ -95,6 +84,15 @@ def spiget_get_download(resource_id: str) -> Optional[str]:
     return None
 
 
+def spiget_get_resource_details(resource_id: str) -> Optional[dict]:
+    """获取 SpigotMC 资源详情，包含 external、file.externalUrl 等字段。"""
+    url = f"{SPIGET_BASE}/resources/{resource_id}"
+    data = _fetch_json(url)
+    if not data or not isinstance(data, dict):
+        return None
+    return data
+
+
 def spiget_resolve_download_url(resource_id: str) -> Optional[str]:
     """跟随 Spiget 下载重定向拿到真实下载 URL。"""
     url = f"{SPIGET_BASE}/resources/{resource_id}/download"
@@ -104,6 +102,105 @@ def spiget_resolve_download_url(resource_id: str) -> Optional[str]:
         return resp.url  # 重定向后的真实地址
     except (urllib.error.HTTPError, urllib.error.URLError, OSError):
         return None
+
+
+def _spiget_download_external_github(external_url: str, target_dir: str,
+                                     plugin_name: str) -> Optional[str]:
+    """
+    尝试从 GitHub releases 页面下载 jar 文件。
+    支持两种 URL 格式：
+      - https://github.com/{owner}/{repo}/releases/tag/{tag}
+      - https://github.com/{owner}/{repo}/releases/download/{tag}/{file}
+    返回 jar 文件名，失败返回 None。
+    """
+    import re
+    from download_msl import multithreaded_download
+
+    # 尝试匹配 releases/tag/ 格式
+    m = re.match(r"https://github\.com/([^/]+)/([^/]+)/releases/tag/(.+)", external_url)
+    if m:
+        owner, repo, tag = m.group(1), m.group(2), m.group(3)
+        # 用 GitHub API 获取 release 信息
+        api_url = f"https://api.github.com/repos/{owner}/{repo}/releases/tags/{tag}"
+        try:
+            req = urllib.request.Request(
+                api_url,
+                headers={"User-Agent": USER_AGENT, "Accept": "application/vnd.github+json"},
+            )
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+        except Exception:
+            return None
+
+        assets = data.get("assets") or []
+        # 过滤 jar 文件，按大小排序（通常主插件最大）
+        jars = [a for a in assets if a.get("name", "").endswith(".jar")]
+        if not jars:
+            return None
+        jars.sort(key=lambda a: -(a.get("size", 0) or 0))
+
+        # 有多个 jar 时让用户选择
+        selected = jars[0]
+        if len(jars) > 1:
+            print()
+            print(f"  发现 {len(jars)} 个 jar 文件，请选择要下载的：")
+            print()
+            for i, a in enumerate(jars, 1):
+                size_mb = (a.get("size", 0) or 0) / 1024 / 1024
+                print(f"  [{i}] {a['name']}  ({size_mb:.1f} MB)")
+            print()
+            while True:
+                try:
+                    c = input(f"  请选择 (1-{len(jars)}): ").strip()
+                    idx = int(c) - 1
+                    if 0 <= idx < len(jars):
+                        selected = jars[idx]
+                        break
+                except ValueError:
+                    pass
+                print("  无效选择。")
+
+        dl_url = selected.get("browser_download_url", "")
+        if not dl_url:
+            return None
+        filename = selected["name"]
+        target_path = os.path.join(target_dir, filename)
+
+        print(f"  [下载] 正在从 GitHub 下载 {filename} ...")
+        if multithreaded_download(dl_url, target_path, desc="下载中"):
+            return filename
+        return None
+
+    return None
+
+
+def _spiget_download_external(target_dir: str, result: PluginResult) -> Optional[str]:
+    """处理外部托管的 SpigotMC 插件下载。"""
+    pid = result["id"]
+    details = spiget_get_resource_details(pid)
+    if not details:
+        print("  [错误] 无法获取资源详情")
+        return None
+
+    external_url = (details.get("file") or {}).get("externalUrl", "")
+    if not external_url:
+        print("  [错误] 外部资源 URL 为空")
+        return None
+
+    # 尝试 GitHub 下载
+    if external_url.startswith("https://github.com/"):
+        filename = _spiget_download_external_github(external_url, target_dir,
+                                                     result.get("name", "plugin"))
+        if filename:
+            return filename
+        print(f"  [提示] 未能自动解析 GitHub 下载地址")
+        print(f"         请手动从以下地址下载: {external_url}")
+        return None
+
+    # 未知外部源，告诉用户手动下载
+    print(f"  [提示] 该插件托管在外部平台，请手动下载：")
+    print(f"         {external_url}")
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -265,6 +362,12 @@ def download_plugin(result: PluginResult, target_dir: str) -> Optional[str]:
 
     try:
         if source == "SpigotMC":
+            # 先检查资源是否为外部托管
+            details = spiget_get_resource_details(pid)
+            is_external = details and details.get("external") is True
+            if is_external:
+                return _spiget_download_external(target_dir, result)
+
             real_url = spigot_resolve_download_url(pid)
             if not real_url:
                 return None

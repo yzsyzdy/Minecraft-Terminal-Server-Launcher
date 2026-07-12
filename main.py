@@ -26,6 +26,8 @@ from download_msl import (
     msl_get_versions,
     msl_get_download_url,
     show_download_server_menu,
+    multithreaded_download,
+    set_download_threads,
 )
 from java_tools import (
     JavaInfo,
@@ -39,3 +41,9 @@ from java_tools import (
 )
 from server_launcher import start_minecraft_server, start_server_interactive
 from menu import show_no_server_menu, select_server_interactive
+from mod_sources import (
+    search_all_mods,
+    download_mod,
+    extract_mod_loader,
+    set_curseforge_api_key,
+)

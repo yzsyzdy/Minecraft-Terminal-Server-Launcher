@@ -55,23 +55,40 @@ def _run_java_version(java_exe: str) -> Optional[str]:
         return None
 
 
+def _is_windows() -> bool:
+    return sys.platform.startswith("win")
+
+
+def _java_exe_name() -> str:
+    return "java.exe" if _is_windows() else "java"
+
+
 def _search_java_from_env() -> list[JavaInfo]:
     found: list[JavaInfo] = []
     seen = set()
     now = datetime.now(timezone.utc).isoformat()
     candidates = []
+    java_bin = _java_exe_name()
     for var in ("JAVA_HOME", "JDK_HOME", "JRE_HOME"):
         val = os.environ.get(var, "").strip()
         if val:
-            candidates.append(os.path.join(val, "bin", "java.exe"))
+            candidates.append(os.path.join(val, "bin", java_bin))
     path_dirs = os.environ.get("PATH", "").split(os.pathsep)
     for d in path_dirs:
         d = d.strip()
         if not d:
             continue
-        c = os.path.join(d, "java.exe")
+        c = os.path.join(d, java_bin)
         if os.path.isfile(c):
             candidates.append(c)
+        # Linux: also check with realpath (PATH might have symlinks)
+        if not _is_windows() and os.path.islink(c):
+            try:
+                real = os.path.realpath(c)
+                if real not in seen:
+                    candidates.append(real)
+            except OSError:
+                pass
     for cand in candidates:
         norm = os.path.normpath(cand)
         if norm in seen or not os.path.isfile(norm):
@@ -87,26 +104,45 @@ def _search_java_from_default_paths() -> list[JavaInfo]:
     found: list[JavaInfo] = []
     seen = set()
     now = datetime.now(timezone.utc).isoformat()
-    roots = [
-        os.environ.get("ProgramFiles", r"C:\Program Files"),
-        os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)"),
-        os.path.join(os.environ.get("LOCALAPPDATA", ""), "Programs", "Common"),
-        os.path.join(os.environ.get("USERPROFILE", ""), ".jdks"),
-        os.path.join(os.environ.get("LOCALAPPDATA", ""), "JetBrains"),
-    ]
-    patterns = [
-        "Java/jdk-*/bin/java.exe", "Java/jdk*/bin/java.exe", "Java/jre*/bin/java.exe",
-        "Eclipse Adoptium/jdk-*/bin/java.exe", "Eclipse Adoptium/jre-*/bin/java.exe",
-        "Microsoft/jdk-*/bin/java.exe", "AdoptOpenJDK/jdk-*/bin/java.exe",
-        "Amazon Corretto/jdk*/bin/java.exe", "Amazon Corretto/jre*/bin/java.exe",
-        "Zulu/zulu*/bin/java.exe", "Liberica JDK/jdk-*/bin/java.exe",
-        "Common/Oracle/Java/javapath/java.exe",
-    ]
-    for root in roots:
-        if not root or not os.path.isdir(root):
-            continue
-        for pat in patterns:
-            for exe in glob.glob(os.path.join(root, pat)):
+    java_bin = _java_exe_name()
+
+    if _is_windows():
+        roots = [
+            os.environ.get("ProgramFiles", r"C:\Program Files"),
+            os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)"),
+            os.path.join(os.environ.get("LOCALAPPDATA", ""), "Programs", "Common"),
+            os.path.join(os.environ.get("USERPROFILE", ""), ".jdks"),
+            os.path.join(os.environ.get("LOCALAPPDATA", ""), "JetBrains"),
+        ]
+        patterns = [
+            f"Java/jdk-*/bin/{java_bin}", f"Java/jdk*/bin/{java_bin}",
+            f"Java/jre*/bin/{java_bin}",
+            f"Eclipse Adoptium/jdk-*/bin/{java_bin}",
+            f"Eclipse Adoptium/jre-*/bin/{java_bin}",
+            f"Microsoft/jdk-*/bin/{java_bin}",
+            f"AdoptOpenJDK/jdk-*/bin/{java_bin}",
+            f"Amazon Corretto/jdk*/bin/{java_bin}",
+            f"Amazon Corretto/jre*/bin/{java_bin}",
+            f"Zulu/zulu*/bin/{java_bin}",
+            f"Liberica JDK/jdk-*/bin/{java_bin}",
+            f"Common/Oracle/Java/javapath/{java_bin}",
+        ]
+        for root in roots:
+            if not root or not os.path.isdir(root):
+                continue
+            for pat in patterns:
+                for exe in glob.glob(os.path.join(root, pat)):
+                    norm = os.path.normpath(exe)
+                    if norm in seen:
+                        continue
+                    ver = _run_java_version(norm)
+                    if ver:
+                        seen.add(norm)
+                        found.append(JavaInfo(path=norm, version=ver, detected_at=now))
+        for root in roots:
+            if not root or not os.path.isdir(root):
+                continue
+            for exe in glob.glob(os.path.join(root, "*/jbr/bin/java.exe")):
                 norm = os.path.normpath(exe)
                 if norm in seen:
                     continue
@@ -114,17 +150,45 @@ def _search_java_from_default_paths() -> list[JavaInfo]:
                 if ver:
                     seen.add(norm)
                     found.append(JavaInfo(path=norm, version=ver, detected_at=now))
-    for root in roots:
-        if not root or not os.path.isdir(root):
-            continue
-        for exe in glob.glob(os.path.join(root, "*/jbr/bin/java.exe")):
-            norm = os.path.normpath(exe)
-            if norm in seen:
+    else:
+        # Linux JDK 搜索路径
+        roots = [
+            "/usr/lib/jvm",
+            "/usr/java",
+            "/opt/java",
+            "/opt/jdk",
+            os.path.join(os.environ.get("HOME", ""), ".jdks"),
+            os.path.join(os.environ.get("HOME", ""), ".sdkman", "candidates", "java"),
+            os.path.join(os.environ.get("HOME", ""), ".local", "share", "JetBrains", "Toolbox", "apps"),
+        ]
+        # 在每个 JDK 根下找 bin/java
+        for root in roots:
+            if not root or not os.path.isdir(root):
                 continue
-            ver = _run_java_version(norm)
-            if ver:
-                seen.add(norm)
-                found.append(JavaInfo(path=norm, version=ver, detected_at=now))
+            # 一级目录（如 /usr/lib/jvm/java-21-openjdk/bin/java）
+            for entry in os.listdir(root):
+                jdk_path = os.path.join(root, entry)
+                if not os.path.isdir(jdk_path):
+                    continue
+                exe = os.path.join(jdk_path, "bin", java_bin)
+                if os.path.isfile(exe):
+                    norm = os.path.normpath(exe)
+                    if norm in seen:
+                        continue
+                    ver = _run_java_version(norm)
+                    if ver:
+                        seen.add(norm)
+                        found.append(JavaInfo(path=norm, version=ver, detected_at=now))
+                # 也检查 jbr/ (JetBrains Runtime)
+                jbr = os.path.join(jdk_path, "jbr", "bin", java_bin)
+                if os.path.isfile(jbr):
+                    norm = os.path.normpath(jbr)
+                    if norm in seen:
+                        continue
+                    ver = _run_java_version(norm)
+                    if ver:
+                        seen.add(norm)
+                        found.append(JavaInfo(path=norm, version=ver, detected_at=now))
     return found
 
 
@@ -361,12 +425,17 @@ def _download_jdk(java_version: str, project_dir: str) -> Optional[str]:
                         shutil.move(src, jdk_dir)
         else:
             with tarfile.open(dl, "r:gz") as tf:
+                # 找到 tarball 中的根目录
+                roots = set()
+                for m in tf.getmembers():
+                    p = m.name.split("/")[0]
+                    if p:
+                        roots.add(p)
                 tf.extractall(project_dir)
-            for entry in os.listdir(project_dir):
-                ep = os.path.join(project_dir, entry)
-                if os.path.isdir(ep) and "jdk" in entry.lower() and ep != jdk_dir:
-                    shutil.move(ep, jdk_dir)
-                    break
+                if roots:
+                    src = os.path.join(project_dir, list(roots)[0])
+                    if os.path.isdir(src) and not os.path.isdir(jdk_dir):
+                        shutil.move(src, jdk_dir)
     except Exception as e:
         print(f"  [错误] 解压失败: {e}"); return None
     finally:

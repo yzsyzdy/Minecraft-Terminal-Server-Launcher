@@ -9,6 +9,7 @@ from typing import Any
 DEFAULT_CONFIG: dict[str, Any] = {
     "java_path": None,
     "interactive": True,
+    "curseforge_api_key": "",
 }
 
 
