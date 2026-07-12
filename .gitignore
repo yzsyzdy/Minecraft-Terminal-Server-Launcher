@@ -13,3 +13,6 @@ msl_cache.json
 # Python 缓存
 __pycache__/
 *.pyc
+
+# Nuitka 构建输出
+build/
