@@ -15,6 +15,8 @@ from server_manager import (
     list_servers,
     load_server_config,
     classify_server_type,
+    export_server_to_zip,
+    EXPORT_CATEGORIES,
 )
 
 
@@ -459,6 +461,112 @@ def _pick_server_for_management(servers: list[dict], servers_dir: str) -> None:
 
 
 # ---------------------------------------------------------------------------
+# 导出服务器
+# ---------------------------------------------------------------------------
+
+def _export_server(servers: list[dict], servers_dir: str, project_dir: str) -> None:
+    """交互式导出服务器为 zip。"""
+    while True:
+        clear_screen()
+        print()
+        print("  选择要导出的服务器：")
+        print()
+        for i, s in enumerate(servers, 1):
+            print(f"  [{i}] {s['name']}")
+        print("  [0] 返回")
+        print()
+        try:
+            c = input(f"  请选择 (0-{len(servers)}): ").strip()
+            if c == "0":
+                return
+            idx = int(c) - 1
+            if 0 <= idx < len(servers):
+                server_cfg = load_server_config(servers[idx]["_path"])
+                server_dir = servers[idx]["_path"]
+                name = server_cfg.get("name", "server")
+                break
+        except ValueError:
+            pass
+        print("  无效选择。")
+
+    # 分类选择
+    selected: set[str] = set()
+    for key, label, _, default in EXPORT_CATEGORIES:
+        if default:
+            selected.add(key)
+
+    while True:
+        clear_screen()
+        print()
+        print(f"  导出服务器: {name}")
+        print("  选择要包含的内容（Y=包含, N=跳过）：")
+        print()
+        for key, label, _, _ in EXPORT_CATEGORIES:
+            mark = "[Y]" if key in selected else "[N]"
+            print(f"    {mark} {label}")
+        print()
+        print("  输入分类编号切换选择，或直接回车开始导出。")
+        print()
+        for i, (key, label, _, _) in enumerate(EXPORT_CATEGORIES, 1):
+            mark = "Y" if key in selected else "N"
+            print(f"    [{i}] {mark} {label}")
+        print("    [A] 全选")
+        print("    [N] 全不选")
+        print("    [0] 取消")
+        print()
+
+        choice = input("  请选择: ").strip().lower()
+        if choice == "":
+            break
+        if choice == "0":
+            return
+        if choice == "a":
+            selected = {key for key, _, _, _ in EXPORT_CATEGORIES}
+            continue
+        if choice == "n":
+            selected.clear()
+            continue
+        try:
+            num = int(choice)
+            if 1 <= num <= len(EXPORT_CATEGORIES):
+                key = EXPORT_CATEGORIES[num - 1][0]
+                if key in selected:
+                    selected.discard(key)
+                else:
+                    selected.add(key)
+        except ValueError:
+            pass
+
+    if not selected:
+        print("  未选择任何内容。")
+        input("  按 Enter 返回...")
+        return
+
+    # 确认输出路径
+    print()
+    default_name = f"{name}-export.zip"
+    print(f"  默认文件名: {default_name}")
+    out = input(f"  输入导出路径（回车使用默认）: ").strip().strip('"')
+    if not out:
+        out = os.path.join(project_dir, default_name)
+    else:
+        out = os.path.abspath(out)
+        if os.path.isdir(out):
+            out = os.path.join(out, default_name)
+
+    if os.path.isfile(out):
+        confirm = input(f"  文件已存在，覆盖？(y/N): ").strip().lower()
+        if confirm != "y":
+            print("  已取消。")
+            input("  按 Enter 返回...")
+            return
+
+    print(f"  [导出] 正在导出 {len(selected)} 个分类...")
+    export_server_to_zip(server_dir, out, selected)
+    input("  按 Enter 返回...")
+
+
+# ---------------------------------------------------------------------------
 # 主菜单
 # ---------------------------------------------------------------------------
 
@@ -484,10 +592,11 @@ def show_main_menu(servers_dir: str, project_dir: str) -> Optional[dict[str, Any
         print("  [2] 导入服务器压缩包")
         print("  [3] 下载服务器")
         print("  [4] 管理插件/模组")
+        print("  [5] 导出服务器")
         print("  [0] 退出")
         print()
 
-        choice = input("  请选择 (0-4): ").strip()
+        choice = input("  请选择 (0-5): ").strip()
 
         if choice == "0":
             print("[退出] 用户选择退出")
@@ -527,8 +636,17 @@ def show_main_menu(servers_dir: str, project_dir: str) -> Optional[dict[str, Any
                 input("  按 Enter 返回...")
             continue
 
+        elif choice == "5":
+            servers_now = list_servers(servers_dir)
+            if servers_now:
+                _export_server(servers_now, servers_dir, project_dir)
+            else:
+                print("  没有可导出的服务器。")
+                input("  按 Enter 返回...")
+            continue
+
         else:
-            print("  无效选择，请输入 0-4。")
+            print("  无效选择，请输入 0-5。")
 
 
 def _select_server_for_launch(

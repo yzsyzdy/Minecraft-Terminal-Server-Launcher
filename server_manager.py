@@ -297,3 +297,129 @@ def import_server_from_zip(zip_path: str, servers_dir: str, project_dir: str) ->
     finally:
         if os.path.isdir(temp_dir):
             shutil.rmtree(temp_dir, ignore_errors=True)
+
+
+# ---------------------------------------------------------------------------
+# 导出服务器
+# ---------------------------------------------------------------------------
+
+EXPORT_CATEGORIES: list[tuple[str, str, list[str], bool]] = [
+    # (key, label, patterns, default_selected)
+    ("world", "世界数据 (world/ nether/ end)", ["world", "world_nether", "world_the_end"], True),
+    ("datapacks", "数据包 (datapacks)", ["world/datapacks"], True),
+    ("plugins", "插件 (jar 文件)", ["plugins/*.jar"], True),
+    ("plugindata", "插件数据 (配置文件夹)", ["plugins/*/"], True),
+    ("playerdata", "玩家数据 (playerdata/stats/白名单等)", ["world/playerdata", "world/stats", "world/advancements",
+                                                  "usercache.json", "ops.json", "whitelist.json",
+                                                  "banned-players.json", "banned-ips.json"], False),
+    ("icon", "服务器图标", ["server-icon.png"], True),
+    ("config", "服务器配置 (server.properties/yml/eula)", ["server.properties", "bukkit.yml", "spigot.yml",
+                                                        "paper.yml", "pufferfish.yml", "purpur.yml",
+                                                        "eula.txt", "commands.yml", "permissions.yml",
+                                                        "help.yml", ".server.json"], True),
+]
+
+
+def _export_collect_files(server_dir: str, selected: set[str]) -> list[tuple[str, str]]:
+    """
+    根据选中的分类收集文件。
+    返回 [(arcname, abs_path)]，arcname 相对于服务器目录。
+    """
+    files: list[tuple[str, str]] = []
+    seen = set()
+
+    for key, _, patterns, _ in EXPORT_CATEGORIES:
+        if key not in selected:
+            continue
+        for pattern in patterns:
+            matched = False
+            full_pattern = os.path.join(server_dir, pattern)
+
+            if "*" not in pattern:
+                # 精确路径
+                if os.path.isfile(full_pattern):
+                    rel = os.path.relpath(full_pattern, server_dir)
+                    norm = rel.replace("\\", "/")
+                    if norm not in seen:
+                        seen.add(norm)
+                        files.append((norm, full_pattern))
+                        matched = True
+                elif os.path.isdir(full_pattern):
+                    for root, dirs, fnames in os.walk(full_pattern):
+                        for fn in fnames:
+                            fp = os.path.join(root, fn)
+                            rel = os.path.relpath(fp, server_dir)
+                            norm = rel.replace("\\", "/")
+                            if norm not in seen:
+                                seen.add(norm)
+                                files.append((norm, fp))
+                    matched = True
+            else:
+                # glob 模式
+                import glob as glob_mod
+                for match in glob_mod.glob(full_pattern, recursive=False):
+                    if os.path.isfile(match):
+                        rel = os.path.relpath(match, server_dir)
+                        norm = rel.replace("\\", "/")
+                        if norm not in seen:
+                            seen.add(norm)
+                            files.append((norm, match))
+                    matched = True
+                # 目录模式：plugins/*/ → 匹配子目录
+                if pattern.endswith("/*/"):
+                    base_dir = os.path.join(server_dir, pattern[:-2])
+                    if os.path.isdir(base_dir):
+                        for entry in sorted(os.listdir(base_dir)):
+                            sub = os.path.join(base_dir, entry)
+                            if os.path.isdir(sub):
+                                for root, dirs, fnames in os.walk(sub):
+                                    for fn in fnames:
+                                        fp = os.path.join(root, fn)
+                                        rel = os.path.relpath(fp, server_dir)
+                                        norm = rel.replace("\\", "/")
+                                        if norm not in seen:
+                                            seen.add(norm)
+                                            files.append((norm, fp))
+                                        matched = True
+
+    return files
+
+
+def export_server_to_zip(server_dir: str, output_path: str,
+                          selected_categories: set[str]) -> Optional[str]:
+    """
+    将服务器导出为 zip 文件。
+    
+    server_dir: 服务器目录
+    output_path: 目标 zip 路径
+    selected_categories: 选中的分类 key 集合
+    
+    返回 output_path，失败返回 None。
+    """
+    files = _export_collect_files(server_dir, selected_categories)
+    if not files:
+        print("  [错误] 所选分类中没有找到任何文件。")
+        return None
+
+    os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
+
+    total = len(files)
+    bar_width = 30
+
+    try:
+        with zipfile.ZipFile(output_path, "w", zipfile.ZIP_DEFLATED) as zf:
+            for i, (arcname, abs_path) in enumerate(files, 1):
+                zf.write(abs_path, arcname)
+                if total > 0:
+                    pct = i / total
+                    filled = int(bar_width * pct)
+                    bar = "\u2588" * filled + "\u2591" * (bar_width - filled)
+                    print(f"    导出 [{bar}] {pct * 100:5.1f}%  ({i}/{total})",
+                          end="\r", flush=True)
+        print()
+        size_mb = os.path.getsize(output_path) / 1024 / 1024
+        print(f"  [导出] 成功: {output_path} ({size_mb:.1f} MB, {total} 个文件)")
+        return output_path
+    except (OSError, zipfile.BadZipFile) as e:
+        print(f"\n  [错误] 导出失败: {e}")
+        return None
