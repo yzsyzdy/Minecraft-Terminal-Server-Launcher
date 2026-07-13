@@ -462,115 +462,97 @@ def _pick_server_for_management(servers: list[dict], servers_dir: str) -> None:
 # 主菜单
 # ---------------------------------------------------------------------------
 
-def show_no_server_menu(servers_dir: str, project_dir: str) -> None:
-    """servers/ 为空时显示导入/下载选项。"""
+def show_main_menu(servers_dir: str, project_dir: str) -> Optional[dict[str, Any]]:
+    """
+    主菜单。
+    返回选中的服务器配置（启动服务器）或 None（退出）。
+    """
     while True:
+        servers = list_servers(servers_dir)
+        server_count = len(servers)
+
         clear_screen()
         print()
-        print("  servers/ 文件夹中没有找到任何服务器。")
+        print(f"  MSTL — Minecraft Terminal Server Launcher")
+        print(f"  服务器目录: {servers_dir}")
         print()
-        print("  [1] 导入服务器压缩包")
-        print("  [2] 下载服务器")
+
+        if server_count == 0:
+            print("  当前没有已配置的服务器。")
+        else:
+            print(f"  [{1}] 启动服务器 ({server_count} 个可用)")
+        print("  [2] 导入服务器压缩包")
+        print("  [3] 下载服务器")
+        print("  [4] 管理插件/模组")
         print("  [0] 退出")
         print()
-        choice = input("  请选择 (0-2): ").strip()
+
+        choice = input("  请选择 (0-4): ").strip()
 
         if choice == "0":
             print("[退出] 用户选择退出")
             sys.exit(0)
 
         elif choice == "1":
-            zip_path = _prompt_zip_path()
-            if zip_path is None:
-                input("  按 Enter 返回菜单...")
-                continue
-            if import_server_from_zip(zip_path, servers_dir, project_dir) is not None:
-                print(); print("  导入完成！"); print()
+            if server_count == 0:
+                print("  没有可用服务器，请先导入或下载。")
                 input("  按 Enter 返回...")
-                return
-            input("  按 Enter 返回菜单...")
+                continue
+            selected = _select_server_for_launch(servers, servers_dir)
+            if selected:
+                return selected
             continue
 
         elif choice == "2":
-            from download_msl import show_download_server_menu
-            result = show_download_server_menu(servers_dir, project_dir)
-            if result is not None:
-                print(); print("  下载完成！"); print()
+            zip_path = _prompt_zip_path()
+            if zip_path is None:
                 input("  按 Enter 返回...")
-                return
-            input("  按 Enter 返回菜单...")
+                continue
+            import_server_from_zip(zip_path, servers_dir, project_dir)
+            input("  按 Enter 返回...")
+            continue
+
+        elif choice == "3":
+            from download_msl import show_download_server_menu
+            show_download_server_menu(servers_dir, project_dir)
+            input("  按 Enter 返回...")
+            continue
+
+        elif choice == "4":
+            servers_now = list_servers(servers_dir)
+            if servers_now:
+                _pick_server_for_management(servers_now, servers_dir)
+            else:
+                print("  没有可管理的服务器。")
+                input("  按 Enter 返回...")
             continue
 
         else:
-            print(f"  无效选择，请输入 0-2。")
+            print("  无效选择，请输入 0-4。")
 
 
-def select_server_interactive(
+def _select_server_for_launch(
     servers: list[dict[str, Any]],
-    servers_dir: str = "",
-    project_dir: str = "",
+    servers_dir: str,
 ) -> Optional[dict[str, Any]]:
-    """
-    列出服务器，末尾附加导入/下载/管理选项。
-    返回选中服务器的配置，或 None 表示返回重新扫描。
-    """
-    can_add_new = bool(servers_dir and project_dir)
-
+    """列出服务器供用户选择启动，返回选中服务器的配置。"""
     while True:
         clear_screen()
         print()
-        print(f"  找到 {len(servers)} 个服务器：")
+        print("  选择要启动的服务器：")
         print()
         for i, s in enumerate(servers, 1):
             ver = s.get("mc_version", "?")
             jar = s.get("jar", "?")
             mem = f"{s.get('min_mem', '?')} / {s.get('max_mem', '?')}"
             print(f"  [{i}] {s['name']}  (MC {ver} | {jar} | {mem})")
-
-        idx_import = len(servers) + 1
-        idx_download = len(servers) + 2
-        idx_manage = len(servers) + 3
-        max_choice = idx_manage
-        print()
-        if can_add_new:
-            print(f"  [{idx_import}] 导入新服务器（压缩包）")
-            print(f"  [{idx_download}] 下载新服务器")
-            print(f"  [{idx_manage}] 管理插件/模组")
-        print("  [0] 退出")
+        print("  [0] 返回")
         print()
 
-        prompt = f"  请选择 (0-{max_choice}): " if can_add_new else f"  请选择 (1-{len(servers)}): "
-        choice = input(prompt).strip()
+        choice = input(f"  请选择 (0-{len(servers)}): ").strip()
 
         if choice == "0":
-            print("[退出] 用户选择退出")
-            sys.exit(0)
-
-        if can_add_new:
-            try:
-                int_c = int(choice)
-                if int_c == idx_import:
-                    zp = _prompt_zip_path()
-                    if zp is None:
-                        input("  按 Enter 返回菜单..."); continue
-                    if import_server_from_zip(zp, servers_dir, project_dir) is not None:
-                        servers.clear(); servers.extend(list_servers(servers_dir))
-                    else:
-                        input("  按 Enter 返回菜单...")
-                    continue
-                elif int_c == idx_download:
-                    from download_msl import show_download_server_menu
-                    r = show_download_server_menu(servers_dir, project_dir)
-                    if r is not None:
-                        servers.clear(); servers.extend(list_servers(servers_dir))
-                    else:
-                        input("  按 Enter 返回菜单...")
-                    continue
-                elif int_c == idx_manage:
-                    _pick_server_for_management(servers, servers_dir)
-                    continue
-            except ValueError:
-                pass
+            return None
 
         try:
             idx = int(choice) - 1
@@ -578,4 +560,4 @@ def select_server_interactive(
                 return servers[idx]
         except ValueError:
             pass
-        print(f"  无效选择，请输入 0-{max_choice} 之间的数字。")
+        print(f"  无效选择，请输入 0-{len(servers)} 之间的数字。")
