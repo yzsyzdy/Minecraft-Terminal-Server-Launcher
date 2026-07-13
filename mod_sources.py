@@ -13,7 +13,7 @@ import urllib.error
 import urllib.error
 from typing import Any, Optional
 
-USER_AGENT = "MinecraftServerLauncher/1.0 (mod downloader)"
+USER_AGENT = "MSTL/1.0 (mod downloader)"
 API_TIMEOUT = 15
 
 # 模组加载器名称 <-> CurseForge 枚举值
@@ -36,9 +36,10 @@ _curseforge_api_key: str = ""
 
 
 def set_curseforge_api_key(key: str) -> None:
-    """设置 CurseForge API key。"""
-    global _curseforge_api_key
+    """设置 CurseForge API key。有 key 时自动切换官方 API，无 key 时使用 curse.tools 代理。"""
+    global _curseforge_api_key, CURSEFORGE_BASE
     _curseforge_api_key = key
+    CURSEFORGE_BASE = "https://api.curseforge.com/v1" if key else "https://api.curse.tools/v1/cf"
 
 
 def extract_mod_loader(name: str) -> str:
@@ -177,7 +178,7 @@ def modrinth_download(project_id: str, target_dir: str, name: str,
 # CurseForge
 # ---------------------------------------------------------------------------
 
-CURSEFORGE_BASE = "https://api.curseforge.com/v1"
+CURSEFORGE_BASE = "https://api.curse.tools/v1/cf"  # 默认使用免费代理，有 API key 时自动切换
 
 # Minecraft 模组的 classId
 CURSE_CLASS_MOD = 6
@@ -196,14 +197,10 @@ def _curse_headers() -> dict:
 def curseforge_search(query: str, mc_version: str = "", loader: str = "",
                       limit: int = 20) -> list[dict]:
     """
-    搜索 CurseForge 模组。
-
-    需要先在 config.json 中配置 curseforge_api_key。
+    搜索 CurseForge 模组。通过 curse.tools 代理（无需 API key）或官方 API（需配置 key）。
     支持按 MC 版本和模组加载器过滤。
     返回列表，每个元素为标准化结果 dict。
     """
-    if not _curseforge_api_key:
-        return []  # 无 API key 时静默跳过
 
     params = [
         f"gameId=432",
@@ -253,11 +250,9 @@ def curseforge_get_download_url(mod_id: str, mc_version: str,
                                 loader: str) -> Optional[tuple[str, str, int]]:
     """
     获取 CurseForge 模组匹配指定版本的下载信息。
+    通过 curse.tools 代理或官方 API 获取。
     返回 (filename, download_url, file_size) 或 None。
     """
-    if not _curseforge_api_key:
-        return None
-
     # 获取模组文件列表
     url = f"{CURSEFORGE_BASE}/mods/{mod_id}/files?pageSize=50&sortOrder=desc"
     if mc_version:
@@ -305,43 +300,10 @@ def curseforge_download(mod_id: str, target_dir: str, name: str,
 
     target_path = os.path.join(target_dir, filename)
 
-    # CDN 下载需要添加 API key 头
-    # multithreaded_download 会发送 HEAD 和 Range 请求，
-    # CurseForge CDN 要求在所有请求中包含 x-api-key
-    # 所以我们直接使用 _download_with_progress 并添加 header
-    from download_msl import _download_with_progress
-    try:
-        req = urllib.request.Request(dl_url, headers={
-            "User-Agent": USER_AGENT,
-            "x-api-key": _curseforge_api_key,
-        })
-        with urllib.request.urlopen(req, timeout=300) as resp:
-            total = resp.length
-            downloaded = 0
-            bar_width = 30
-            chunk_size = 8192
-            os.makedirs(os.path.dirname(target_path) or ".", exist_ok=True)
-            with open(target_path, "wb") as f:
-                while True:
-                    chunk = resp.read(chunk_size)
-                    if not chunk:
-                        break
-                    f.write(chunk)
-                    downloaded += len(chunk)
-                    if total and total > 0:
-                        pct = downloaded / total
-                        filled = int(bar_width * pct)
-                        bar = "\u2588" * filled + "\u2591" * (bar_width - filled)
-                        print(f"    下载 {name} [{bar}] {pct * 100:5.1f}%",
-                              end="\r", flush=True)
-                    else:
-                        print(f"    下载 {name} {downloaded/1024/1024:.1f} MB...",
-                              end="\r", flush=True)
-        print()
+    # CDN 下载无需 API key
+    if multithreaded_download(dl_url, target_path, desc=f"下载 {name}"):
         return filename
-    except Exception as e:
-        print(f"\n  [错误] 下载失败: {e}")
-        return None
+    return None
 
 
 # ---------------------------------------------------------------------------

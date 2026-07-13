@@ -213,7 +213,7 @@ def classify_server_type(server_cfg: dict, server_dir: str) -> str:
     # 查分类表
     if candidate in _PLUGIN_IDS:
         return "plugin"
-    if candidate in _HYBRID_IDS or candidate in {"arclight"} and any(x in name for x in ("forge", "fabric", "neoforge")):
+    if candidate in _HYBRID_IDS:
         return "hybrid"
     if candidate in _MOD_IDS:
         return "mod"

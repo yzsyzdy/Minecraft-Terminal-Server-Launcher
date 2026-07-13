@@ -22,6 +22,44 @@ def console_title(title: str) -> None:
             pass
 
 
+_JVM_OPENS = [
+    "--add-opens", "java.base/java.lang=ALL-UNNAMED",
+    "--add-opens", "java.base/java.lang.reflect=ALL-UNNAMED",
+    "--add-opens", "java.base/java.util=ALL-UNNAMED",
+    "--add-opens", "java.base/java.io=ALL-UNNAMED",
+    "--add-opens", "java.base/sun.nio.ch=ALL-UNNAMED",
+]
+
+
+def _validate_java_jar(java_path: str, jar_path: str) -> str:
+    """校验 Java 和 jar 文件，返回工作目录。"""
+    java_path = os.path.abspath(java_path)
+    jar_path = os.path.abspath(jar_path)
+    if not os.path.isfile(java_path):
+        raise FileNotFoundError(f"Java 可执行文件未找到: {java_path}")
+    if not os.path.isfile(jar_path):
+        raise FileNotFoundError(f"服务端核心文件未找到: {jar_path}")
+    return os.path.dirname(jar_path)
+
+
+def _build_jvm_cmd(
+    java_path: str, jar_path: str, min_mem: str, max_mem: str,
+    extra_jvm_args: Optional[list[str]] = None,
+    extra_server_args: Optional[list[str]] = None,
+    nogui: bool = True,
+) -> list[str]:
+    """构建完整的 JVM 启动命令列表。"""
+    cmd = [java_path, f"-Xmx{max_mem}", f"-Xms{min_mem}"] + _JVM_OPENS
+    if extra_jvm_args:
+        cmd.extend(extra_jvm_args)
+    cmd += ["-jar", jar_path]
+    if nogui:
+        cmd.append("nogui")
+    if extra_server_args:
+        cmd.extend(extra_server_args)
+    return cmd
+
+
 def start_minecraft_server(
     java_path: str,
     jar_path: str,
@@ -34,35 +72,13 @@ def start_minecraft_server(
 ) -> int:
     """启动服务器（非交互模式，仅输出日志）。返回进程退出码。"""
     console_title("MSTL — 服务器控制台 (非交互)")
-    java_path = os.path.abspath(java_path)
-    jar_path = os.path.abspath(jar_path)
-    if not os.path.isfile(java_path):
-        raise FileNotFoundError(f"Java 可执行文件未找到: {java_path}")
-    if not os.path.isfile(jar_path):
-        raise FileNotFoundError(f"服务端核心文件未找到: {jar_path}")
-    if workdir is None:
-        workdir = os.path.dirname(jar_path)
-
-    jvm_opens = [
-        "--add-opens", "java.base/java.lang=ALL-UNNAMED",
-        "--add-opens", "java.base/java.lang.reflect=ALL-UNNAMED",
-        "--add-opens", "java.base/java.util=ALL-UNNAMED",
-        "--add-opens", "java.base/java.io=ALL-UNNAMED",
-        "--add-opens", "java.base/sun.nio.ch=ALL-UNNAMED",
-    ]
-
-    cmd = [java_path, f"-Xmx{max_mem}", f"-Xms{min_mem}"] + jvm_opens
-    if extra_jvm_args:
-        cmd.extend(extra_jvm_args)
-    cmd += ["-jar", jar_path]
-    if nogui:
-        cmd.append("nogui")
-    if extra_server_args:
-        cmd.extend(extra_server_args)
+    workdir = _validate_java_jar(java_path, jar_path) if workdir is None else os.path.abspath(workdir)
+    cmd = _build_jvm_cmd(java_path, jar_path, min_mem, max_mem,
+                         extra_jvm_args, extra_server_args, nogui)
 
     print(f"[启动] 工作目录: {workdir}")
-    print(f"[启动] Java:    {java_path}")
-    print(f"[启动] 核心:    {jar_path}")
+    print(f"[启动] Java:    {os.path.abspath(java_path)}")
+    print(f"[启动] 核心:    {os.path.abspath(jar_path)}")
     print(f"[启动] 内存:    最小 {min_mem} / 最大 {max_mem}")
     print(f"[启动] 命令:    {' '.join(cmd)}")
     print()
@@ -104,32 +120,13 @@ def start_server_interactive(
 ) -> int:
     """启动服务器并支持控制台交互输入。"""
     console_title("MSTL — 服务器控制台")
-    java_path = os.path.abspath(java_path)
-    jar_path = os.path.abspath(jar_path)
-    if not os.path.isfile(java_path):
-        raise FileNotFoundError(f"Java 可执行文件未找到: {java_path}")
-    if not os.path.isfile(jar_path):
-        raise FileNotFoundError(f"服务端核心文件未找到: {jar_path}")
-    workdir = os.path.dirname(jar_path)
-
-    jvm_opens = [
-        "--add-opens", "java.base/java.lang=ALL-UNNAMED",
-        "--add-opens", "java.base/java.lang.reflect=ALL-UNNAMED",
-        "--add-opens", "java.base/java.util=ALL-UNNAMED",
-        "--add-opens", "java.base/java.io=ALL-UNNAMED",
-        "--add-opens", "java.base/sun.nio.ch=ALL-UNNAMED",
-    ]
-
-    cmd = [java_path, f"-Xmx{max_mem}", f"-Xms{min_mem}"] + jvm_opens
-    if extra_jvm_args:
-        cmd.extend(extra_jvm_args)
-    cmd += ["-jar", jar_path, "nogui"]
-    if extra_server_args:
-        cmd.extend(extra_server_args)
+    workdir = _validate_java_jar(java_path, jar_path)
+    cmd = _build_jvm_cmd(java_path, jar_path, min_mem, max_mem,
+                         extra_jvm_args, extra_server_args, nogui=True)
 
     print(f"[启动] 工作目录: {workdir}")
-    print(f"[启动] Java:    {java_path}")
-    print(f"[启动] 核心:    {jar_path}")
+    print(f"[启动] Java:    {os.path.abspath(java_path)}")
+    print(f"[启动] 核心:    {os.path.abspath(jar_path)}")
     print(f"[启动] 内存:    最小 {min_mem} / 最大 {max_mem}")
     print("[启动] 控制台交互已启用（输入 stop 关闭服务器）")
     print()

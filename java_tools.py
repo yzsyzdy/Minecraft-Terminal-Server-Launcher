@@ -223,6 +223,21 @@ def _java_list_path(storage_dir: str) -> str:
     return os.path.join(storage_dir, "java_list.json")
 
 
+def _last_selected_path(storage_dir: str) -> str:
+    """读取 java_list.json 中的 last_selected 字段。"""
+    path = _java_list_path(storage_dir)
+    if not os.path.isfile(path):
+        return ""
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if isinstance(data, dict):
+            return data.get("last_selected", "")
+    except (json.JSONDecodeError, OSError):
+        pass
+    return ""
+
+
 def load_java_list(storage_dir: str) -> list[JavaInfo]:
     path = _java_list_path(storage_dir)
     if not os.path.isfile(path):
@@ -388,6 +403,50 @@ def _check_java_compatibility(
         return None
 
 
+def _extract_and_rename_jdk(archive: str, target_dir: str, os_name: str) -> Optional[str]:
+    """解压 JDK 压缩包，将提取出的根目录移动到 target_dir。返回 java 可执行文件路径。"""
+    try:
+        if os_name == "windows":
+            with zipfile.ZipFile(archive, "r") as zf:
+                roots = set()
+                for m in zf.infolist():
+                    p = m.filename.split("/")[0]
+                    if p:
+                        roots.add(p)
+                tmp = os.path.join(os.path.dirname(target_dir), ".jdk_extract_tmp")
+                if os.path.isdir(tmp):
+                    shutil.rmtree(tmp)
+                zf.extractall(tmp)
+                if roots:
+                    src = os.path.join(tmp, list(roots)[0])
+                    if os.path.isdir(src):
+                        shutil.move(src, target_dir)
+                shutil.rmtree(tmp, ignore_errors=True)
+        else:
+            with tarfile.open(archive, "r:gz") as tf:
+                roots = set()
+                for m in tf.getmembers():
+                    p = m.name.split("/")[0]
+                    if p:
+                        roots.add(p)
+                tmp = os.path.join(os.path.dirname(target_dir), ".jdk_extract_tmp")
+                if os.path.isdir(tmp):
+                    shutil.rmtree(tmp)
+                tf.extractall(tmp)
+                if roots:
+                    src = os.path.join(tmp, list(roots)[0])
+                    if os.path.isdir(src):
+                        shutil.move(src, target_dir)
+                shutil.rmtree(tmp, ignore_errors=True)
+    except Exception as e:
+        print(f"  [错误] 解压失败: {e}")
+        return None
+
+    java_bin = "java.exe" if os_name == "windows" else "java"
+    exe = os.path.join(target_dir, "bin", java_bin)
+    return exe if os.path.isfile(exe) else None
+
+
 def _download_jdk(java_version: str, project_dir: str) -> Optional[str]:
     os_name = _os_platform()
     urls = JDK_MIRROR_URLS.get(java_version)
@@ -398,7 +457,7 @@ def _download_jdk(java_version: str, project_dir: str) -> Optional[str]:
         print(f"  [错误] JDK {java_version} 不支持 {os_name}"); return None
 
     jdk_dir = os.path.join(project_dir, f"jdk-{java_version}")
-    java_exe = os.path.join(jdk_dir, "bin", "java" if os_name == "linux" else "java.exe")
+    java_exe = os.path.join(jdk_dir, "bin", "java.exe" if os_name == "windows" else "java")
     if os.path.isdir(jdk_dir) and os.path.isfile(java_exe):
         print(f"  [JDK] 已存在: {jdk_dir}"); return java_exe
 
@@ -409,40 +468,11 @@ def _download_jdk(java_version: str, project_dir: str) -> Optional[str]:
         return None
 
     print("  [JDK] 正在解压...")
-    try:
-        if os_name == "windows":
-            with zipfile.ZipFile(dl, "r") as zf:
-                members = zf.infolist()
-                roots = set()
-                for m in members:
-                    p = m.filename.split("/")[0]
-                    if p:
-                        roots.add(p)
-                zf.extractall(project_dir)
-                if roots:
-                    src = os.path.join(project_dir, list(roots)[0])
-                    if os.path.isdir(src) and not os.path.isdir(jdk_dir):
-                        shutil.move(src, jdk_dir)
-        else:
-            with tarfile.open(dl, "r:gz") as tf:
-                # 找到 tarball 中的根目录
-                roots = set()
-                for m in tf.getmembers():
-                    p = m.name.split("/")[0]
-                    if p:
-                        roots.add(p)
-                tf.extractall(project_dir)
-                if roots:
-                    src = os.path.join(project_dir, list(roots)[0])
-                    if os.path.isdir(src) and not os.path.isdir(jdk_dir):
-                        shutil.move(src, jdk_dir)
-    except Exception as e:
-        print(f"  [错误] 解压失败: {e}"); return None
-    finally:
-        if os.path.isfile(dl):
-            os.remove(dl)
+    java_exe = _extract_and_rename_jdk(dl, jdk_dir, os_name)
+    if os.path.isfile(dl):
+        os.remove(dl)
 
-    if not os.path.isfile(java_exe):
+    if not java_exe or not os.path.isfile(java_exe):
         print("  [错误] 解压后未找到 java"); return None
     print(f"  [JDK] 下载完成: {java_exe}")
     return java_exe
@@ -472,8 +502,16 @@ def resolve_java(
         selected = valid_saved[0]
         print(f"[Java] 使用本地记录的 Java: {selected.path} (版本 {selected.version})")
     elif len(valid_saved) > 1:
-        print(f"[Java] 在本地记录中找到 {len(valid_saved)} 个 Java")
-        selected = _interactive_select(valid_saved)
+        # 优先使用上次选中的
+        last_path = _last_selected_path(storage_dir)
+        if last_path:
+            matches = [j for j in valid_saved if os.path.normpath(j.path) == os.path.normpath(last_path)]
+            if matches:
+                selected = matches[0]
+                print(f"[Java] 使用上次选择的 Java: {selected.path} (版本 {selected.version})")
+        if selected is None:
+            print(f"[Java] 在本地记录中找到 {len(valid_saved)} 个 Java")
+            selected = _interactive_select(valid_saved)
     else:
         need_scan = True
 

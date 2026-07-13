@@ -15,14 +15,17 @@ from server_launcher import start_minecraft_server, start_server_interactive
 
 
 def _is_eula_unagreed(server_path: str) -> bool:
-    """检查 eula.txt 是否存在且内容为 eula=false。"""
+    """检查 eula.txt 中 eula=false 是否逐行存在（排除注释或 URL 中的误匹配）。"""
     eula_path = os.path.join(server_path, "eula.txt")
     if not os.path.isfile(eula_path):
         return False
     try:
         with open(eula_path, "r", encoding="utf-8") as f:
-            content = f.read()
-        return "eula=false" in content
+            for line in f:
+                stripped = line.strip()
+                if stripped == "eula=false":
+                    return True
+        return False
     except OSError:
         return False
 
@@ -127,7 +130,6 @@ def main():
     print()
 
     # 启动循环（支持 EULA 同意后自动重启）
-    first_start = True
     while True:
         try:
             if interactive:
@@ -150,27 +152,23 @@ def main():
             sys.exit(0)
 
         # 检查 EULA
-        if _is_eula_unagreed(server_path):
-            print()
-            print(f"  [EULA] 服务器因未同意 EULA 而退出。")
-            if _prompt_eula(name):
-                if _agree_to_eula(server_path):
-                    print("  [EULA] 已同意，正在自动重启服务器...")
-                    print()
-                    first_start = False
-                    continue  # 自动重启
-                else:
-                    print("  [EULA] 修改 eula.txt 失败，请手动修改。")
-            else:
-                print("  [EULA] 已拒绝。")
+        if not _is_eula_unagreed(server_path):
+            break
 
-        # 正常退出或无需 EULA 处理
+        print()
+        print(f"  [EULA] 服务器因未同意 EULA 而退出。")
+        if _prompt_eula(name):
+            if _agree_to_eula(server_path):
+                print("  [EULA] 已同意，正在自动重启服务器...")
+                print()
+                continue
+            else:
+                print("  [EULA] 修改 eula.txt 失败，请手动修改。")
+        else:
+            print("  [EULA] 已拒绝。")
         break
 
-    if first_start:
-        print(f"\n[完成] 服务器 \"{name}\" 已关闭，退出码: {exit_code}")
-    else:
-        print(f"\n[完成] 服务器 \"{name}\" 已关闭，退出码: {exit_code}")
+    print(f"\n[完成] 服务器 \"{name}\" 已关闭，退出码: {exit_code}")
     sys.exit(exit_code)
 
 

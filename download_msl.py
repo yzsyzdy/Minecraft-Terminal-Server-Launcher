@@ -285,31 +285,19 @@ def multithreaded_download(url: str, target_path: str, desc: str = "",
                       end="\r", flush=True)
             time.sleep(0.15)
 
-        # 检查各分块结果，失败时重试（最多 2 次额外尝试）
-        for attempt in range(3):
-            failed_indices = [
-                i for i, f in enumerate(futures)
-                if f.exception() or f.result() is False
-            ]
-            if not failed_indices:
-                break
-            if attempt < 2:
-                retry_futures = [
-                    executor.submit(_download_chunk, url, chunks[i][0], chunks[i][1],
-                                    target_path, shared, lock)
-                    for i in failed_indices
-                ]
-                for rf in concurrent.futures.as_completed(retry_futures):
-                    pass
-                futures = retry_futures
-            else:
-                try:
-                    os.remove(target_path)
-                except OSError:
-                    pass
-                print(f"\n  [错误] 下载失败，"
-                      f"{len(failed_indices)}/{len(chunks)} 个分块下载失败")
-                return False
+        # 检查各分块结果
+    failed_indices = [
+        i for i, f in enumerate(futures)
+        if f.exception() or f.result() is False
+    ]
+    if failed_indices:
+        try:
+            os.remove(target_path)
+        except OSError:
+            pass
+        # 回退到单线程下载
+        print(f"\n  [重试] 多线程分块下载失败，回退到单线程...")
+        return _download_with_progress(url, target_path, desc)
 
     final_bar = "\u2588" * bar_width
     print(f"    {desc} [{final_bar}] 100.0%  "
