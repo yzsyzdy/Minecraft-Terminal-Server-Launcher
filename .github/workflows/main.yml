@@ -42,10 +42,6 @@ jobs:
             --copyright="MSTL" `
             start.py
 
-      # ---------- 查看构建产物（调试用） ----------
-      - name: List output directory
-        run: dir build /s
-
       # ---------- 压缩整个输出目录 ----------
       - name: Compress build output
         shell: powershell
