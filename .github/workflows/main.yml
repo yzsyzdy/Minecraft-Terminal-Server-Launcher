@@ -55,9 +55,12 @@ jobs:
           Compress-Archive -Path $source -DestinationPath $zipFile -Force
           Write-Host "Created $zipFile"
 
-      # ---------- 上传压缩包 ----------
-      - name: Upload unsigned artifact
-        uses: actions/upload-artifact@v4
+      # ---------- 自动发布到 GitHub Releases ----------
+      - name: Create Release and Upload Asset
+        uses: softprops/action-gh-release@v1
         with:
-          name: MSTL-unsigned
-          path: MSTL-unsigned.zip
+          files: MSTL-unsigned.zip   # 要上传的文件
+          tag_name: ${{ github.ref_name }}  # 自动使用你推送的标签名（如 v1.0.0）
+          generate_release_notes: true      # 自动生成更新日志（可选）
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}  # GitHub 内置的默认 Token，无需手动配置
