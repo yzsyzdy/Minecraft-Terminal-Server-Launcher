@@ -6,7 +6,7 @@ on:
       - 'v*'
   workflow_dispatch:
 
-# ⭐ 关键修复 1：赋予操作 Releases 的写权限
+# 赋予创建 Release 的写权限
 permissions:
   contents: write
 
@@ -28,26 +28,11 @@ jobs:
           pip install nuitka
           pip install imageio
 
-      # ---------- 构建 ----------
+      # ---------- 构建（改为单行，避免续行符解析错误）----------
       - name: Build with Nuitka
-        run: |
-          python -m nuitka `
-            --standalone `
-            --assume-yes-for-downloads `
-            --enable-plugin=anti-bloat `
-            --windows-console-mode=force `
-            --windows-icon-from-ico=icon.png `
-            --output-dir=build `
-            --product-name=MSTL `
-            --file-description="Minecraft Terminal Server Launcher" `
-            --product-version="1.0.0" `
-            --file-version="1.0.0" `
-            --copyright="MSTL" `
-            # ⭐ 关键修复 2：强制包含 locals 文件夹
-            --include-data-dir=locals=locals `
-            start.py
+        run: python -m nuitka --standalone --assume-yes-for-downloads --enable-plugin=anti-bloat --windows-console-mode=force --windows-icon-from-ico=icon.png --output-dir=build --product-name=MSTL --file-description="Minecraft Terminal Server Launcher" --product-version="1.0.0" --file-version="1.0.0" --copyright="MSTL" --include-data-dir=locals=locals start.py
 
-      # ---------- 查看构建产物（调试用） ----------
+      # ---------- 查看构建产物（调试）----------
       - name: List output directory
         run: Get-ChildItem -Recurse build
 
@@ -64,14 +49,14 @@ jobs:
           Compress-Archive -Path $source -DestinationPath $zipFile -Force
           Write-Host "Created $zipFile"
 
-      # ---------- 上传压缩包到工件（临时存储） ----------
+      # ---------- 上传压缩包到工件（临时保存）----------
       - name: Upload unsigned artifact
         uses: actions/upload-artifact@v4
         with:
           name: MSTL-unsigned
           path: MSTL-unsigned.zip
 
-      # ---------- ⭐ 推荐：自动发布到 Releases ----------
+      # ---------- 自动发布到 Releases ----------
       - name: Create Release and Upload Asset
         uses: softprops/action-gh-release@v1
         with:
