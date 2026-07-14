@@ -1,0 +1,69 @@
+name: Build and Sign
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Nuitka
+        run: pip install nuitka
+
+      # ---------- 构建 ----------
+      - name: Build with Nuitka
+        run: |
+          python -m nuitka `
+            --standalone `
+            --assume-yes-for-downloads `
+            --enable-plugin=anti-bloat `
+            --windows-console-mode=force `
+            --windows-icon-from-ico=icon.png `
+            --output-dir=build `
+            --product-name=MSTL `
+            --file-description="Minecraft Terminal Server Launcher" `
+            --product-version="1.0.0" `
+            --file-version="1.0.0" `
+            --copyright="MSTL" `
+            start.py
+
+      # ---------- 查看构建产物（调试用，可删除） ----------
+      - name: List output directory
+        run: dir build /s
+
+      # ---------- 压缩整个输出目录 ----------
+      - name: Compress build output
+        shell: powershell
+        run: |
+          # 假设输出目录为 build/start.dist（根据你的入口文件名 start.py）
+          # 如果实际路径不同，请修改下面的路径
+          $source = "build/start.dist"
+          $zipFile = "MSTL-unsigned.zip"
+          # 如果目录不存在，尝试 build/start.exe 的情况（单文件模式？但你是standalone，会有目录）
+          if (-not (Test-Path $source)) {
+            Write-Host "Directory $source not found, trying build/start.exe (single file)..."
+            # 如果确实是单文件，则直接压缩该文件
+            $source = "build/start.exe"
+          }
+          Compress-Archive -Path $source -DestinationPath $zipFile -Force
+          Write-Host "Created $zipFile"
+
+      # ---------- 上传压缩包（未签名） ----------
+      - name: Upload unsigned artifact (zip)
+        id: upload-artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: MSTL-unsigned
+          path: MSTL-unsigned.zip
+
