@@ -4,7 +4,11 @@ on:
   push:
     tags:
       - 'v*'
-  workflow_dispatch:   # 允许手动触发，方便测试
+  workflow_dispatch:
+
+# ⭐ 关键修复 1：赋予操作 Releases 的写权限
+permissions:
+  contents: write
 
 jobs:
   build:
@@ -19,7 +23,6 @@ jobs:
         with:
           python-version: '3.11'
 
-      # 修复：合并安装命令
       - name: Install dependencies
         run: |
           pip install nuitka
@@ -40,14 +43,20 @@ jobs:
             --product-version="1.0.0" `
             --file-version="1.0.0" `
             --copyright="MSTL" `
+            # ⭐ 关键修复 2：强制包含 locals 文件夹
+            --include-data-dir=locals=locals `
             start.py
+
+      # ---------- 查看构建产物（调试用） ----------
+      - name: List output directory
+        run: Get-ChildItem -Recurse build
 
       # ---------- 压缩整个输出目录 ----------
       - name: Compress build output
         shell: powershell
         run: |
           $source = "build/start.dist"
-          $zipFile = "MSTL.zip"
+          $zipFile = "MSTL-unsigned.zip"
           if (-not (Test-Path $source)) {
             Write-Host "Directory $source not found, trying build/start.exe (single file)..."
             $source = "build/start.exe"
@@ -55,12 +64,19 @@ jobs:
           Compress-Archive -Path $source -DestinationPath $zipFile -Force
           Write-Host "Created $zipFile"
 
-      # ---------- 自动发布到 GitHub Releases ----------
+      # ---------- 上传压缩包到工件（临时存储） ----------
+      - name: Upload unsigned artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: MSTL-unsigned
+          path: MSTL-unsigned.zip
+
+      # ---------- ⭐ 推荐：自动发布到 Releases ----------
       - name: Create Release and Upload Asset
         uses: softprops/action-gh-release@v1
         with:
-          files: MSTL.zip   # 要上传的文件
-          tag_name: ${{ github.ref_name }}  # 自动使用你推送的标签名（如 v1.0.0）
-          generate_release_notes: true      # 自动生成更新日志（可选）
+          files: MSTL-unsigned.zip
+          tag_name: ${{ github.ref_name }}
+          generate_release_notes: true
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}  # GitHub 内置的默认 Token，无需手动配置
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
