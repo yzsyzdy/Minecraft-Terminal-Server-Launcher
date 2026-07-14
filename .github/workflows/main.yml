@@ -6,7 +6,6 @@ on:
       - 'v*'
   workflow_dispatch:
 
-# 赋予创建 Release 的写权限
 permissions:
   contents: write
 
@@ -28,15 +27,19 @@ jobs:
           pip install nuitka
           pip install imageio
 
-      # ---------- 构建（改为单行，避免续行符解析错误）----------
+      # ---------- 调试：列出工作目录 ----------
+      - name: List root directory
+        run: Get-ChildItem -Recurse -Depth 1
+
+      # ---------- 构建（单行命令）----------
       - name: Build with Nuitka
         run: python -m nuitka --standalone --assume-yes-for-downloads --enable-plugin=anti-bloat --windows-console-mode=force --windows-icon-from-ico=icon.png --output-dir=build --product-name=MSTL --file-description="Minecraft Terminal Server Launcher" --product-version="1.0.0" --file-version="1.0.0" --copyright="MSTL" --include-data-dir=locals=locals start.py
 
-      # ---------- 查看构建产物（调试）----------
+      # ---------- 查看构建产物 ----------
       - name: List output directory
         run: Get-ChildItem -Recurse build
 
-      # ---------- 压缩整个输出目录 ----------
+      # ---------- 压缩 ----------
       - name: Compress build output
         shell: powershell
         run: |
@@ -49,14 +52,14 @@ jobs:
           Compress-Archive -Path $source -DestinationPath $zipFile -Force
           Write-Host "Created $zipFile"
 
-      # ---------- 上传压缩包到工件（临时保存）----------
+      # ---------- 上传工件 ----------
       - name: Upload unsigned artifact
         uses: actions/upload-artifact@v4
         with:
           name: MSTL-unsigned
           path: MSTL-unsigned.zip
 
-      # ---------- 自动发布到 Releases ----------
+      # ---------- 发布到 Releases ----------
       - name: Create Release and Upload Asset
         uses: softprops/action-gh-release@v1
         with:
