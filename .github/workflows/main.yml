@@ -47,7 +47,7 @@ jobs:
         shell: powershell
         run: |
           $source = "build/start.dist"
-          $zipFile = "MSTL-unsigned.zip"
+          $zipFile = "MSTL.zip"
           if (-not (Test-Path $source)) {
             Write-Host "Directory $source not found, trying build/start.exe (single file)..."
             $source = "build/start.exe"
@@ -59,7 +59,7 @@ jobs:
       - name: Create Release and Upload Asset
         uses: softprops/action-gh-release@v1
         with:
-          files: MSTL-unsigned.zip   # 要上传的文件
+          files: MSTL.zip   # 要上传的文件
           tag_name: ${{ github.ref_name }}  # 自动使用你推送的标签名（如 v1.0.0）
           generate_release_notes: true      # 自动生成更新日志（可选）
         env:
