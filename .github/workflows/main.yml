@@ -18,8 +18,9 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Install Nuitka
+      - name: Install Nuitka&imageio
         run: pip install nuitka
+        run: pip install imageio
 
       # ---------- 构建 ----------
       - name: Build with Nuitka
