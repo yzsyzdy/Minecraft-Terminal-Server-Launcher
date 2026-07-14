@@ -4,6 +4,7 @@ on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch:   # 允许手动触发，方便测试
 
 jobs:
   build:
@@ -18,9 +19,11 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Install Nuitka&imageio
-        run: pip install nuitka
-        run: pip install imageio
+      # 修复：合并安装命令
+      - name: Install dependencies
+        run: |
+          pip install nuitka
+          pip install imageio
 
       # ---------- 构建 ----------
       - name: Build with Nuitka
@@ -39,7 +42,7 @@ jobs:
             --copyright="MSTL" `
             start.py
 
-      # ---------- 查看构建产物（调试用，可删除） ----------
+      # ---------- 查看构建产物（调试用） ----------
       - name: List output directory
         run: dir build /s
 
@@ -47,24 +50,18 @@ jobs:
       - name: Compress build output
         shell: powershell
         run: |
-          # 假设输出目录为 build/start.dist（根据你的入口文件名 start.py）
-          # 如果实际路径不同，请修改下面的路径
           $source = "build/start.dist"
           $zipFile = "MSTL-unsigned.zip"
-          # 如果目录不存在，尝试 build/start.exe 的情况（单文件模式？但你是standalone，会有目录）
           if (-not (Test-Path $source)) {
             Write-Host "Directory $source not found, trying build/start.exe (single file)..."
-            # 如果确实是单文件，则直接压缩该文件
             $source = "build/start.exe"
           }
           Compress-Archive -Path $source -DestinationPath $zipFile -Force
           Write-Host "Created $zipFile"
 
-      # ---------- 上传压缩包（未签名） ----------
-      - name: Upload unsigned artifact (zip)
-        id: upload-artifact
+      # ---------- 上传压缩包 ----------
+      - name: Upload unsigned artifact
         uses: actions/upload-artifact@v4
         with:
           name: MSTL-unsigned
           path: MSTL-unsigned.zip
-
