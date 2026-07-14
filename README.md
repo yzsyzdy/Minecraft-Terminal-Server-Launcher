@@ -160,6 +160,11 @@ start.py
 - **标准库**（零第三方依赖）
 - **JDK 21+**（可选，用于运行 Minecraft 服务器，启动器可自动下载）
 
+## 许可
+
+本项目基于 **GNU General Public License v3.0** 开源。
+完整协议见 [LICENSE](LICENSE) 文件。
+
 ## 常见问题
 
 ### CurseForge 搜索不生效？
