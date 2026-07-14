@@ -1,7 +1,7 @@
 """
-MSTL — 服务器启动模块
+MSTL — Server launch module
 
-提供启动服务器的核心函数（JVM 参数、进程管理）。
+Provides core functions for starting Minecraft servers (JVM args, process management).
 """
 
 import subprocess
@@ -11,9 +11,11 @@ import signal
 import platform
 from typing import Optional
 
+from i18n import t
+
 
 def console_title(title: str) -> None:
-    """设置控制台窗口标题（Windows），其他系统忽略。"""
+    """Set console window title (Windows only)."""
     if platform.system() == "Windows":
         try:
             import ctypes
@@ -32,13 +34,13 @@ _JVM_OPENS = [
 
 
 def _validate_java_jar(java_path: str, jar_path: str) -> str:
-    """校验 Java 和 jar 文件，返回工作目录。"""
+    """Validate Java and jar files, return working directory."""
     java_path = os.path.abspath(java_path)
     jar_path = os.path.abspath(jar_path)
     if not os.path.isfile(java_path):
-        raise FileNotFoundError(f"Java 可执行文件未找到: {java_path}")
+        raise FileNotFoundError(t("app.error_java_not_found", path=java_path))
     if not os.path.isfile(jar_path):
-        raise FileNotFoundError(f"服务端核心文件未找到: {jar_path}")
+        raise FileNotFoundError(t("app.error_jar_not_found", path=jar_path))
     return os.path.dirname(jar_path)
 
 
@@ -48,7 +50,7 @@ def _build_jvm_cmd(
     extra_server_args: Optional[list[str]] = None,
     nogui: bool = True,
 ) -> list[str]:
-    """构建完整的 JVM 启动命令列表。"""
+    """Build the full JVM command list."""
     cmd = [java_path, f"-Xmx{max_mem}", f"-Xms{min_mem}"] + _JVM_OPENS
     if extra_jvm_args:
         cmd.extend(extra_jvm_args)
@@ -70,17 +72,17 @@ def start_minecraft_server(
     extra_jvm_args: Optional[list[str]] = None,
     extra_server_args: Optional[list[str]] = None,
 ) -> int:
-    """启动服务器（非交互模式，仅输出日志）。返回进程退出码。"""
-    console_title("MSTL — 服务器控制台 (非交互)")
+    """Start server (non-interactive, log output only). Returns exit code."""
+    console_title(t("console.title_noinput"))
     workdir = _validate_java_jar(java_path, jar_path) if workdir is None else os.path.abspath(workdir)
     cmd = _build_jvm_cmd(java_path, jar_path, min_mem, max_mem,
                          extra_jvm_args, extra_server_args, nogui)
 
-    print(f"[启动] 工作目录: {workdir}")
-    print(f"[启动] Java:    {os.path.abspath(java_path)}")
-    print(f"[启动] 核心:    {os.path.abspath(jar_path)}")
-    print(f"[启动] 内存:    最小 {min_mem} / 最大 {max_mem}")
-    print(f"[启动] 命令:    {' '.join(cmd)}")
+    print(t("launch.workdir", dir=workdir))
+    print(t("launch.java", path=os.path.abspath(java_path)))
+    print(t("launch.jar", path=os.path.abspath(jar_path)))
+    print(t("launch.memory", min=min_mem, max=max_mem))
+    print(t("launch.command", cmd=" ".join(cmd)))
     print()
 
     process = subprocess.Popen(
@@ -89,14 +91,14 @@ def start_minecraft_server(
     )
 
     def _handle_sigint(sig, frame):
-        print("\n[关闭] 收到 Ctrl+C，正在停止服务器...")
+        print(t("launch.sigint"))
         if process.poll() is None:
             process.terminate()
             try:
                 process.wait(timeout=10)
             except subprocess.TimeoutExpired:
                 process.kill()
-        sys.exit(0)
+        os._exit(0)
 
     original_sigint = signal.getsignal(signal.SIGINT)
     signal.signal(signal.SIGINT, _handle_sigint)
@@ -118,16 +120,16 @@ def start_server_interactive(
     extra_jvm_args: Optional[list[str]] = None,
     extra_server_args: Optional[list[str]] = None,
 ) -> int:
-    """启动服务器并支持控制台交互输入。"""
-    console_title("MSTL — 服务器控制台")
+    """Start server with interactive console input."""
+    console_title(t("console.title"))
     workdir = _validate_java_jar(java_path, jar_path)
     cmd = _build_jvm_cmd(java_path, jar_path, min_mem, max_mem,
                          extra_jvm_args, extra_server_args, nogui=True)
 
-    print(f"[启动] 工作目录: {workdir}")
-    print(f"[启动] Java:    {os.path.abspath(java_path)}")
-    print(f"[启动] 核心:    {os.path.abspath(jar_path)}")
-    print(f"[启动] 内存:    最小 {min_mem} / 最大 {max_mem}")
-    print("[启动] 控制台交互已启用（输入 stop 关闭服务器）")
+    print(t("launch.workdir", dir=workdir))
+    print(t("launch.java", path=os.path.abspath(java_path)))
+    print(t("launch.jar", path=os.path.abspath(jar_path)))
+    print(t("launch.memory", min=min_mem, max=max_mem))
+    print(t("launch.interactive"))
     print()
     return subprocess.call(cmd, cwd=workdir)

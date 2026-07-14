@@ -9,6 +9,7 @@ from typing import Any
 DEFAULT_CONFIG: dict[str, Any] = {
     "java_path": None,
     "interactive": True,
+    "language": "",
     "curseforge_api_key": "",
 }
 
@@ -31,7 +32,7 @@ def load_config(storage_dir: str) -> dict[str, Any]:
 
 
 def save_config(config: dict[str, Any], storage_dir: str) -> None:
-    """保存配置到 config.json。"""
+    """将配置保存到 config.json。保留所有字段。"""
     merged = dict(DEFAULT_CONFIG)
     merged.update(config)
     path = os.path.join(storage_dir, "config.json")

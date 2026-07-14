@@ -40,6 +40,7 @@ from java_tools import (
     JDK_MIRROR_URLS,
 )
 from server_launcher import start_minecraft_server, start_server_interactive
+from i18n import t, load_language, available_languages, detect_os_language
 from menu import show_main_menu
 from mod_sources import (
     search_all_mods,

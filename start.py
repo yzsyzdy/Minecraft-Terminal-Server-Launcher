@@ -21,22 +21,21 @@ import os
 import sys
 
 from config import load_config, save_config
-from server_manager import ensure_servers_folder, list_servers, load_server_config
+from server_manager import ensure_servers_folder, load_server_config
 from menu import show_main_menu
 from java_tools import resolve_java
 from server_launcher import start_minecraft_server, start_server_interactive
+from i18n import t, load_language, detect_os_language
 
 
 def _is_eula_unagreed(server_path: str) -> bool:
-    """检查 eula.txt 中 eula=false 是否逐行存在（排除注释或 URL 中的误匹配）。"""
     eula_path = os.path.join(server_path, "eula.txt")
     if not os.path.isfile(eula_path):
         return False
     try:
         with open(eula_path, "r", encoding="utf-8") as f:
             for line in f:
-                stripped = line.strip()
-                if stripped == "eula=false":
+                if line.strip() == "eula=false":
                     return True
         return False
     except OSError:
@@ -44,7 +43,6 @@ def _is_eula_unagreed(server_path: str) -> bool:
 
 
 def _agree_to_eula(server_path: str) -> bool:
-    """将 eula.txt 中的 eula=false 改为 eula=true。成功返回 True。"""
     eula_path = os.path.join(server_path, "eula.txt")
     try:
         with open(eula_path, "r", encoding="utf-8") as f:
@@ -58,32 +56,23 @@ def _agree_to_eula(server_path: str) -> bool:
 
 
 def _prompt_eula(name: str) -> bool:
-    """询问用户是否同意 Minecraft EULA。返回 True 表示同意。"""
     print()
-    print("  =============================================")
-    print("   Minecraft 最终用户许可协议 (EULA)")
-    print("   https://aka.ms/MinecraftEULA")
-    print("  =============================================")
+    print(t("eula.notice"))
     print()
-    print(f"  服务器 \"{name}\" 需要您同意 EULA 才能运行。")
+    print(t("eula.prompt", name=name))
     print()
-    ans = input("  是否同意 Minecraft EULA？(y/N): ").strip().lower()
+    ans = input(t("eula.ask")).strip().lower()
     return ans == "y"
 
 
+
 def _project_dir() -> str:
-    """确定项目根目录。
-    
-    源码模式用 __file__，打包模式（Nuitka/PyInstaller）用 sys.executable，
-    保证 config.json/servers/ 创建在 exe 同级目录。
-    """
     if getattr(sys, "frozen", False):
         return os.path.dirname(os.path.abspath(sys.executable))
     return os.path.dirname(os.path.abspath(__file__))
 
 
 def _start_server(server_cfg: dict, config: dict, project_dir: str) -> int:
-    """启动指定服务器，返回退出码。处理 Java 解析、兼容性检查、EULA。"""
     server_path = server_cfg["_path"]
     server_java = server_cfg.get("java_path") or config.get("java_path")
 
@@ -96,13 +85,13 @@ def _start_server(server_cfg: dict, config: dict, project_dir: str) -> int:
             project_dir=project_dir,
         )
     except FileNotFoundError as e:
-        print(f"[错误] {e}")
+        print(t("app.error_file_not_found", msg=str(e)))
         return 1
 
     jar_rel = server_cfg.get("jar", "server.jar")
     jar_abs = os.path.abspath(os.path.join(server_path, jar_rel))
     if not os.path.isfile(jar_abs):
-        print(f"[错误] 服务器核心文件未找到: {jar_abs}")
+        print(t("app.error_jar_missing", path=jar_abs))
         return 1
 
     min_mem = server_cfg.get("min_mem", "1G")
@@ -113,11 +102,11 @@ def _start_server(server_cfg: dict, config: dict, project_dir: str) -> int:
     name = server_cfg.get("name", "?")
 
     print()
-    print(f"  服务器:    {name}")
-    print(f"  MC 版本:   {server_cfg.get('mc_version', '?')}")
-    print(f"  Java:      {java_abs}")
-    print(f"  核心:      {jar_abs}")
-    print(f"  内存:      最小 {min_mem} / 最大 {max_mem}")
+    print(t("server.info_name", name=name))
+    print(t("server.info_mc", ver=server_cfg.get("mc_version", "?")))
+    print(t("server.info_java", path=java_abs))
+    print(t("server.info_jar", path=jar_abs))
+    print(t("server.info_memory", min=min_mem, max=max_mem))
     print()
 
     while True:
@@ -135,26 +124,26 @@ def _start_server(server_cfg: dict, config: dict, project_dir: str) -> int:
                     extra_jvm_args=extra_jvm, extra_server_args=extra_srv,
                 )
         except FileNotFoundError as e:
-            print(f"[错误] {e}")
+            print(t("app.error_file_not_found", msg=str(e)))
             return 1
         except KeyboardInterrupt:
-            print("\n[关闭] 用户中断")
+            print(t("app.cancel"))
             return 0
 
         if not _is_eula_unagreed(server_path):
             break
 
         print()
-        print(f"  [EULA] 服务器因未同意 EULA 而退出。")
+        print(t("eula.exit_reason"))
         if _prompt_eula(name):
             if _agree_to_eula(server_path):
-                print("  [EULA] 已同意，正在自动重启服务器...")
+                print(t("eula.agreed"))
                 print()
                 continue
             else:
-                print("  [EULA] 修改 eula.txt 失败，请手动修改。")
+                print(t("eula.failed"))
         else:
-            print("  [EULA] 已拒绝。")
+            print(t("eula.refused"))
         break
 
     return exit_code
@@ -166,6 +155,8 @@ def main():
     project_dir = _project_dir()
 
     config = load_config(project_dir)
+    lang = config.get("language", "") or detect_os_language()
+    load_language(lang)
     save_config(config, project_dir)
 
     servers_dir = ensure_servers_folder(project_dir)
@@ -179,7 +170,7 @@ def main():
     exit_code = _start_server(server_cfg, config, project_dir)
 
     name = server_cfg.get("name", "?")
-    print(f"\n[完成] 服务器 \"{name}\" 已关闭，退出码: {exit_code}")
+    print(t("app.done", name=name, code=exit_code))
     sys.exit(exit_code)
 
 

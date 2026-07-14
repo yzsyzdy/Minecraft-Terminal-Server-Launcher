@@ -1,5 +1,5 @@
 """
-Java 自动检测、版本兼容与 JDK 下载模块
+Java auto-detection, version compatibility, and JDK download module
 """
 
 import subprocess
@@ -15,15 +15,16 @@ from dataclasses import dataclass, asdict
 from typing import Optional, Any
 
 from download_msl import _download_with_progress
+from i18n import t
 
 
 # =============================================================================
-# Java 检测
+# Java detection
 # =============================================================================
 
 @dataclass
 class JavaInfo:
-    """描述一个检测到的 Java 安装。"""
+    """Describes a detected Java installation."""
     path: str
     version: str
     detected_at: str
@@ -81,7 +82,6 @@ def _search_java_from_env() -> list[JavaInfo]:
         c = os.path.join(d, java_bin)
         if os.path.isfile(c):
             candidates.append(c)
-        # Linux: also check with realpath (PATH might have symlinks)
         if not _is_windows() and os.path.islink(c):
             try:
                 real = os.path.realpath(c)
@@ -151,7 +151,6 @@ def _search_java_from_default_paths() -> list[JavaInfo]:
                     seen.add(norm)
                     found.append(JavaInfo(path=norm, version=ver, detected_at=now))
     else:
-        # Linux JDK 搜索路径
         roots = [
             "/usr/lib/jvm",
             "/usr/java",
@@ -161,11 +160,9 @@ def _search_java_from_default_paths() -> list[JavaInfo]:
             os.path.join(os.environ.get("HOME", ""), ".sdkman", "candidates", "java"),
             os.path.join(os.environ.get("HOME", ""), ".local", "share", "JetBrains", "Toolbox", "apps"),
         ]
-        # 在每个 JDK 根下找 bin/java
         for root in roots:
             if not root or not os.path.isdir(root):
                 continue
-            # 一级目录（如 /usr/lib/jvm/java-21-openjdk/bin/java）
             for entry in os.listdir(root):
                 jdk_path = os.path.join(root, entry)
                 if not os.path.isdir(jdk_path):
@@ -179,7 +176,6 @@ def _search_java_from_default_paths() -> list[JavaInfo]:
                     if ver:
                         seen.add(norm)
                         found.append(JavaInfo(path=norm, version=ver, detected_at=now))
-                # 也检查 jbr/ (JetBrains Runtime)
                 jbr = os.path.join(jdk_path, "jbr", "bin", java_bin)
                 if os.path.isfile(jbr):
                     norm = os.path.normpath(jbr)
@@ -216,7 +212,7 @@ def _version_sort_key(version: str) -> tuple:
 
 
 # ---------------------------------------------------------------------------
-# Java 列表持久化
+# Java list persistence
 # ---------------------------------------------------------------------------
 
 def _java_list_path(storage_dir: str) -> str:
@@ -224,7 +220,7 @@ def _java_list_path(storage_dir: str) -> str:
 
 
 def _last_selected_path(storage_dir: str) -> str:
-    """读取 java_list.json 中的 last_selected 字段。"""
+    """Read the last_selected field from java_list.json."""
     path = _java_list_path(storage_dir)
     if not os.path.isfile(path):
         return ""
@@ -260,34 +256,33 @@ def save_java_list(javas: list[JavaInfo], storage_dir: str, last_selected: str =
 
 def _interactive_select(javas: list[JavaInfo]) -> JavaInfo:
     print()
-    print("  检测到多个 Java 安装，请选择其中一个：")
+    print(t("java.select_prompt"))
     print()
     for i, j in enumerate(javas, 1):
-        print(f"  [{i}] {j.path}")
-        print(f"      版本: {j.version}")
+        print(t("java.select_line", i=i, path=j.path, ver=j.version))
     print()
     while True:
         try:
-            choice = input(f"  请输入编号 (1-{len(javas)}): ").strip()
+            choice = input(t("java.select_prompt_num", max=len(javas))).strip()
             idx = int(choice) - 1
             if 0 <= idx < len(javas):
                 return javas[idx]
         except ValueError:
             pass
-        print(f"  无效选择。")
+        print(t("app.invalid_choice_short"))
 
 
 # =============================================================================
-# Java 版本兼容性
+# Java version compatibility
 # =============================================================================
 
 MC_JAVA_COMPAT: list[tuple[str, str, str, str, str]] = [
-    ("0",    "1.12.2", "8",  "8",  "许多老牌 Mod 强制要求 Java 8"),
-    ("1.13", "1.16.5", "8",  "11", "Java 11 性能更好"),
-    ("1.17", "1.17.1", "16", "17", "Java 8 不再兼容"),
+    ("0",    "1.12.2", "8",  "8",  "Many older mods require Java 8"),
+    ("1.13", "1.16.5", "8",  "11", "Java 11 offers better performance"),
+    ("1.17", "1.17.1", "16", "17", "Java 8 no longer works"),
     ("1.18", "1.20.4", "17", "17", ""),
-    ("1.20.5", "1.25", "21", "21", "官方强制版本"),
-    ("1.25", "999",    "25", "25", "最新快照版"),
+    ("1.20.5", "1.25", "21", "21", "Officially required version"),
+    ("1.25", "999",    "25", "25", "Latest snapshot"),
 ]
 
 JDK_MIRROR_URLS: dict[str, dict[str, str]] = {
@@ -365,46 +360,46 @@ def _check_java_compatibility(
         return None
 
     print()
-    print(f"  [警告] Java 版本不兼容！")
-    print(f"         当前 Java:      {java_version} (主版本 {java_major})")
-    print(f"         服务器 MC 版本: {mc_version}")
-    print(f"         需要 Java {need_min} 或更高版本")
-    print(f"         推荐 Java {rec}")
+    print(t("java.compat.title"))
+    print(t("java.compat.current", ver=java_version, major=java_major))
+    print(t("java.compat.mc_version", ver=mc_version))
+    print(t("java.compat.required", ver=need_min))
+    print(t("java.compat.recommended", ver=rec))
     if req["note"]:
-        print(f"         提示: {req['note']}")
+        print(t("java.hint", note=req["note"]))
     print()
 
     if rec in JDK_MIRROR_URLS:
-        print(f"  [1] 自动下载 JDK {rec}")
-        print(f"  [2] 忽略警告，继续使用当前 Java")
-        print(f"  [0] 取消启动")
+        print(t("java.compat.download", n=1, ver=rec))
+        print(t("java.compat.ignore", n=2))
+        print(t("java.compat.cancel", n=0))
         print()
         while True:
-            c = input("  请选择 (0-2): ").strip()
+            c = input(t("java.compat.prompt", max=2)).strip()
             if c == "1":
                 exe = _download_jdk(rec, project_dir or storage_dir)
                 if exe:
                     ver = _run_java_version(exe)
                     now = datetime.now(timezone.utc).isoformat()
                     save_java_list([JavaInfo(path=exe, version=ver or rec, detected_at=now)], storage_dir, last_selected=exe)
-                    print(f"[Java] 已切换至: {exe} (版本 {ver or rec})")
+                    print(t("java.downloaded", path=exe, ver=ver or rec))
                     return exe
-                print(); print("  [错误] 下载失败"); continue
+                print(); print(t("java.compat.download_failed")); continue
             elif c == "2":
                 return None
             elif c == "0":
-                raise FileNotFoundError("用户取消了启动")
+                raise FileNotFoundError(t("java.compat.cancelled"))
             else:
-                print("  无效选择。")
+                print(t("app.invalid_choice_short"))
     else:
-        print(f"  （无法自动下载 JDK {rec}，请手动安装）")
-        if input("  是否忽略警告继续？(y/N): ").strip().lower() != "y":
-            raise FileNotFoundError("用户取消了启动")
+        print(t("java.compat.no_auto", ver=rec))
+        if input(t("java.compat.ignore_ask")).strip().lower() != "y":
+            raise FileNotFoundError(t("java.compat.cancelled"))
         return None
 
 
 def _extract_and_rename_jdk(archive: str, target_dir: str, os_name: str) -> Optional[str]:
-    """解压 JDK 压缩包，将提取出的根目录移动到 target_dir。返回 java 可执行文件路径。"""
+    """Extract JDK archive and move the extracted root to target_dir."""
     try:
         if os_name == "windows":
             with zipfile.ZipFile(archive, "r") as zf:
@@ -439,7 +434,7 @@ def _extract_and_rename_jdk(archive: str, target_dir: str, os_name: str) -> Opti
                         shutil.move(src, target_dir)
                 shutil.rmtree(tmp, ignore_errors=True)
     except Exception as e:
-        print(f"  [错误] 解压失败: {e}")
+        print(t("jdk.extract_failed", msg=str(e)))
         return None
 
     java_bin = "java.exe" if os_name == "windows" else "java"
@@ -451,30 +446,30 @@ def _download_jdk(java_version: str, project_dir: str) -> Optional[str]:
     os_name = _os_platform()
     urls = JDK_MIRROR_URLS.get(java_version)
     if not urls:
-        print(f"  [错误] 不支持自动下载 JDK {java_version}"); return None
+        print(t("jdk.unsupported", ver=java_version)); return None
     url = urls.get(os_name)
     if not url:
-        print(f"  [错误] JDK {java_version} 不支持 {os_name}"); return None
+        print(t("jdk.unsupported_os", ver=java_version, os=os_name)); return None
 
     jdk_dir = os.path.join(project_dir, f"jdk-{java_version}")
     java_exe = os.path.join(jdk_dir, "bin", "java.exe" if os_name == "windows" else "java")
     if os.path.isdir(jdk_dir) and os.path.isfile(java_exe):
-        print(f"  [JDK] 已存在: {jdk_dir}"); return java_exe
+        print(t("jdk.existing", dir=jdk_dir)); return java_exe
 
-    print(f"  [JDK] 正在下载 GraalVM JDK {java_version}（{os_name}）...")
+    print(t("jdk.downloading", ver=java_version, os=os_name))
     ext = ".zip" if os_name == "windows" else ".tar.gz"
     dl = os.path.join(project_dir, f"jdk-{java_version}{ext}")
     if not _download_with_progress(url, dl, desc=f"JDK {java_version}"):
         return None
 
-    print("  [JDK] 正在解压...")
+    print(t("jdk.extracting"))
     java_exe = _extract_and_rename_jdk(dl, jdk_dir, os_name)
     if os.path.isfile(dl):
         os.remove(dl)
 
     if not java_exe or not os.path.isfile(java_exe):
-        print("  [错误] 解压后未找到 java"); return None
-    print(f"  [JDK] 下载完成: {java_exe}")
+        print(t("jdk.java_not_found")); return None
+    print(t("jdk.complete", path=java_exe))
     return java_exe
 
 
@@ -484,7 +479,7 @@ def resolve_java(
     mc_version: str = "",
     project_dir: str = "",
 ) -> str:
-    """自动解析 Java 路径。支持缓存、扫描、版本兼容检查、自动下载。"""
+    """Resolve Java path with caching, scanning, compat checking, and auto-download."""
     if configured_path:
         ap = os.path.abspath(configured_path)
         if os.path.isfile(ap):
@@ -500,49 +495,48 @@ def resolve_java(
 
     if len(valid_saved) == 1:
         selected = valid_saved[0]
-        print(f"[Java] 使用本地记录的 Java: {selected.path} (版本 {selected.version})")
+        print(t("java.detect_single", path=selected.path, ver=selected.version))
     elif len(valid_saved) > 1:
-        # 优先使用上次选中的
         last_path = _last_selected_path(storage_dir)
         if last_path:
             matches = [j for j in valid_saved if os.path.normpath(j.path) == os.path.normpath(last_path)]
             if matches:
                 selected = matches[0]
-                print(f"[Java] 使用上次选择的 Java: {selected.path} (版本 {selected.version})")
+                print(t("java.detect_last", path=selected.path, ver=selected.version))
         if selected is None:
-            print(f"[Java] 在本地记录中找到 {len(valid_saved)} 个 Java")
+            print(t("java.detect_multiple", count=len(valid_saved)))
             selected = _interactive_select(valid_saved)
     else:
         need_scan = True
 
     if need_scan:
-        print("[Java] 未找到本地可用 Java 记录，正在扫描系统...")
+        print(t("java.scanning"))
         found = detect_java_versions()
         if not found:
             req = get_java_requirement(mc_version) if mc_version else None
-            print("  [Java] 未在系统中找到任何 Java 安装。")
+            print(t("java.none_found"))
             if req:
-                print(f"         当前服务器 MC {mc_version} 需要 Java {req['min']}+")
-                print(f"         推荐 Java {req['recommended']}")
+                print(t("java.need_version", mc=mc_version, ver=req["min"]))
+                print(t("java.recommend_version", ver=req["recommended"]))
                 if req["note"]:
-                    print(f"         提示: {req['note']}")
+                    print(t("java.hint", note=req["note"]))
             else:
-                print("         推荐安装 JDK 21 或更高版本。")
+                print(t("java.recommend_generic"))
 
             target = req["recommended"] if req else "21"
             if target in JDK_MIRROR_URLS:
                 print()
-                if input(f"  是否自动下载 JDK {target}？(y/N): ").strip().lower() == "y":
+                if input(t("java.ask_download", ver=target)).strip().lower() == "y":
                     exe = _download_jdk(target, project_dir or storage_dir)
                     if exe:
                         ver = _run_java_version(exe)
                         now = datetime.now(timezone.utc).isoformat()
                         found = [JavaInfo(path=exe, version=ver or target, detected_at=now)]
                         save_java_list(found, storage_dir, last_selected=exe)
-                        print(f"[Java] 已下载: {exe} (版本 {ver or target})")
+                        print(t("java.downloaded", path=exe, ver=ver or target))
 
             if not found:
-                raise FileNotFoundError("未在系统中找到任何 Java 安装。\n  请先安装 JDK 21 或更高版本：https://adoptium.net/")
+                raise FileNotFoundError("No Java installation found.\n  Install JDK 21 or later: https://adoptium.net/")
 
         selected = found[0] if len(found) == 1 else _interactive_select(found)
         seen = {os.path.normpath(j.path) for j in found}

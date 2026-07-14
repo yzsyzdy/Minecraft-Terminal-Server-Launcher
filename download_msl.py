@@ -1,8 +1,8 @@
 """
-MSL API V4 服务端下载模块
+MSL API V4 server download module
 
-通过 MSL 镜像源下载 Minecraft 服务端核心。
-API 端点：https://api.mslmc.cn/v4
+Downloads Minecraft server jars via MSL mirror API.
+API endpoint: https://api.mslmc.cn/v4
 """
 
 import os
@@ -17,19 +17,20 @@ from datetime import datetime, timezone
 from typing import Any, Optional
 
 from server_manager import save_server_config
+from i18n import t
+from constants import MSL_API_BASE, USER_AGENT
 
-MSL_API_BASE = "https://api.mslmc.cn/v4"
-MSL_USER_AGENT = "MSTL/1.0"
+MSL_USER_AGENT = USER_AGENT
 
 _CATEGORY_LABELS: dict[str, str] = {
-    "pluginsCore": "插件端",
-    "pluginsAndModsCore_Forge": "插件+模组端 (Forge)",
-    "pluginsAndModsCore_Fabric": "插件+模组端 (Fabric)",
-    "modsCore_Forge": "模组端 (Forge)",
-    "modsCore_Fabric": "模组端 (Fabric)",
-    "vanillaCore": "原版端",
-    "bedrockCore": "基岩版",
-    "proxyCore": "代理端",
+    "pluginsCore": "download.category.pluginsCore",
+    "pluginsAndModsCore_Forge": "download.category.pluginsAndModsCore_Forge",
+    "pluginsAndModsCore_Fabric": "download.category.pluginsAndModsCore_Fabric",
+    "modsCore_Forge": "download.category.modsCore_Forge",
+    "modsCore_Fabric": "download.category.modsCore_Fabric",
+    "vanillaCore": "download.category.vanillaCore",
+    "bedrockCore": "download.category.bedrockCore",
+    "proxyCore": "download.category.proxyCore",
 }
 
 _SERVER_DISPLAY_NAMES: dict[str, str] = {
@@ -53,7 +54,7 @@ def _server_display_name(server_id: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# 缓存
+# Cache
 # ---------------------------------------------------------------------------
 
 def _msl_cache_path(project_dir: str) -> str:
@@ -87,7 +88,7 @@ def _msl_cache_fetch(cache_key: str, path: str, project_dir: str) -> Any:
     entry = cache.get(cache_key)
     today = _today_str()
     if entry and isinstance(entry, dict) and entry.get("cached_at") == today:
-        print(f"  [缓存] 使用本地缓存 ({today})")
+        print(t("cache.hit", date=today))
         return entry.get("data")
 
     url = f"{MSL_API_BASE}{path}"
@@ -96,14 +97,14 @@ def _msl_cache_fetch(cache_key: str, path: str, project_dir: str) -> Any:
         with urllib.request.urlopen(req, timeout=30) as resp:
             data = json.loads(resp.read().decode("utf-8"))
     except urllib.error.HTTPError as e:
-        print(f"  [错误] MSL API 返回 HTTP {e.code}: {e.reason}"); return None
+        print(t("app.error", msg=f"MSL API HTTP {e.code}: {e.reason}")); return None
     except urllib.error.URLError as e:
-        print(f"  [错误] 网络请求失败: {e.reason}"); return None
+        print(t("app.error", msg=f"Network error: {e.reason}")); return None
     except (json.JSONDecodeError, OSError) as e:
-        print(f"  [错误] 响应解析失败: {e}"); return None
+        print(t("app.error", msg=f"Response parse failed: {e}")); return None
 
     if not isinstance(data, dict) or data.get("code") != 200:
-        print(f"  [错误] MSL API: {data.get('message', '异常')}"); return None
+        print(t("app.error", msg=data.get("message", "Abnormal"))); return None
     result = data.get("data")
     cache[cache_key] = {"cached_at": today, "data": result}
     _msl_save_cache(cache, project_dir)
@@ -111,20 +112,20 @@ def _msl_cache_fetch(cache_key: str, path: str, project_dir: str) -> Any:
 
 
 def _msl_request(path: str) -> Any:
-    """直接请求（无缓存），用于下载地址。"""
+    """Direct request (no cache), used for download URLs."""
     url = f"{MSL_API_BASE}{path}"
     try:
         req = urllib.request.Request(url, headers={"User-Agent": MSL_USER_AGENT})
         with urllib.request.urlopen(req, timeout=30) as resp:
             data = json.loads(resp.read().decode("utf-8"))
     except urllib.error.HTTPError as e:
-        print(f"  [错误] MSL API 返回 HTTP {e.code}: {e.reason}"); return None
+        print(t("app.error", msg=f"MSL API HTTP {e.code}: {e.reason}")); return None
     except urllib.error.URLError as e:
-        print(f"  [错误] 网络请求失败: {e.reason}"); return None
+        print(t("app.error", msg=f"Network error: {e.reason}")); return None
     except (json.JSONDecodeError, OSError) as e:
-        print(f"  [错误] 响应解析失败: {e}"); return None
+        print(t("app.error", msg=f"Response parse failed: {e}")); return None
     if not isinstance(data, dict) or data.get("code") != 200:
-        print(f"  [错误] MSL API: {data.get('message', '异常')}"); return None
+        print(t("app.error", msg=data.get("message", "Abnormal"))); return None
     return data.get("data")
 
 
@@ -142,15 +143,15 @@ def msl_get_download_url(server_type: str, version: str) -> Optional[dict]:
 
 
 # ---------------------------------------------------------------------------
-# 多线程下载
+# Multi-threaded download
 # ---------------------------------------------------------------------------
 
 _DEFAULT_DOWNLOAD_THREADS = 16
-_MIN_CHUNK_SIZE = 1 * 1024 * 1024  # 小于 1MB 的文件不做多线程
+_MIN_CHUNK_SIZE = 1 * 1024 * 1024
 
 
 def _check_range_support(url: str) -> tuple[bool, int]:
-    """检查服务器是否支持 Range 请求，返回 (支持?, 文件大小)。"""
+    """Check if server supports Range requests. Returns (supported?, file_size)."""
     try:
         req = urllib.request.Request(url, method="HEAD",
                                      headers={"User-Agent": MSL_USER_AGENT})
@@ -165,7 +166,7 @@ def _check_range_support(url: str) -> tuple[bool, int]:
 
 def _download_chunk(url: str, start: int, end: int, target_path: str,
                     shared: dict, lock: threading.Lock) -> bool:
-    """下载一个文件分块，直接写入目标文件的对应偏移位置。"""
+    """Download a chunk and write to the target file at the correct offset."""
     range_header = f"bytes={start}-{end}"
     req = urllib.request.Request(url, headers={
         "User-Agent": MSL_USER_AGENT,
@@ -188,7 +189,7 @@ def _download_chunk(url: str, start: int, end: int, target_path: str,
 
 
 def _download_with_progress(url: str, target_path: str, desc: str = "") -> bool:
-    """单线程下载（作为多线程的回退方案）。"""
+    """Single-thread download (fallback when multi-thread is not viable)."""
     try:
         req = urllib.request.Request(url, headers={"User-Agent": MSL_USER_AGENT})
         with urllib.request.urlopen(req, timeout=300) as resp:
@@ -210,57 +211,52 @@ def _download_with_progress(url: str, target_path: str, desc: str = "") -> bool:
                         bar = "\u2588" * filled + "\u2591" * (bar_width - filled)
                         print(f"    {desc} [{bar}] {pct * 100:5.1f}%", end="\r", flush=True)
                     else:
-                        print(f"    {desc} 已下载 {downloaded/1024/1024:.1f} MB...", end="\r", flush=True)
+                        print(f"    {desc} {downloaded/1024/1024:.1f} MB...", end="\r", flush=True)
         print()
         return True
     except (urllib.error.HTTPError, urllib.error.URLError, OSError) as e:
-        print(f"\n  [错误] 下载失败: {e}")
+        print(f"\n  {t('app.error', msg=f'Download failed: {e}')}")
         return False
 
 
 def multithreaded_download(url: str, target_path: str, desc: str = "",
                            num_threads: int = _DEFAULT_DOWNLOAD_THREADS) -> bool:
     """
-    多线程下载单个文件。
+    Multi-threaded file download.
 
-    自动检测服务器是否支持 Range 请求。支持时将文件切分为多块并发下载，
-    不支持或文件过小时回退到单线程。
-    失败的分块会自动重试最多 2 次。
+    Automatically detects if the server supports Range requests.
+    Falls back to single-thread if not supported or file is too small.
+    On chunk failure, retries with single-thread download.
     """
-    supports_range, file_size = _check_range_support(url)
+    # 先获取文件大小用于分块
+    _, file_size = _check_range_support(url)
 
-    # 回退条件：不支持 Range / 文件太小 / 无法获取大小
-    if not supports_range or file_size < _MIN_CHUNK_SIZE or file_size <= 0:
+    if file_size < _MIN_CHUNK_SIZE or file_size <= 0:
         return _download_with_progress(url, target_path, desc)
 
-    # 根据实际大小计算合理线程数（每个线程至少下载 _MIN_CHUNK_SIZE）
+    # 即使 HEAD 未报告 Range 支持，仍尝试多线程
+    #（部分 CDN 对 HEAD/GET 响应不一致，实际 GET 支持 Range）
     actual_threads = min(num_threads, max(1, file_size // _MIN_CHUNK_SIZE))
     if actual_threads <= 1:
         return _download_with_progress(url, target_path, desc)
 
     chunk_size = file_size // actual_threads
 
-    # 预分配文件空间
     os.makedirs(os.path.dirname(target_path) or ".", exist_ok=True)
     with open(target_path, "wb") as f:
         f.truncate(file_size)
 
-    # 构建分块偏移列表
     chunks: list[tuple[int, int]] = []
     for i in range(actual_threads):
         start = i * chunk_size
-        if i < actual_threads - 1:
-            end = start + chunk_size - 1
-        else:
-            end = file_size - 1
+        end = start + chunk_size - 1 if i < actual_threads - 1 else file_size - 1
         chunks.append((start, end))
 
-    # 共享进度状态
     shared: dict[str, Any] = {"downloaded": 0}
     lock = threading.Lock()
     bar_width = 30
 
-    print(f"    {desc} 多线程下载 ({actual_threads}线程)...")
+    print(f"    {desc} ({actual_threads} threads)...")
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=actual_threads) as executor:
         futures = [
@@ -269,7 +265,6 @@ def multithreaded_download(url: str, target_path: str, desc: str = "",
             for start, end in chunks
         ]
 
-        # 实时输出进度
         while not all(f.done() for f in futures):
             with lock:
                 downloaded = shared["downloaded"]
@@ -281,23 +276,21 @@ def multithreaded_download(url: str, target_path: str, desc: str = "",
                       f"({downloaded/1024/1024:.1f}/{file_size/1024/1024:.1f} MB)",
                       end="\r", flush=True)
             else:
-                print(f"    {desc} 已下载 {downloaded/1024/1024:.1f} MB...",
+                print(f"    {desc} {downloaded/1024/1024:.1f} MB...",
                       end="\r", flush=True)
             time.sleep(0.15)
 
-        # 检查各分块结果
-    failed_indices = [
-        i for i, f in enumerate(futures)
-        if f.exception() or f.result() is False
-    ]
-    if failed_indices:
-        try:
-            os.remove(target_path)
-        except OSError:
-            pass
-        # 回退到单线程下载
-        print(f"\n  [重试] 多线程分块下载失败，回退到单线程...")
-        return _download_with_progress(url, target_path, desc)
+        failed_indices = [
+            i for i, f in enumerate(futures)
+            if f.exception() or f.result() is False
+        ]
+        if failed_indices:
+            try:
+                os.remove(target_path)
+            except OSError:
+                pass
+            print(f"\n  {t('download.retry_fallback')}")
+            return _download_with_progress(url, target_path, desc)
 
     final_bar = "\u2588" * bar_width
     print(f"    {desc} [{final_bar}] 100.0%  "
@@ -306,7 +299,7 @@ def multithreaded_download(url: str, target_path: str, desc: str = "",
 
 
 def set_download_threads(count: int) -> None:
-    """设置全局默认下载线程数。"""
+    """Set the global default download thread count."""
     global _DEFAULT_DOWNLOAD_THREADS
     if count < 1:
         count = 1
@@ -314,63 +307,64 @@ def set_download_threads(count: int) -> None:
 
 
 # ---------------------------------------------------------------------------
-# 交互选择
+# Interactive selection
 # ---------------------------------------------------------------------------
 
 def _interactive_pick_server_type(categorized: dict) -> Optional[str]:
     all_servers: list[tuple[str, str]] = []
     for cat, lst in categorized.items():
-        label = _CATEGORY_LABELS.get(cat, cat)
+        label_key = _CATEGORY_LABELS.get(cat, cat)
         if not isinstance(lst, list):
             continue
         for sid in lst:
             if isinstance(sid, str):
-                all_servers.append((sid, label))
+                all_servers.append((sid, label_key))
     if not all_servers:
-        print("  [错误] 服务端列表为空"); return None
+        print(t("app.error", msg="Server list is empty")); return None
     print()
-    print("  请选择服务端类型：(MSL镜像源, https://www.mslmc.cn/)")
+    print(t("download.select_type"))
     print()
     current_cat = ""
     idx = 1
     index_map: list[tuple[int, str]] = []
-    for sid, cat in all_servers:
-        if cat != current_cat:
-            print(f"  [{cat}]")
-            current_cat = cat
+    for sid, cat_key in all_servers:
+        label = t(cat_key)
+        if label != current_cat:
+            print(f"  [{label}]")
+            current_cat = label
         print(f"      [{idx}] {_server_display_name(sid)}")
         index_map.append((idx, sid))
         idx += 1
     print()
     while True:
         try:
-            c = input(f"  请输入编号 (1-{len(index_map)}): ").strip()
+            c = input(t("download.select_version_prompt", max=len(index_map))).strip()
             n = int(c)
             for i, sid in index_map:
                 if i == n:
                     return sid
         except ValueError:
             pass
-        print(f"  无效选择。")
+        print(t("app.invalid_choice_short"))
 
 
 def _interactive_pick_version(versions: list[str], description: str) -> Optional[str]:
     if not versions:
-        print("  [错误] 没有可用版本"); return None
+        print(t("app.error", msg="No available versions")); return None
     print()
     if description:
         print(f"  {description}")
     print()
-    print(f"  可用版本（共 {len(versions)} 个），默认下载最新版：")
+    print(f"  {len(versions)} versions available, default is latest:")
     print()
     stable = [v for v in versions if not any(x in v.lower() for x in ("pre", "rc", "snapshot", "alpha", "beta"))]
     show = stable[:20] if stable else versions[:20]
     for i, ver in enumerate(show, 1):
-        print(f"  [{i}] {ver}{' ← 最新' if i == 1 else ''}")
-    print(f"  [L] 直接下载最新版 ({show[0]})")
+        print(f"  [{i}] {ver}{'  <- latest' if i == 1 else ''}")
+    print(f"  [L] Download latest ({show[0]})")
     print()
     while True:
-        c = input(f"  请输入编号 (1-{len(show)} 或 L): ").strip().lower()
+        c = input("  Enter number (1-{0} or L): ".format(len(show))).strip().lower()
         if c == "l":
             return show[0]
         try:
@@ -379,60 +373,59 @@ def _interactive_pick_version(versions: list[str], description: str) -> Optional
                 return show[idx]
         except ValueError:
             pass
-        print(f"  无效选择。")
+        print(t("app.invalid_choice_short"))
 
 
 def _prompt_post_download_config(server_name: str) -> dict:
     print()
-    print("  服务器下载完成，请配置运行时参数（直接回车使用默认值）：")
+    print(t("download.config_prompt"))
     print()
-    ji = input("  Java 路径（回车自动检测）: ").strip()
+    ji = input(t("download.config_java")).strip()
     java_path = ji if ji else None
     while True:
-        mi = input("  最小内存 [1G]: ").strip()
+        mi = input(t("download.config_min_mem", default="1G")).strip()
         if not mi:
             min_mem = "1G"; break
         if mi.upper().endswith(("G", "M")):
             min_mem = mi.upper(); break
-        print("  格式错误，请输入如 1G、2048M")
+        print(t("download.config_mem_invalid"))
     while True:
-        ma = input("  最大内存 [4G]: ").strip()
+        ma = input(t("download.config_max_mem", default="4G")).strip()
         if not ma:
             max_mem = "4G"; break
         if ma.upper().endswith(("G", "M")):
             max_mem = ma.upper(); break
-        print("  格式错误，请输入如 4G、4096M")
+        print(t("download.config_mem_invalid"))
     return {"java_path": java_path, "min_mem": min_mem, "max_mem": max_mem}
 
 
 def show_download_server_menu(servers_dir: str, project_dir: str) -> Optional[str]:
-    """交互式下载服务器界面。返回服务器目录路径，失败返回 None。"""
-    print(); print("  [下载] 正在获取可用服务端列表..."); print()
+    """Interactive server download UI. Returns server directory or None."""
+    print(); print(t("download.fetching_types")); print()
     categorized = msl_get_server_types(project_dir)
     if not categorized:
-        print("  [错误] 无法获取服务端列表"); return None
+        print(t("app.error", msg="Failed to get server type list")); return None
     server_id = _interactive_pick_server_type(categorized)
     if server_id is None:
         return None
 
-    print(f"  [下载] 正在获取 {_server_display_name(server_id)} 的版本列表...")
+    print(t("download.fetching_versions", name=_server_display_name(server_id)))
     version_data = msl_get_versions(server_id, project_dir)
     if not version_data:
-        print(f"  [错误] 无法获取版本信息"); return None
+        print(t("app.error", msg="Failed to get version info")); return None
     selected_version = _interactive_pick_version(version_data.get("versions", []), version_data.get("description", ""))
     if selected_version is None:
         return None
 
-    print(f"  [下载] 已选择: {_server_display_name(server_id)} {selected_version}")
-    print("  [下载] 正在获取下载地址...")
+    print(t("download.selected", name=_server_display_name(server_id), ver=selected_version))
+    print(t("download.fetching_url"))
     download_info = msl_get_download_url(server_id, selected_version)
     if not download_info:
-        print("  [错误] 无法获取下载地址（每小时限 30 次，每天 60 次）"); return None
+        print(t("download.url_failed")); return None
     url = download_info.get("url", "")
     if not url:
-        print("  [错误] 下载地址为空"); return None
+        print(t("download.url_empty")); return None
 
-    # 创建服务器目录
     server_name = f"{server_id}-{selected_version}"
     server_dir = os.path.join(servers_dir, server_name)
     counter = 1
@@ -446,12 +439,12 @@ def show_download_server_menu(servers_dir: str, project_dir: str) -> Optional[st
         jar_filename = f"{server_id}.jar"
     jar_path = os.path.join(server_dir, jar_filename)
 
-    print(f"  [下载] 正在下载 {_server_display_name(server_id)} {selected_version}")
-    print(f"         保存到: {jar_path}")
-    if not multithreaded_download(url, jar_path, desc="下载中"):
+    print(t("download.downloading", name=_server_display_name(server_id), ver=selected_version))
+    print(t("download.saving_to", path=jar_path))
+    if not multithreaded_download(url, jar_path, desc=_server_display_name(server_id)):
         shutil.rmtree(server_dir, ignore_errors=True); return None
     if not os.path.isfile(jar_path) or os.path.getsize(jar_path) == 0:
-        print("  [错误] 下载的文件无效")
+        print(t("download.invalid_file"))
         shutil.rmtree(server_dir, ignore_errors=True); return None
 
     post_cfg = _prompt_post_download_config(server_name)
@@ -462,8 +455,8 @@ def show_download_server_menu(servers_dir: str, project_dir: str) -> Optional[st
     }, server_dir)
 
     size_mb = os.path.getsize(jar_path) / 1024 / 1024
-    print(f"  [下载] 下载完成！({size_mb:.1f} MB)")
+    print(t("download.complete", size=size_mb))
     if download_info.get("sha256"):
-        print(f"          SHA256: {download_info['sha256']}")
-    print(f"          服务器目录: {server_dir}")
+        print(t("download.sha256", hash=download_info["sha256"]))
+    print(t("download.server_dir", dir=server_dir))
     return server_dir

@@ -9,7 +9,10 @@ import os
 import json
 import zipfile
 import shutil
+import glob
 from typing import Any, Optional
+
+from i18n import t
 
 
 DEFAULT_SERVER_CONFIG: dict[str, Any] = {
@@ -25,14 +28,14 @@ DEFAULT_SERVER_CONFIG: dict[str, Any] = {
 
 
 def ensure_servers_folder(storage_dir: str) -> str:
-    """确保 servers/ 文件夹存在，返回其绝对路径。"""
+    """Ensure servers/ folder exists, return its absolute path."""
     path = os.path.join(storage_dir, "servers")
     os.makedirs(path, exist_ok=True)
     return path
 
 
 def list_servers(servers_dir: str) -> list[dict[str, Any]]:
-    """扫描 servers/ 目录，返回所有有效服务器的配置列表。"""
+    """Scan servers/ directory and return all valid server configs."""
     servers: list[dict[str, Any]] = []
     if not os.path.isdir(servers_dir):
         return servers
@@ -59,7 +62,7 @@ def list_servers(servers_dir: str) -> list[dict[str, Any]]:
 
 
 def load_server_config(server_dir: str) -> dict[str, Any]:
-    """加载指定服务器目录的 .server.json。"""
+    """Load .server.json from a server directory."""
     config_path = os.path.join(server_dir, ".server.json")
     cfg = dict(DEFAULT_SERVER_CONFIG)
     if os.path.isfile(config_path):
@@ -74,7 +77,7 @@ def load_server_config(server_dir: str) -> dict[str, Any]:
 
 
 def save_server_config(config: dict[str, Any], server_dir: str) -> None:
-    """保存服务器配置到 .server.json。"""
+    """Save server config to .server.json."""
     merged = dict(DEFAULT_SERVER_CONFIG)
     merged.update(config)
     for key in ("_path", "_config_path"):
@@ -86,30 +89,30 @@ def save_server_config(config: dict[str, Any], server_dir: str) -> None:
 
 
 # ---------------------------------------------------------------------------
-# 导入压缩包
+# Import from zip
 # ---------------------------------------------------------------------------
 
 def _prompt_zip_path() -> Optional[str]:
-    """交互式询问压缩包路径。"""
+    """Prompt for a zip file path interactively."""
     print()
-    print("  请输入压缩包路径（支持拖拽文件到窗口）：")
+    print(t("import.prompt"))
     raw = input("  > ").strip()
     if not raw:
         return None
     raw = raw.strip('"')
     path = os.path.abspath(raw)
     if not os.path.isfile(path):
-        print(f"  [错误] 文件不存在: {path}")
+        print(t("import.file_missing", path=path))
         return None
     ext = os.path.splitext(path)[1].lower()
     if ext not in (".zip", ".jar"):
-        print(f"  [错误] 不支持的文件格式: {ext}，仅支持 .zip")
+        print(t("import.unsupported_format", ext=ext))
         return None
     return path
 
 
 def _find_first_level_jars(directory: str) -> list[str]:
-    """在第一层查找 .jar，无则检查唯一子目录。"""
+    """Find .jar files at the first level, or inside a single subdirectory."""
     jars: list[str] = []
     try:
         entries = sorted(os.listdir(directory))
@@ -135,26 +138,27 @@ def _find_first_level_jars(directory: str) -> list[str]:
 
 
 def _pick_jar_interactive(jars: list[str]) -> str:
-    """多 jar 时让用户选择。"""
+    """Let user pick from multiple jars interactively."""
     print()
-    print(f"  发现 {len(jars)} 个 .jar 文件，请选择服务端核心：")
+    print(t("import.select_jar", count=len(jars)))
     print()
     for i, j in enumerate(jars, 1):
         print(f"  [{i}] {j}")
     print()
     while True:
         try:
-            choice = input(f"  请选择 (1-{len(jars)}): ").strip()
+            choice = input(t("import.pick_prompt", max=len(jars))).strip()
             idx = int(choice) - 1
             if 0 <= idx < len(jars):
                 return jars[idx]
         except ValueError:
             pass
-        print(f"  无效选择。")
+        print(t("app.invalid_choice_short"))
 
 
 def _extract_with_progress(zip_path: str, target_dir: str) -> None:
-    """解压 zip 并显示进度条。"""
+    """Extract zip with progress bar and zip slip protection."""
+    target_abs = os.path.abspath(target_dir)
     with zipfile.ZipFile(zip_path, "r") as zf:
         members = zf.infolist()
         total = sum(m.file_size for m in members if not m.is_dir())
@@ -162,19 +166,24 @@ def _extract_with_progress(zip_path: str, target_dir: str) -> None:
         bar_width = 30
         print()
         for member in members:
-            zf.extract(member, target_dir)
+            # Zip slip protection
+            member_path = os.path.abspath(os.path.join(target_abs, member.filename))
+            if not member_path.startswith(target_abs + os.sep):
+                print(f"\n    [skip] path traversal blocked: {member.filename}")
+                continue
+            zf.extract(member, target_abs)
             if not member.is_dir():
                 extracted += member.file_size
             if total > 0:
                 pct = extracted / total
                 filled = int(bar_width * pct)
                 bar = "\u2588" * filled + "\u2591" * (bar_width - filled)
-                print(f"    \u89e3\u538b [{bar}] {pct * 100:5.1f}%", end="\r", flush=True)
+                print(f"    [{bar}] {pct * 100:5.1f}%", end="\r", flush=True)
         print()
 
 
 # ---------------------------------------------------------------------------
-# 服务端类型分类
+# Server type classification
 # ---------------------------------------------------------------------------
 
 _PLUGIN_IDS = {"paper", "purpur", "leaf", "leaves", "spigot", "bukkit", "folia",
@@ -186,7 +195,6 @@ _VANILLA_IDS = {"vanilla", "vanilla-snapshot"}
 _PROXY_IDS = {"velocity", "bungeecord", "lightfall", "travertine"}
 _BEDROCK_IDS = {"bedrock-server", "nukkitx"}
 
-# jar 文件名到类型的映射（用于导入的服务器）
 _JAR_HINTS: dict[str, str] = {
     "paper": "plugin", "purpur": "plugin", "leaves": "plugin", "spigot": "plugin",
     "bukkit": "plugin", "folia": "plugin", "pufferfish": "plugin",
@@ -200,17 +208,15 @@ _JAR_HINTS: dict[str, str] = {
 
 def classify_server_type(server_cfg: dict, server_dir: str) -> str:
     """
-    判断服务器类型。返回以下之一：
+    Detect server type. Returns one of:
     "plugin", "mod", "hybrid", "vanilla", "proxy", "bedrock", "unknown"
     """
     name = (server_cfg.get("name") or "").lower()
     jar = (server_cfg.get("jar") or "").lower()
 
-    # 从 name 提取可能的 server_id（格式：paper-1.21.1）
     parts = name.split("-")
     candidate = parts[0] if parts else ""
 
-    # 查分类表
     if candidate in _PLUGIN_IDS:
         return "plugin"
     if candidate in _HYBRID_IDS:
@@ -224,7 +230,6 @@ def classify_server_type(server_cfg: dict, server_dir: str) -> str:
     if candidate in _BEDROCK_IDS:
         return "bedrock"
 
-    # 从 jar 文件名猜测
     for hint, stype in _JAR_HINTS.items():
         if hint in jar:
             return stype
@@ -233,10 +238,10 @@ def classify_server_type(server_cfg: dict, server_dir: str) -> str:
 
 
 def import_server_from_zip(zip_path: str, servers_dir: str, project_dir: str) -> Optional[str]:
-    """从压缩包导入服务器。返回服务器目录路径，失败返回 None。"""
+    """Import a server from a zip archive. Returns server directory or None."""
     zip_path = os.path.abspath(zip_path)
     if not os.path.isfile(zip_path):
-        print(f"  [错误] 文件不存在: {zip_path}")
+        print(t("import.file_missing", path=zip_path))
         return None
 
     temp_dir = os.path.join(project_dir, ".import_temp")
@@ -246,21 +251,22 @@ def import_server_from_zip(zip_path: str, servers_dir: str, project_dir: str) ->
         os.makedirs(temp_dir)
 
         zip_name = os.path.basename(zip_path)
-        print(f"  [导入] 正在解压 {zip_name}")
+        print(t("import.extracting", name=zip_name))
         try:
             _extract_with_progress(zip_path, temp_dir)
         except zipfile.BadZipFile:
-            print(f"  [错误] 文件不是有效的压缩包: {zip_name}")
+            print(t("import.bad_zip", name=zip_name))
             return None
 
         jars = _find_first_level_jars(temp_dir)
         if not jars:
-            print("  [错误] 压缩包第一层未找到任何 .jar 文件。")
+            print(t("import.no_jar"))
             return None
 
         selected = jars[0] if len(jars) == 1 else _pick_jar_interactive(jars)
         jar_name = os.path.basename(selected)
-        print(f"  [导入] {'自动识别' if len(jars) == 1 else '已选择'}核心: {selected}")
+        auto = len(jars) == 1
+        print(t("import.auto_detect", detected="Auto-detected" if auto else "Selected", jar=selected))
 
         base_name = os.path.splitext(os.path.basename(zip_path))[0]
         server_dir = os.path.join(servers_dir, base_name)
@@ -291,8 +297,8 @@ def import_server_from_zip(zip_path: str, servers_dir: str, project_dir: str) ->
         }
         save_server_config(server_config, server_dir)
 
-        print(f"  [导入] 服务器 \"{base_name}\" 导入成功！")
-        print(f"         目录: {server_dir}")
+        print(t("import.success", name=base_name))
+        print(t("import.dir_info", dir=server_dir))
         return server_dir
     finally:
         if os.path.isdir(temp_dir):
@@ -300,31 +306,27 @@ def import_server_from_zip(zip_path: str, servers_dir: str, project_dir: str) ->
 
 
 # ---------------------------------------------------------------------------
-# 导出服务器
+# Export server
 # ---------------------------------------------------------------------------
 
 EXPORT_CATEGORIES: list[tuple[str, str, list[str], bool]] = [
-    # (key, label, patterns, default_selected)
-    ("world", "世界数据 (world/ nether/ end)", ["world", "world_nether", "world_the_end"], True),
-    ("datapacks", "数据包 (datapacks)", ["world/datapacks"], True),
-    ("plugins", "插件 (jar 文件)", ["plugins/*.jar"], True),
-    ("plugindata", "插件数据 (配置文件夹)", ["plugins/*/"], True),
-    ("playerdata", "玩家数据 (playerdata/stats/白名单等)", ["world/playerdata", "world/stats", "world/advancements",
-                                                  "usercache.json", "ops.json", "whitelist.json",
-                                                  "banned-players.json", "banned-ips.json"], False),
-    ("icon", "服务器图标", ["server-icon.png"], True),
-    ("config", "服务器配置 (server.properties/yml/eula)", ["server.properties", "bukkit.yml", "spigot.yml",
-                                                        "paper.yml", "pufferfish.yml", "purpur.yml",
-                                                        "eula.txt", "commands.yml", "permissions.yml",
-                                                        "help.yml", ".server.json"], True),
+    ("world",     "export.category.world",     ["world", "world_nether", "world_the_end"], True),
+    ("datapacks", "export.category.datapacks",   ["world/datapacks"], True),
+    ("plugins",   "export.category.plugins",    ["plugins/*.jar"], True),
+    ("plugindata","export.category.plugindata",  ["plugins/*/"], True),
+    ("playerdata","export.category.playerdata",  ["world/playerdata", "world/stats", "world/advancements",
+                                                   "usercache.json", "ops.json", "whitelist.json",
+                                                   "banned-players.json", "banned-ips.json"], False),
+    ("icon",      "export.category.icon",       ["server-icon.png"], True),
+    ("config",    "export.category.config",     ["server.properties", "bukkit.yml", "spigot.yml",
+                                                   "paper.yml", "pufferfish.yml", "purpur.yml",
+                                                   "eula.txt", "commands.yml", "permissions.yml",
+                                                   "help.yml", ".server.json"], True),
 ]
 
 
 def _export_collect_files(server_dir: str, selected: set[str]) -> list[tuple[str, str]]:
-    """
-    根据选中的分类收集文件。
-    返回 [(arcname, abs_path)]，arcname 相对于服务器目录。
-    """
+    """Collect files based on selected categories. Returns [(arcname, abs_path)]."""
     files: list[tuple[str, str]] = []
     seen = set()
 
@@ -332,40 +334,29 @@ def _export_collect_files(server_dir: str, selected: set[str]) -> list[tuple[str
         if key not in selected:
             continue
         for pattern in patterns:
-            matched = False
             full_pattern = os.path.join(server_dir, pattern)
 
             if "*" not in pattern:
-                # 精确路径
                 if os.path.isfile(full_pattern):
-                    rel = os.path.relpath(full_pattern, server_dir)
-                    norm = rel.replace("\\", "/")
-                    if norm not in seen:
-                        seen.add(norm)
-                        files.append((norm, full_pattern))
-                        matched = True
+                    rel = os.path.relpath(full_pattern, server_dir).replace("\\", "/")
+                    if rel not in seen:
+                        seen.add(rel)
+                        files.append((rel, full_pattern))
                 elif os.path.isdir(full_pattern):
                     for root, dirs, fnames in os.walk(full_pattern):
                         for fn in fnames:
                             fp = os.path.join(root, fn)
-                            rel = os.path.relpath(fp, server_dir)
-                            norm = rel.replace("\\", "/")
-                            if norm not in seen:
-                                seen.add(norm)
-                                files.append((norm, fp))
-                    matched = True
+                            rel = os.path.relpath(fp, server_dir).replace("\\", "/")
+                            if rel not in seen:
+                                seen.add(rel)
+                                files.append((rel, fp))
             else:
-                # glob 模式
-                import glob as glob_mod
-                for match in glob_mod.glob(full_pattern, recursive=False):
+                for match in glob.glob(full_pattern, recursive=False):
                     if os.path.isfile(match):
-                        rel = os.path.relpath(match, server_dir)
-                        norm = rel.replace("\\", "/")
-                        if norm not in seen:
-                            seen.add(norm)
-                            files.append((norm, match))
-                    matched = True
-                # 目录模式：plugins/*/ → 匹配子目录
+                        rel = os.path.relpath(match, server_dir).replace("\\", "/")
+                        if rel not in seen:
+                            seen.add(rel)
+                            files.append((rel, match))
                 if pattern.endswith("/*/"):
                     base_dir = os.path.join(server_dir, pattern[:-2])
                     if os.path.isdir(base_dir):
@@ -375,30 +366,19 @@ def _export_collect_files(server_dir: str, selected: set[str]) -> list[tuple[str
                                 for root, dirs, fnames in os.walk(sub):
                                     for fn in fnames:
                                         fp = os.path.join(root, fn)
-                                        rel = os.path.relpath(fp, server_dir)
-                                        norm = rel.replace("\\", "/")
-                                        if norm not in seen:
-                                            seen.add(norm)
-                                            files.append((norm, fp))
-                                        matched = True
-
+                                        rel = os.path.relpath(fp, server_dir).replace("\\", "/")
+                                        if rel not in seen:
+                                            seen.add(rel)
+                                            files.append((rel, fp))
     return files
 
 
 def export_server_to_zip(server_dir: str, output_path: str,
                           selected_categories: set[str]) -> Optional[str]:
-    """
-    将服务器导出为 zip 文件。
-    
-    server_dir: 服务器目录
-    output_path: 目标 zip 路径
-    selected_categories: 选中的分类 key 集合
-    
-    返回 output_path，失败返回 None。
-    """
+    """Export a server to a zip archive. Returns output_path or None."""
     files = _export_collect_files(server_dir, selected_categories)
     if not files:
-        print("  [错误] 所选分类中没有找到任何文件。")
+        print(t("export.no_files"))
         return None
 
     os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
@@ -414,12 +394,12 @@ def export_server_to_zip(server_dir: str, output_path: str,
                     pct = i / total
                     filled = int(bar_width * pct)
                     bar = "\u2588" * filled + "\u2591" * (bar_width - filled)
-                    print(f"    导出 [{bar}] {pct * 100:5.1f}%  ({i}/{total})",
+                    print(t("export.progress", bar=bar, pct=pct * 100, i=i, total=total),
                           end="\r", flush=True)
         print()
         size_mb = os.path.getsize(output_path) / 1024 / 1024
-        print(f"  [导出] 成功: {output_path} ({size_mb:.1f} MB, {total} 个文件)")
+        print(t("export.success", path=output_path, size=size_mb, files=total))
         return output_path
     except (OSError, zipfile.BadZipFile) as e:
-        print(f"\n  [错误] 导出失败: {e}")
+        print(t("export.failed", msg=str(e)))
         return None

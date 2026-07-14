@@ -13,7 +13,8 @@ import urllib.error
 import urllib.error
 from typing import Any, Optional
 
-USER_AGENT = "MSTL/1.0 (mod downloader)"
+from constants import USER_AGENT, MODRINTH_BASE, CURSEFORGE_OFFICIAL, CURSEFORGE_PROXY
+
 API_TIMEOUT = 15
 
 # 模组加载器名称 <-> CurseForge 枚举值
@@ -67,8 +68,6 @@ def _fetch_json(url: str, headers: Optional[dict] = None, timeout: int = API_TIM
 # ---------------------------------------------------------------------------
 # Modrinth
 # ---------------------------------------------------------------------------
-
-MODRINTH_BASE = "https://api.modrinth.com/v2"
 
 
 def modrinth_search(query: str, mc_version: str = "", loader: str = "",
@@ -158,9 +157,11 @@ def modrinth_download(project_id: str, target_dir: str, name: str,
     """
     from download_msl import multithreaded_download
 
+    from i18n import t
+
     info = modrinth_get_suitable_version(project_id, mc_version, loader)
     if not info:
-        print("  [错误] 未找到匹配当前版本的模组文件")
+        print(t("mod.no_version_match"))
         return None
     _, dl_url, ver_name = info
 
@@ -169,7 +170,7 @@ def modrinth_download(project_id: str, target_dir: str, name: str,
     filename = "".join(c if c.isalnum() or c in "._-+" else "_" for c in filename)
     target_path = os.path.join(target_dir, filename)
 
-    if multithreaded_download(dl_url, target_path, desc=f"下载 {name}"):
+    if multithreaded_download(dl_url, target_path, desc=f"Mod: {name}"):
         return filename
     return None
 
@@ -292,16 +293,17 @@ def curseforge_download(mod_id: str, target_dir: str, name: str,
     """
     from download_msl import multithreaded_download
 
+    from i18n import t
     info = curseforge_get_download_url(mod_id, mc_version, loader)
     if not info:
-        print("  [错误] 未找到匹配当前版本的模组文件")
+        print(t("mod.no_version_match"))
         return None
     filename, dl_url, _ = info
 
     target_path = os.path.join(target_dir, filename)
 
     # CDN 下载无需 API key
-    if multithreaded_download(dl_url, target_path, desc=f"下载 {name}"):
+    if multithreaded_download(dl_url, target_path, desc=f"Mod: {name}"):
         return filename
     return None
 

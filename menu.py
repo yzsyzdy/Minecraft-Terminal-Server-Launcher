@@ -1,5 +1,5 @@
 """
-交互式菜单：服务器列表选择、无服务器时的导入/下载引导、插件/模组管理。
+Interactive menus: main menu, server list, import/download/export guide, plugin/mod management.
 """
 
 import sys
@@ -7,8 +7,9 @@ import os
 import shutil
 from typing import Any, Optional
 
-from config import load_config
 from clear import clear_screen
+from i18n import t
+from config import load_config
 from server_manager import (
     _prompt_zip_path,
     import_server_from_zip,
@@ -21,11 +22,11 @@ from server_manager import (
 
 
 # ---------------------------------------------------------------------------
-# 通用 jar 管理
+# Generic jar management utilities
 # ---------------------------------------------------------------------------
 
 def _list_jars(directory: str) -> tuple[list[str], list[str]]:
-    """扫描目录，返回 (启用的 .jar 文件名列表, 禁用的 .jar.disabled 文件名列表)。"""
+    """Scan directory, return (enabled .jar names, disabled .jar.disabled names)."""
     enabled: list[str] = []
     disabled: list[str] = []
     if not os.path.isdir(directory):
@@ -47,93 +48,93 @@ def _list_jars(directory: str) -> tuple[list[str], list[str]]:
 
 
 def _delete_jar(directory: str) -> None:
-    """交互式删除 jar 文件。"""
+    """Interactively delete a jar file."""
     enabled, disabled = _list_jars(directory)
     if not enabled and not disabled:
-        print("  没有文件可删除。")
-        input("  按 Enter 返回...")
+        print(t("menu.plugin.nothing_delete"))
+        input(t("app.press_enter"))
         return
-    target = input("  输入要删除的文件名: ").strip()
+    target = input(t("menu.plugin.enter_filename")).strip()
     if not target:
         return
     full_path = os.path.join(directory, target)
     if not os.path.isfile(full_path):
-        print(f"  未找到文件: {target}")
-        input("  按 Enter 返回...")
+        print(t("menu.plugin.add_file_missing", path=target))
+        input(t("app.press_enter"))
         return
-    confirm = input(f"  确认删除 {target} ? (y/N): ").strip().lower()
+    confirm = input(t("menu.plugin.confirm_delete", name=target)).strip().lower()
     if confirm == "y":
         try:
             os.remove(full_path)
-            print(f"  已删除: {target}")
+            print(t("menu.plugin.deleted", name=target))
         except OSError as e:
-            print(f"  删除失败: {e}")
+            print(t("menu.plugin.delete_failed", msg=str(e)))
     else:
-        print("  已取消。")
-    input("  按 Enter 返回...")
+        print(t("menu.plugin.cancelled"))
+    input(t("app.press_enter"))
 
 
 def _toggle_jar(directory: str) -> None:
-    """交互式禁用/启用 jar 文件（.jar <-> .jar.disabled）。"""
+    """Interactively disable/enable a jar (.jar <-> .jar.disabled)."""
     enabled, disabled = _list_jars(directory)
     if not enabled and not disabled:
-        print("  没有文件可操作。")
-        input("  按 Enter 返回...")
+        print(t("menu.plugin.nothing_toggle"))
+        input(t("app.press_enter"))
         return
-    target = input("  输入文件名: ").strip()
+    target = input(t("menu.plugin.enter_toggle_file")).strip()
     if not target:
         return
     full_path = os.path.join(directory, target)
     if not os.path.isfile(full_path):
-        print(f"  未找到文件: {target}")
-        input("  按 Enter 返回...")
+        print(t("menu.plugin.add_file_missing", path=target))
+        input(t("app.press_enter"))
         return
     if target.endswith(".disabled"):
         new_name = target[:-9]
         if new_name == target:
-            print("  无法识别状态。")
-            input("  按 Enter 返回...")
+            print(t("menu.plugin.state_unrecognized"))
+            input(t("app.press_enter"))
             return
         try:
             os.rename(full_path, os.path.join(directory, new_name))
-            print(f"  已启用: {new_name}")
+            print(t("menu.plugin.enabled", name=new_name))
         except OSError as e:
-            print(f"  操作失败: {e}")
+            print(t("menu.plugin.toggle_failed", msg=str(e)))
     else:
         try:
             os.rename(full_path, os.path.join(directory, target + ".disabled"))
-            print(f"  已禁用: {target + '.disabled'}")
+            print(t("menu.plugin.disabled", name=target + ".disabled"))
         except OSError as e:
-            print(f"  操作失败: {e}")
-    input("  按 Enter 返回...")
+            print(t("menu.plugin.toggle_failed", msg=str(e)))
+    input(t("app.press_enter"))
 
 
 def _add_jar_from_file(directory: str) -> None:
-    """交互式导入本地 jar 文件。"""
+    """Interactively import a local jar file."""
     print()
-    print("  请输入 jar 文件路径（支持拖拽）：")
+    print(t("menu.plugin.add_prompt"))
     jar_path = input("  > ").strip().strip('"')
     if not jar_path:
         return
     jar_abs = os.path.abspath(jar_path)
     if not os.path.isfile(jar_abs):
-        print(f"  文件不存在: {jar_abs}")
-        input("  按 Enter 返回...")
+        print(t("menu.plugin.add_file_missing", path=jar_abs))
+        input(t("app.press_enter"))
         return
     if not jar_abs.lower().endswith(".jar"):
-        print("  文件不是 .jar 格式。")
-        input("  按 Enter 返回...")
+        print(t("menu.plugin.add_not_jar"))
+        input(t("app.press_enter"))
         return
     try:
         shutil.copy2(jar_abs, directory)
-        print(f"  已导入: {os.path.basename(jar_abs)}")
+        print(t("menu.plugin.add_imported", name=os.path.basename(jar_abs)))
     except OSError as e:
-        print(f"  复制失败: {e}")
-    input("  按 Enter 返回...")
+        print(t("menu.plugin.add_copy_failed", msg=str(e)))
+    input(t("app.press_enter"))
 
 
 # ---------------------------------------------------------------------------
-# 插件管理
+# Plugin management
 # ---------------------------------------------------------------------------
 
 def _get_plugins_dir(server_dir: str) -> str:
@@ -141,16 +142,16 @@ def _get_plugins_dir(server_dir: str) -> str:
 
 
 def _search_and_download_plugin(server_name: str, plugins_dir: str) -> None:
-    """搜索插件并下载。自动查询 SpigotMC、Modrinth、Hangar，按下载量排序。"""
+    """Search and download plugins from SpigotMC, Modrinth, Hangar, sorted by downloads."""
     clear_screen()
     from plugin_sources import search_all, download_plugin
 
     print()
-    query = input("  请输入插件名称或关键词: ").strip()
+    query = input(t("search.query_plugin")).strip()
     if not query:
         return
 
-    print(f"  [搜索] 正在查询 SpigotMC + Modrinth + Hangar ...")
+    print(t("search.searching_plugins"))
     src_results = search_all(query, limit=5)
 
     flat: list[tuple[int, str, Any]] = []
@@ -161,52 +162,56 @@ def _search_and_download_plugin(server_name: str, plugins_dir: str) -> None:
     flat.sort(key=lambda x: x[0], reverse=True)
 
     if not flat:
-        print("  未找到匹配的插件。")
-        input("  按 Enter 返回...")
+        print(t("search.no_results", type="plugin"))
+        input(t("app.press_enter"))
         return
 
     print()
-    print(f"  找到 {len(flat)} 个结果（按下载量排序）：")
+    print(t("search.results_found", count=len(flat)))
     print()
     for i, (dl, src, r) in enumerate(flat, 1):
         nm = r.get("name", "?")
         author = r.get("author", "?")
         desc = (r.get("description") or "")[:56]
         dl_str = f"{dl:,}" if dl >= 1000 else str(dl)
-        print(f"  [{i:2d}] [{src:9s}] {nm}")
-        print(f"        作者: {author}  |  下载: {dl_str}")
+        print(t("search.result_line", i=i, src=src, name=nm))
+        print(t("search.result_detail", author=author, dl=dl_str))
         if desc:
-            print(f"        {desc}")
+            print(t("search.result_desc", desc=desc))
         print()
 
     while True:
         try:
-            c = input(f"  输入编号下载 (1-{len(flat)}, 0 返回): ").strip()
+            c = input(t("search.download_prompt", max=len(flat))).strip()
             if c == "0":
                 return
             idx = int(c) - 1
             if 0 <= idx < len(flat):
                 _, src_label, result = flat[idx]
-                print(f"  [下载] 正在从 {src_label} 下载 {result['name']} ...")
+                print(t("search.downloading", src=src_label, name=result["name"]))
                 filename = download_plugin(result, plugins_dir)
                 if filename:
-                    print(f"  [下载] 已保存: {filename}")
+                    print(t("search.download_saved", name=filename))
                 else:
-                    print(f"  [错误] 下载失败，可能需要手动下载。")
-                input("  按 Enter 返回...")
+                    print(t("search.download_failed"))
+                input(t("app.press_enter"))
                 return
         except ValueError:
             pass
-        print("  无效选择。")
+        print(t("app.invalid_choice_short"))
 
+
+# ---------------------------------------------------------------------------
+# Generic jar management menu
+# ---------------------------------------------------------------------------
 
 def _manage_jars_menu(
     name: str,
     directory: str,
-    header: str,
-    search_fn: Any,
+    label: str,
+    search_fn: Optional[callable],
 ) -> None:
-    """通用的插件/模组管理菜单。"""
+    """Generic plugin/mod management menu."""
     os.makedirs(directory, exist_ok=True)
 
     while True:
@@ -214,27 +219,27 @@ def _manage_jars_menu(
         total = len(enabled) + len(disabled)
         clear_screen()
         print()
-        print(f"  [{header}] 服务器: {name}")
-        print(f"  目录: {directory}")
+        print(f"  [{label}] {name}")
+        print(t("menu.plugin.dir", dir=directory))
         print()
         if total == 0:
-            print("  尚未安装任何文件。")
+            print(t("menu.plugin.empty"))
         else:
-            print(f"  共 {total} 个：")
+            print(t("menu.plugin.count", count=total))
             print()
             for p in enabled:
                 print(f"      [E] {p}")
             for p in disabled:
                 print(f"      [D] {p}")
             print()
-        print("  [E] = 启用  [D] = 已禁用")
+        print("  [E] = Enabled  [D] = Disabled")
         print()
-        print("  [1] 删除")
-        print("  [2] 禁用/启用")
-        print("  [3] 添加")
-        print("  [0] 返回")
+        print(t("menu.plugin.delete", n=1))
+        print(t("menu.plugin.toggle", n=2))
+        print(t("menu.plugin.add", n=3))
+        print(t("menu.plugin.back", n=0))
         print()
-        choice = input("  请选择 (0-3): ").strip()
+        choice = input(t("menu.plugin.prompt")).strip()
 
         if choice == "0":
             return
@@ -245,14 +250,14 @@ def _manage_jars_menu(
         elif choice == "3":
             while True:
                 print()
-                print(f"  [添加{header}] 服务器: {name}")
+                print(f"  [Add {label}] {name}")
                 print()
-                print("  [1] 导入 jar 文件")
+                print(t("menu.plugin.add_import", n=1))
                 if search_fn:
-                    print("  [2] 搜索下载")
-                print("  [0] 返回")
+                    print(t("menu.plugin.add_search", n=2))
+                print(t("menu.plugin.back", n=0))
                 print()
-                sub = input("  请选择 (0-2): ").strip()
+                sub = input("  " + t("menu.main.prompt", max=2)).strip()
                 if sub == "0":
                     break
                 elif sub == "1":
@@ -260,25 +265,25 @@ def _manage_jars_menu(
                 elif sub == "2" and search_fn:
                     search_fn()
                 else:
-                    print("  无效选择。")
+                    print(t("app.invalid_choice_short"))
         else:
-            print("  无效选择。")
+            print(t("app.invalid_choice_short"))
 
 
 def _show_plugin_menu(server_cfg: dict, server_dir: str) -> None:
-    """插件管理菜单。"""
+    """Plugin management menu."""
     name = server_cfg.get("name", "?")
     plugins_dir = _get_plugins_dir(server_dir)
     _manage_jars_menu(
         name=name,
         directory=plugins_dir,
-        header="插件管理",
+        label=t("menu.plugin.header"),
         search_fn=lambda: _search_and_download_plugin(name, plugins_dir),
     )
 
 
 # ---------------------------------------------------------------------------
-# 模组管理
+# Mod management
 # ---------------------------------------------------------------------------
 
 def _get_mods_dir(server_dir: str) -> str:
@@ -287,16 +292,15 @@ def _get_mods_dir(server_dir: str) -> str:
 
 def _search_and_download_mod(name: str, mods_dir: str,
                               mc_version: str, loader: str) -> None:
-    """搜索模组并下载，自动按服务器版本和加载器过滤。"""
+    """Search and download mods from Modrinth and CurseForge, filtered by version/loader."""
     clear_screen()
     from mod_sources import search_all_mods, download_mod, set_curseforge_api_key
 
     print()
-    query = input("  请输入模组名称或关键词: ").strip()
+    query = input(t("search.query_mod")).strip()
     if not query:
         return
 
-    # 通过向上查找 config.json 来确定项目目录
     def _find_project_dir(path: str) -> str:
         current = os.path.abspath(path)
         while True:
@@ -313,23 +317,23 @@ def _search_and_download_mod(name: str, mods_dir: str,
         set_curseforge_api_key(cf_key)
 
     version_info = f"{loader} {mc_version}" if mc_version else loader
-    print(f"  [搜索] 正在查询 Modrinth + CurseForge（过滤: {version_info}）...")
+    print(t("search.searching_mods", info=version_info))
     src_results = search_all_mods(query, mc_version, loader, limit=10)
 
     is_fallback = src_results.pop("_fallback", False)
 
     src_used = list(src_results.keys())
     if not src_used:
-        print(f"  未找到匹配的模组。")
+        print(t("search.no_results", type="mod"))
         if not cf_key:
-            print("  提示：如需搜索 CurseForge，请在 config.json 中配置 curseforge_api_key")
-        input("  按 Enter 返回...")
+            print(t("search.curseforge_hint"))
+        input(t("app.press_enter"))
         return
 
     if not cf_key:
-        print("  提示：仅搜索了 Modrinth（未配置 CurseForge API key）")
+        print(t("search.modrinth_only"))
     if is_fallback:
-        print(f"  [提示] 在当前版本范围未找到足够结果，已自动放宽搜索范围。")
+        print(t("search.fallback_hint"))
 
     flat: list[tuple[int, str, dict]] = []
     for label, items in src_results.items():
@@ -339,42 +343,42 @@ def _search_and_download_mod(name: str, mods_dir: str,
     flat.sort(key=lambda x: x[0], reverse=True)
 
     print()
-    print(f"  找到 {len(flat)} 个结果（按下载量排序）：")
+    print(t("search.results_found", count=len(flat)))
     print()
     for i, (dl, src, r) in enumerate(flat, 1):
         nm = r.get("name", "?")
         author = r.get("author", "?")
         desc = (r.get("description") or "")[:60]
         dl_str = f"{dl:,}" if dl >= 1000 else str(dl)
-        print(f"  [{i:2d}] [{src:10s}] {nm}")
-        print(f"        作者: {author}  |  下载: {dl_str}")
+        print(t("search.result_line", i=i, src=src, name=nm))
+        print(t("search.result_detail", author=author, dl=dl_str))
         if desc:
-            print(f"        {desc}")
+            print(t("search.result_desc", desc=desc))
         print()
 
     while True:
         try:
-            c = input(f"  输入编号下载 (1-{len(flat)}, 0 返回): ").strip()
+            c = input(t("search.download_prompt", max=len(flat))).strip()
             if c == "0":
                 return
             idx = int(c) - 1
             if 0 <= idx < len(flat):
                 _, src_label, result = flat[idx]
-                print(f"  [下载] 正在从 {src_label} 下载 {result['name']} ...")
+                print(t("search.downloading", src=src_label, name=result["name"]))
                 filename = download_mod(result, mods_dir, mc_version, loader)
                 if filename:
-                    print(f"  [下载] 已保存: {filename}")
+                    print(t("search.download_saved", name=filename))
                 else:
-                    print(f"  [错误] 下载失败，可能需要手动下载。")
-                input("  按 Enter 返回...")
+                    print(t("search.download_failed"))
+                input(t("app.press_enter"))
                 return
         except ValueError:
             pass
-        print("  无效选择。")
+        print(t("app.invalid_choice_short"))
 
 
 def _show_mod_menu(server_cfg: dict, server_dir: str) -> None:
-    """模组管理菜单。"""
+    """Mod management menu."""
     name = server_cfg.get("name", "?")
     mc_version = server_cfg.get("mc_version", "")
     from mod_sources import extract_mod_loader
@@ -384,17 +388,17 @@ def _show_mod_menu(server_cfg: dict, server_dir: str) -> None:
     _manage_jars_menu(
         name=name,
         directory=mods_dir,
-        header="模组管理",
+        label=t("menu.mod.header"),
         search_fn=lambda: _search_and_download_mod(name, mods_dir, mc_version, loader),
     )
 
 
 # ---------------------------------------------------------------------------
-# 服务器类型分发
+# Server type dispatch
 # ---------------------------------------------------------------------------
 
 def _run_management_for_server(server_cfg: dict, server_dir: str) -> None:
-    """检查服务器类型并跳转到对应的管理菜单。"""
+    """Check server type and jump to the appropriate management menu."""
     stype = classify_server_type(server_cfg, server_dir)
 
     if stype == "plugin":
@@ -403,51 +407,51 @@ def _run_management_for_server(server_cfg: dict, server_dir: str) -> None:
         _show_mod_menu(server_cfg, server_dir)
     elif stype == "hybrid":
         print()
-        print(f"  [{server_cfg.get('name', '?')}] 检测到混合端（同时支持插件和模组）")
+        print(t("menu.hybrid.title", name=server_cfg.get("name", "?")))
         print()
-        print("  [1] 管理插件")
-        print("  [2] 管理模组")
-        print("  [0] 返回")
+        print(t("menu.hybrid.manage_plugin", n=1))
+        print(t("menu.hybrid.manage_mod", n=2))
+        print(t("menu.plugin.back", n=0))
         print()
         while True:
-            c = input("  请选择 (0-2): ").strip()
+            c = input("  " + t("menu.main.prompt", max=2)).strip()
             if c == "1":
                 _show_plugin_menu(server_cfg, server_dir); return
             elif c == "2":
                 _show_mod_menu(server_cfg, server_dir); return
             elif c == "0":
                 return
-            print("  无效选择。")
+            print(t("app.invalid_choice_short"))
     elif stype in ("vanilla", "proxy", "bedrock"):
-        msg = {"vanilla": "原版服务端不支持插件或模组。",
-               "proxy": "代理端不支持插件或模组管理。",
-               "bedrock": "基岩版服务端不支持此功能。"}
+        msg_key = {"vanilla": "menu.hybrid.unsupported_vanilla",
+                    "proxy": "menu.hybrid.unsupported_proxy",
+                    "bedrock": "menu.hybrid.unsupported_bedrock"}
         print()
-        print(f"  [{server_cfg.get('name', '?')}] {msg[stype]}")
+        print(t(msg_key[stype], name=server_cfg.get("name", "?")))
         print()
-        input("  按 Enter 返回...")
+        input(t("app.press_enter"))
     else:
         print()
-        print(f"  [{server_cfg.get('name', '?')}] 无法识别服务端类型。")
+        print(t("menu.hybrid.unsupported_unknown", name=server_cfg.get("name", "?")))
         print()
-        input("  按 Enter 返回...")
+        input(t("app.press_enter"))
 
 
 def _pick_server_for_management(servers: list[dict], servers_dir: str) -> None:
-    """让用户选择要管理插件/模组的服务器。"""
+    """Let user pick a server to manage plugins/mods."""
     while True:
         clear_screen()
         print()
-        print("  选择要管理的服务器：")
+        print(t("menu.manage.title"))
         print()
         for i, s in enumerate(servers, 1):
             ver = s.get("mc_version", "?")
             jar = s.get("jar", "?")
-            print(f"  [{i}] {s['name']}  (MC {ver} | {jar})")
-        print("  [0] 返回")
+            print(t("menu.manage.line", i=i, name=s["name"], ver=ver, jar=jar))
+        print(t("menu.plugin.back", n=0))
         print()
         try:
-            c = input(f"  请输入编号 (0-{len(servers)}): ").strip()
+            c = input(t("menu.manage.prompt", max=len(servers))).strip()
             if c == "0":
                 return
             idx = int(c) - 1
@@ -457,26 +461,26 @@ def _pick_server_for_management(servers: list[dict], servers_dir: str) -> None:
                 _run_management_for_server(server_cfg, server_dir)
         except ValueError:
             pass
-        print("  无效选择。")
+        print(t("app.invalid_choice_short"))
 
 
 # ---------------------------------------------------------------------------
-# 导出服务器
+# Export server
 # ---------------------------------------------------------------------------
 
 def _export_server(servers: list[dict], servers_dir: str, project_dir: str) -> None:
-    """交互式导出服务器为 zip。"""
+    """Interactive server export to zip."""
     while True:
         clear_screen()
         print()
-        print("  选择要导出的服务器：")
+        print(t("menu.export.select"))
         print()
         for i, s in enumerate(servers, 1):
             print(f"  [{i}] {s['name']}")
-        print("  [0] 返回")
+        print(t("menu.export.back", n=0))
         print()
         try:
-            c = input(f"  请选择 (0-{len(servers)}): ").strip()
+            c = input(t("menu.export.prompt_server", max=len(servers))).strip()
             if c == "0":
                 return
             idx = int(c) - 1
@@ -487,35 +491,31 @@ def _export_server(servers: list[dict], servers_dir: str, project_dir: str) -> N
                 break
         except ValueError:
             pass
-        print("  无效选择。")
+        print(t("app.invalid_choice_short"))
 
-    # 分类选择
-    selected: set[str] = set()
-    for key, label, _, default in EXPORT_CATEGORIES:
-        if default:
-            selected.add(key)
+    selected: set[str] = {key for key, _, _, default in EXPORT_CATEGORIES if default}
 
     while True:
         clear_screen()
         print()
-        print(f"  导出服务器: {name}")
-        print("  选择要包含的内容（Y=包含, N=跳过）：")
+        print(t("menu.export.title", name=name))
+        print(t("menu.export.categories"))
         print()
-        for key, label, _, _ in EXPORT_CATEGORIES:
+        for key, lbl_key, _, _ in EXPORT_CATEGORIES:
             mark = "[Y]" if key in selected else "[N]"
-            print(f"    {mark} {label}")
+            print(f"    {mark} {t(lbl_key)}")
         print()
-        print("  输入分类编号切换选择，或直接回车开始导出。")
+        print(t("menu.export.hint"))
         print()
-        for i, (key, label, _, _) in enumerate(EXPORT_CATEGORIES, 1):
+        for i, (key, lbl_key, _, _) in enumerate(EXPORT_CATEGORIES, 1):
             mark = "Y" if key in selected else "N"
-            print(f"    [{i}] {mark} {label}")
-        print("    [A] 全选")
-        print("    [N] 全不选")
-        print("    [0] 取消")
+            print(f"    [{i}] {mark} {t(lbl_key)}")
+        print(t("menu.export.all", n="A"))
+        print(t("menu.export.none", n="N"))
+        print(t("menu.export.cancel_btn", n=0))
         print()
 
-        choice = input("  请选择: ").strip().lower()
+        choice = input(t("menu.export.prompt")).strip().lower()
         if choice == "":
             break
         if choice == "0":
@@ -538,15 +538,14 @@ def _export_server(servers: list[dict], servers_dir: str, project_dir: str) -> N
             pass
 
     if not selected:
-        print("  未选择任何内容。")
-        input("  按 Enter 返回...")
+        print(t("menu.export.nothing_selected"))
+        input(t("app.press_enter"))
         return
 
-    # 确认输出路径
     print()
     default_name = f"{name}-export.zip"
-    print(f"  默认文件名: {default_name}")
-    out = input(f"  输入导出路径（回车使用默认）: ").strip().strip('"')
+    print(t("menu.export.default_name", name=default_name))
+    out = input(t("menu.export.output_prompt")).strip().strip('"')
     if not out:
         out = os.path.join(project_dir, default_name)
     else:
@@ -555,25 +554,24 @@ def _export_server(servers: list[dict], servers_dir: str, project_dir: str) -> N
             out = os.path.join(out, default_name)
 
     if os.path.isfile(out):
-        confirm = input(f"  文件已存在，覆盖？(y/N): ").strip().lower()
+        confirm = input(t("menu.export.overwrite_confirm")).strip().lower()
         if confirm != "y":
-            print("  已取消。")
-            input("  按 Enter 返回...")
+            print(t("menu.plugin.cancelled"))
+            input(t("app.press_enter"))
             return
 
-    print(f"  [导出] 正在导出 {len(selected)} 个分类...")
+    print(t("menu.export.starting", count=len(selected)))
     export_server_to_zip(server_dir, out, selected)
-    input("  按 Enter 返回...")
+    input(t("app.press_enter"))
 
 
 # ---------------------------------------------------------------------------
-# 主菜单
+# Main menu
 # ---------------------------------------------------------------------------
 
 def show_main_menu(servers_dir: str, project_dir: str) -> Optional[dict[str, Any]]:
     """
-    主菜单。
-    返回选中的服务器配置（启动服务器）或 None（退出）。
+    Main menu. Returns selected server config for launching, or None to exit.
     """
     while True:
         servers = list_servers(servers_dir)
@@ -581,31 +579,31 @@ def show_main_menu(servers_dir: str, project_dir: str) -> Optional[dict[str, Any
 
         clear_screen()
         print()
-        print(f"  MSTL — Minecraft Terminal Server Launcher")
-        print(f"  服务器目录: {servers_dir}")
+        print(f"  {t('app.title')}")
+        print(t("app.server_dir", path=servers_dir))
         print()
 
         if server_count == 0:
-            print("  当前没有已配置的服务器。")
+            print(t("app.no_servers"))
         else:
-            print(f"  [{1}] 启动服务器 ({server_count} 个可用)")
-        print("  [2] 导入服务器压缩包")
-        print("  [3] 下载服务器")
-        print("  [4] 管理插件/模组")
-        print("  [5] 导出服务器")
-        print("  [0] 退出")
+            print(t("menu.main.start_server", n=1, count=server_count))
+        print(t("menu.main.import", n=2))
+        print(t("menu.main.download", n=3))
+        print(t("menu.main.manage", n=4))
+        print(t("menu.main.export", n=5))
+        print(t("menu.main.exit", n=0))
         print()
 
-        choice = input("  请选择 (0-5): ").strip()
+        choice = input(t("menu.main.prompt", max=5)).strip()
 
         if choice == "0":
-            print("[退出] 用户选择退出")
+            print(t("app.exit_user"))
             sys.exit(0)
 
         elif choice == "1":
             if server_count == 0:
-                print("  没有可用服务器，请先导入或下载。")
-                input("  按 Enter 返回...")
+                print(t("app.no_servers_start"))
+                input(t("app.press_enter"))
                 continue
             selected = _select_server_for_launch(servers, servers_dir)
             if selected:
@@ -615,16 +613,16 @@ def show_main_menu(servers_dir: str, project_dir: str) -> Optional[dict[str, Any
         elif choice == "2":
             zip_path = _prompt_zip_path()
             if zip_path is None:
-                input("  按 Enter 返回...")
+                input(t("app.press_enter"))
                 continue
             import_server_from_zip(zip_path, servers_dir, project_dir)
-            input("  按 Enter 返回...")
+            input(t("app.press_enter"))
             continue
 
         elif choice == "3":
             from download_msl import show_download_server_menu
             show_download_server_menu(servers_dir, project_dir)
-            input("  按 Enter 返回...")
+            input(t("app.press_enter"))
             continue
 
         elif choice == "4":
@@ -632,8 +630,8 @@ def show_main_menu(servers_dir: str, project_dir: str) -> Optional[dict[str, Any
             if servers_now:
                 _pick_server_for_management(servers_now, servers_dir)
             else:
-                print("  没有可管理的服务器。")
-                input("  按 Enter 返回...")
+                print(t("app.no_servers_manage"))
+                input(t("app.press_enter"))
             continue
 
         elif choice == "5":
@@ -641,33 +639,33 @@ def show_main_menu(servers_dir: str, project_dir: str) -> Optional[dict[str, Any
             if servers_now:
                 _export_server(servers_now, servers_dir, project_dir)
             else:
-                print("  没有可导出的服务器。")
-                input("  按 Enter 返回...")
+                print(t("app.no_servers_export"))
+                input(t("app.press_enter"))
             continue
 
         else:
-            print("  无效选择，请输入 0-5。")
+            print(t("app.invalid_choice", max=5))
 
 
 def _select_server_for_launch(
     servers: list[dict[str, Any]],
     servers_dir: str,
 ) -> Optional[dict[str, Any]]:
-    """列出服务器供用户选择启动，返回选中服务器的配置。"""
+    """List servers for launch selection. Returns selected config or None."""
     while True:
         clear_screen()
         print()
-        print("  选择要启动的服务器：")
+        print(t("menu.select_server.title"))
         print()
         for i, s in enumerate(servers, 1):
             ver = s.get("mc_version", "?")
             jar = s.get("jar", "?")
             mem = f"{s.get('min_mem', '?')} / {s.get('max_mem', '?')}"
-            print(f"  [{i}] {s['name']}  (MC {ver} | {jar} | {mem})")
-        print("  [0] 返回")
+            print(t("menu.select_server.line", i=i, name=s["name"], ver=ver, jar=jar, mem=mem))
+        print(t("menu.select_server.back", n=0))
         print()
 
-        choice = input(f"  请选择 (0-{len(servers)}): ").strip()
+        choice = input(t("menu.select_server.prompt", max=len(servers))).strip()
 
         if choice == "0":
             return None
@@ -678,4 +676,4 @@ def _select_server_for_launch(
                 return servers[idx]
         except ValueError:
             pass
-        print(f"  无效选择，请输入 0-{len(servers)} 之间的数字。")
+        print(t("app.invalid_choice", max=len(servers)))

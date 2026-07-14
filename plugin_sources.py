@@ -11,7 +11,8 @@ import urllib.request
 import urllib.error
 from typing import Any, Optional
 
-USER_AGENT = "MSTL/1.0 (plugin downloader)"
+from i18n import t
+from constants import USER_AGENT, SPIGET_BASE
 
 # ---------------------------------------------------------------------------
 # 通用结构
@@ -37,14 +38,12 @@ def _fetch_json(url: str, timeout: int = 15) -> Optional[Any]:
 def _download_jar(url: str, target_path: str) -> bool:
     """下载 jar 文件到目标路径（使用多线程下载）。"""
     from download_msl import multithreaded_download
-    return multithreaded_download(url, target_path, desc="下载中")
+    return multithreaded_download(url, target_path, desc="Download"
 
 
 # ---------------------------------------------------------------------------
 # Spiget
 # ---------------------------------------------------------------------------
-
-SPIGET_BASE = "https://api.spiget.org/v2"
 
 
 def spiget_search(query: str, limit: int = 10) -> list[PluginResult]:
@@ -97,7 +96,10 @@ def spiget_resolve_download_url(resource_id: str) -> Optional[str]:
     """跟随 Spiget 下载重定向拿到真实下载 URL。"""
     url = f"{SPIGET_BASE}/resources/{resource_id}/download"
     try:
-        req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
+        req = urllib.request.Request(url, headers={
+            "User-Agent": USER_AGENT,
+            "Referer": "https://www.spigotmc.org/",
+        })
         resp = urllib.request.urlopen(req, timeout=30)
         return resp.url  # 重定向后的真实地址
     except (urllib.error.HTTPError, urllib.error.URLError, OSError):
@@ -143,7 +145,7 @@ def _spiget_download_external_github(external_url: str, target_dir: str,
         selected = jars[0]
         if len(jars) > 1:
             print()
-            print(f"  发现 {len(jars)} 个 jar 文件，请选择要下载的：")
+            print(t("github.found_jars", count=len(jars)))
             print()
             for i, a in enumerate(jars, 1):
                 size_mb = (a.get("size", 0) or 0) / 1024 / 1024
@@ -151,14 +153,14 @@ def _spiget_download_external_github(external_url: str, target_dir: str,
             print()
             while True:
                 try:
-                    c = input(f"  请选择 (1-{len(jars)}): ").strip()
+                    c = input(t("github.select_jar", max=len(jars))).strip()
                     idx = int(c) - 1
                     if 0 <= idx < len(jars):
                         selected = jars[idx]
                         break
                 except ValueError:
                     pass
-                print("  无效选择。")
+                print(t("app.invalid_choice_short"))
 
         dl_url = selected.get("browser_download_url", "")
         if not dl_url:
@@ -166,8 +168,8 @@ def _spiget_download_external_github(external_url: str, target_dir: str,
         filename = selected["name"]
         target_path = os.path.join(target_dir, filename)
 
-        print(f"  [下载] 正在从 GitHub 下载 {filename} ...")
-        if multithreaded_download(dl_url, target_path, desc="下载中"):
+        print(t("github.downloading", name=filename))
+        if multithreaded_download(dl_url, target_path, desc="Download"):
             return filename
         return None
 
@@ -179,12 +181,12 @@ def _spiget_download_external(target_dir: str, result: PluginResult) -> Optional
     pid = result["id"]
     details = spiget_get_resource_details(pid)
     if not details:
-        print("  [错误] 无法获取资源详情")
+        print(t("github.failed_metadata"))
         return None
 
     external_url = (details.get("file") or {}).get("externalUrl", "")
     if not external_url:
-        print("  [错误] 外部资源 URL 为空")
+        print(t("github.empty_url"))
         return None
 
     # 尝试 GitHub 下载
@@ -193,12 +195,12 @@ def _spiget_download_external(target_dir: str, result: PluginResult) -> Optional
                                                      result.get("name", "plugin"))
         if filename:
             return filename
-        print(f"  [提示] 未能自动解析 GitHub 下载地址")
-        print(f"         请手动从以下地址下载: {external_url}")
+        print(t("github.hint_manual"))
+        print(f"         {external_url}")
         return None
 
     # 未知外部源，告诉用户手动下载
-    print(f"  [提示] 该插件托管在外部平台，请手动下载：")
+    print(t("github.hint_unknown"))
     print(f"         {external_url}")
     return None
 
