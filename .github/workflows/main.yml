@@ -1,0 +1,66 @@
+name: Build and Sign
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:   # 允许手动触发，方便测试
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      # 修复：合并安装命令
+      - name: Install dependencies
+        run: |
+          pip install nuitka
+          pip install imageio
+
+      # ---------- 构建 ----------
+      - name: Build with Nuitka
+        run: |
+          python -m nuitka `
+            --standalone `
+            --assume-yes-for-downloads `
+            --enable-plugin=anti-bloat `
+            --windows-console-mode=force `
+            --windows-icon-from-ico=icon.png `
+            --output-dir=build `
+            --product-name=MSTL `
+            --file-description="Minecraft Terminal Server Launcher" `
+            --product-version="1.0.0" `
+            --file-version="1.0.0" `
+            --copyright="MSTL" `
+            start.py
+
+      # ---------- 压缩整个输出目录 ----------
+      - name: Compress build output
+        shell: powershell
+        run: |
+          $source = "build/start.dist"
+          $zipFile = "MSTL.zip"
+          if (-not (Test-Path $source)) {
+            Write-Host "Directory $source not found, trying build/start.exe (single file)..."
+            $source = "build/start.exe"
+          }
+          Compress-Archive -Path $source -DestinationPath $zipFile -Force
+          Write-Host "Created $zipFile"
+
+      # ---------- 自动发布到 GitHub Releases ----------
+      - name: Create Release and Upload Asset
+        uses: softprops/action-gh-release@v1
+        with:
+          files: MSTL.zip   # 要上传的文件
+          tag_name: ${{ github.ref_name }}  # 自动使用你推送的标签名（如 v1.0.0）
+          generate_release_notes: true      # 自动生成更新日志（可选）
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}  # GitHub 内置的默认 Token，无需手动配置
