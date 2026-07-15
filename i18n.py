@@ -53,6 +53,7 @@ def available_languages() -> list[tuple[str, str]]:
     lang_names: dict[str, str] = {
         "zh": "中文",
         "en": "English",
+        "ru": "Русский",
     }
     result: list[tuple[str, str]] = []
     d = _locale_dir()
