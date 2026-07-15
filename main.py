@@ -42,6 +42,14 @@ from java_tools import (
 from server_launcher import start_minecraft_server, start_server_interactive
 from i18n import t, load_language, available_languages, detect_os_language
 from menu import show_main_menu
+from openfrp.tunnel_manager import (
+    get_tunnels_by_token, get_tunnels_by_auth, get_node_list,
+    create_tunnel, delete_tunnel, edit_tunnel,
+    download_frpc, get_frpc_local_path,
+    get_frpc_download_url, get_frpc_release_info,
+    launch_frpc, stop_frpc,
+    TunnelInfo, NodeInfo,
+)
 from mod_sources import (
     search_all_mods,
     download_mod,

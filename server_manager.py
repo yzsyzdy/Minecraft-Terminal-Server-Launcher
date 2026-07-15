@@ -24,6 +24,11 @@ DEFAULT_SERVER_CONFIG: dict[str, Any] = {
     "max_mem": "4G",
     "extra_jvm_args": [],
     "extra_server_args": [],
+    "openfrp": {
+        "token": "",
+        "proxy_id": 0,
+        "auto_start": False,
+    },
 }
 
 

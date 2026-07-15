@@ -101,6 +101,15 @@ def _start_server(server_cfg: dict, config: dict, project_dir: str) -> int:
     interactive = config.get("interactive", True)
     name = server_cfg.get("name", "?")
 
+    # OpenFrp auto-start
+    of_cfg = server_cfg.get("openfrp", {}) or {}
+    frpc_proc = None
+    if of_cfg.get("auto_start") and of_cfg.get("token") and of_cfg.get("proxy_id"):
+        from openfrp.tunnel_manager import launch_frpc
+        frpc_proc = launch_frpc(project_dir, server_cfg)
+    elif of_cfg.get("auto_start"):
+        print("  [OpenFrp] auto_start enabled but token or proxy_id missing, skipping.")
+
     print()
     print(t("server.info_name", name=name))
     print(t("server.info_mc", ver=server_cfg.get("mc_version", "?")))
@@ -168,6 +177,8 @@ def main():
     server_cfg = load_server_config(selected["_path"])
 
     exit_code = _start_server(server_cfg, config, project_dir)
+    from openfrp.tunnel_manager import stop_frpc
+    stop_frpc()
 
     name = server_cfg.get("name", "?")
     print(t("app.done", name=name, code=exit_code))

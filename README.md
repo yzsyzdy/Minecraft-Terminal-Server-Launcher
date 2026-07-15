@@ -160,6 +160,21 @@ start.py
 - **标准库**（零第三方依赖）
 - **JDK 21+**（可选，用于运行 Minecraft 服务器，启动器可自动下载）
 
+## 内网穿透 (OpenFrp)
+
+MSTL 集成了 [OpenFrp](https://openfrp.net/) 内网穿透支持，可自动为 Minecraft 服务器创建 TCP 隧道。
+
+### 使用方式
+
+1. 在 [OpenFrp 控制台](https://console.openfrp.net) 获取你的 **用户 token**
+2. MSTL 主菜单 → [6] OpenFrp → [1] 查看隧道列表 → 输入 token
+3. 确认隧道后，回到 [3] 绑定隧道到服务器
+4. 启动服务器时 frpc 自动跟随启动
+
+### 无需手动安装 frpc
+
+MSTL 会自动检测系统架构并下载对应的 frpc 二进制文件。
+
 ## 许可
 
 本项目基于 **GNU General Public License v3.0** 开源。

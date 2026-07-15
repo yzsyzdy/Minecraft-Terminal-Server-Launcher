@@ -1,0 +1,132 @@
+# MSTL Wiki — MkDocs Material 配置
+site_name: MSTL
+site_description: Minecraft Terminal Server Launcher — 轻量级、零依赖的 Minecraft 服务端管理器
+site_url: https://yzsyzdy.github.io/mc-server-launcher/
+repo_url: https://github.com/yzsyzdy/mc-server-launcher
+repo_name: yzsyzdy/mc-server-launcher
+edit_uri: edit/main/docs
+
+copyright: Copyright &copy; 2026 yzsyzdy — GNU General Public License v3.0
+
+theme:
+  name: material
+  language: zh
+  favicon: assets/favicon.png
+  logo: assets/logo.png
+  icon:
+    repo: fontawesome/brands/github
+  features:
+    - navigation.instant
+    - navigation.instant.prefetch
+    - navigation.tracking
+    - navigation.tabs
+    - navigation.sections
+    - navigation.path
+    - navigation.indexes
+    - toc.follow
+    - search.suggest
+    - search.highlight
+    - search.share
+    - content.code.copy
+    - content.code.annotate
+    - content.tabs.link
+  palette:
+    - media: "(prefers-color-scheme)"
+      toggle:
+        icon: material/brightness-auto
+        name: 跟随系统
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/weather-sunny
+        name: 切换到暗色模式
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/weather-night
+        name: 切换到亮色模式
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/yzsyzdy/mc-server-launcher
+  consent:
+    title: Cookie 声明
+    description: >-
+      本站使用 Cookies 记录您的偏好和访问数据。点击"接受"继续使用。
+  analytics:
+    provider: google
+    property: !ENV [GA_ID, ""]
+  generator: false
+
+extra_css:
+  - stylesheets/extra.css
+
+plugins:
+  - search:
+      lang:
+        - zh
+        - en
+  - i18n:
+      docs_structure: folder
+      languages:
+        - locale: zh
+          name: 中文
+          build: true
+          default: true
+        - locale: en
+          name: English
+          build: true
+  - tags
+  - git-revision-date-localized:
+      enable_creation_date: true
+  - minify:
+      minify_html: true
+
+markdown_extensions:
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.keys
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+  - pymdownx.tasklist:
+      custom_checkbox: true
+  - attr_list
+  - md_in_html
+  - def_list
+  - footnotes
+  - tables
+  - toc:
+      permalink: true
+
+nav:
+  - 首页: index.md
+  - 使用指南:
+    - guide/index.md
+    - 快速开始: guide/quickstart.md
+    - 服务器管理: guide/server-management.md
+    - 配置说明: guide/configuration.md
+  - 功能详解:
+    - features/index.md
+    - 插件管理: features/plugin-management.md
+    - 模组管理: features/mod-management.md
+    - 内网穿透: features/tunnel.md
+  - 进阶:
+    - advanced/index.md
+    - 项目架构: advanced/architecture.md
+    - 从源码构建: advanced/build.md
+  - 常见问题: faq.md

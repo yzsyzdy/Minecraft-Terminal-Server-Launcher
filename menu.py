@@ -15,6 +15,7 @@ from server_manager import (
     import_server_from_zip,
     list_servers,
     load_server_config,
+    save_server_config,
     classify_server_type,
     export_server_to_zip,
     EXPORT_CATEGORIES,
@@ -566,6 +567,212 @@ def _export_server(servers: list[dict], servers_dir: str, project_dir: str) -> N
 
 
 # ---------------------------------------------------------------------------
+# OpenFrp 内网穿透
+# ---------------------------------------------------------------------------
+
+from openfrp.tunnel_manager import (
+    get_tunnels_by_token, get_node_list, create_tunnel, delete_tunnel,
+    download_frpc, get_frpc_local_path, TunnelInfo,
+)
+
+
+def _openfrp_menu(servers: list[dict], servers_dir: str, project_dir: str) -> None:
+    """OpenFrp tunnel management menu."""
+    while True:
+        clear_screen()
+        print()
+        print("  [OpenFrp] 内网穿透")
+        print()
+        print("  [1] 查看隧道列表 (token)")
+        print("  [2] 下载/updaddr frpc")
+        print("  [3] 创建 Minecraft 隧道")
+        print("  [4] 绑定隧道到服务器")
+        print("  [0] 返回")
+        print()
+        choice = input("  请选择 (0-4): ").strip()
+
+        if choice == "0":
+            return
+        elif choice == "1":
+            _openfrp_list_tunnels(project_dir)
+        elif choice == "2":
+            _openfrp_download_frpc(project_dir)
+        elif choice == "3":
+            _openfrp_create_tunnel(project_dir)
+        elif choice == "4":
+            _openfrp_bind_tunnel(servers, servers_dir, project_dir)
+        else:
+            print(t("app.invalid_choice_short"))
+
+
+def _openfrp_list_tunnels(project_dir: str) -> None:
+    """List tunnels by user token."""
+    print()
+    token = input("  请输入用户 token: ").strip()
+    if not token:
+        return
+    print("  [OpenFrp] 正在获取隧道列表...")
+    groups = get_tunnels_by_token(token)
+    if groups is None:
+        print("  [OpenFrp] " + t("app.error", msg="无法获取隧道列表，请检查 token"))
+        input(t("app.press_enter"))
+        return
+    print()
+    for node_name, tunnels in groups:
+        print(f"  [{node_name}]")
+        for t_in in tunnels:
+            online = "\u2713" if t_in.online else "\u2717"
+            print(f"      [{online}] \u00a7{t_in.proxy_id} {t_in.name}  ({t_in.proxy_type}) {t_in.remote_addr}")
+        print()
+    print(f"  \u5171 {sum(len(g) for _, g in groups)} \u6761隧道")
+    input(t("app.press_enter"))
+
+
+def _openfrp_download_frpc(project_dir: str) -> None:
+    """Download or update frpc binary."""
+    existing = get_frpc_local_path(project_dir)
+    if os.path.isfile(existing):
+        size = os.path.getsize(existing) / 1024 / 1024
+        print(f"  [OpenFrp] \u5df2存在: {existing} ({size:.1f} MB)")
+        if input("  重新下载? (y/N): ").strip().lower() != "y":
+            return
+    path = download_frpc(project_dir)
+    if path:
+        print(f"  [OpenFrp] \u4e0b载完成: {path}")
+    else:
+        print(f"  [OpenFrp] " + t("app.error", msg="下载失败"))
+    input(t("app.press_enter"))
+
+
+def _openfrp_create_tunnel(project_dir: str) -> None:
+    """Interactive tunnel creation wizard for Minecraft servers."""
+    from openfrp.tunnel_manager import get_node_list, create_tunnel
+
+    print()
+    auth = input("  请输入 Authorization (从面板个人中心复制): ").strip()
+    if not auth:
+        return
+
+    print("  [OpenFrp] 正在获取节点列表...")
+    nodes = get_node_list(auth)
+    if not nodes:
+        print("  [OpenFrp] " + t("app.error", msg="无法获取节点列表，请检查 Authorization"))
+        input(t("app.press_enter"))
+        return
+
+    # 过滤可用的 TCP 节点
+    tcp_nodes = [n for n in nodes if n.protocol_support.get("tcp") and not n.fully_loaded and n.status == 200]
+    if not tcp_nodes:
+        print("  [OpenFrp] " + t("app.error", msg="没有可用的 TCP 节点"))
+        input(t("app.press_enter"))
+        return
+
+    print()
+    print("  选择节点（仅显示可用 TCP 节点）：")
+    print()
+    for i, n in enumerate(tcp_nodes[:20], 1):
+        region = {1: "\u4e2d\u56fd\u5927\u9646", 2: "\u6e2f\u6fb3\u53f0", 3: "\u6d77\u5916"}.get(n.classify, "?")
+        tag = "" if not n.need_realname else " [\u9700\u5b9e\u540d]"
+        print(f"  [{i}] {n.name} ({region}){tag}")
+    print("  [0] 返回")
+    print()
+    try:
+        c = input(f"  请选择 (0-{min(len(tcp_nodes), 20)}): ").strip()
+        if c == "0":
+            return
+        idx = int(c) - 1
+        if 0 <= idx < len(tcp_nodes):
+            selected_node = tcp_nodes[idx]
+        else:
+            return
+    except ValueError:
+        return
+
+    print()
+    name = input("  隧道名称 (留空自动生成): ").strip() or f"mc-{selected_node.node_id}"
+    local_port = input("  本地端口 [25565]: ").strip() or "25565"
+    remote_port = input("  远程端口 (留空随机): ").strip()
+    encrypt = input("  启用加密? (Y/n): ").strip().lower()
+    compress = input("  启用压缩? (Y/n): ").strip().lower()
+
+    params = {
+        "type": "tcp",
+        "name": name,
+        "local_addr": "127.0.0.1",
+        "local_port": local_port,
+        "node_id": selected_node.node_id,
+        "dataEncrypt": encrypt != "n",
+        "dataGzip": compress != "n",
+        "domain_bind": "",
+        "autoTls": "false",
+        "forceHttps": False,
+        "proxyProtocolVersion": False,
+        "custom": "",
+    }
+    if remote_port:
+        try:
+            params["remote_port"] = int(remote_port)
+        except ValueError:
+            pass
+
+    print()
+    print(f"  [OpenFrp] 正在创建隧道 '{name}' ...")
+    msg = create_tunnel(auth, params)
+    if msg:
+        print(f"  [OpenFrp] {msg}")
+    else:
+        print(f"  [OpenFrp] " + t("app.error", msg="创建失败，请检查 Authorization 是否有效"))
+    input(t("app.press_enter"))
+
+
+def _openfrp_bind_tunnel(servers: list[dict], servers_dir: str, project_dir: str) -> None:
+    """Bind a tunnel to a server config."""
+    while True:
+        clear_screen()
+        print()
+        print("  选择要绑定隧道的服务器:")
+        print()
+        for i, s in enumerate(servers, 1):
+            of = s.get("openfrp", {}) or {}
+            pid = of.get("proxy_id", 0)
+            tag = f" [\u96a7\u9053 #{pid}]" if pid else ""
+            print(f"  [{i}] {s['name']}{tag}")
+        print("  [0] 返回")
+        print()
+        try:
+            c = input(f"  请选择 (0-{len(servers)}): ").strip()
+            if c == "0":
+                return
+            idx = int(c) - 1
+            if 0 <= idx < len(servers):
+                server_path = servers[idx]["_path"]
+                server_cfg = load_server_config(server_path)
+                break
+        except ValueError:
+            pass
+        print(t("app.invalid_choice_short"))
+
+    print()
+    token = input("  请输入 OpenFrp token (留空保持现有): ").strip()
+    pid_str = input("  隧道 ID (留空保持现有): ").strip()
+    auto = input("  随服务器启动自动启动 frpc? (y/N): ").strip().lower()
+
+    of_cfg = server_cfg.get("openfrp", {}) or {}
+    if token:
+        of_cfg["token"] = token
+    if pid_str:
+        try:
+            of_cfg["proxy_id"] = int(pid_str)
+        except ValueError:
+            pass
+    of_cfg["auto_start"] = (auto == "y")
+    server_cfg["openfrp"] = of_cfg
+    save_server_config(server_cfg, server_path)
+    print(f"  [OpenFrp] \u7ed1\u5b9a\u5b8c\u6210: proxy_id={of_cfg.get('proxy_id', 0)}, auto_start={of_cfg['auto_start']}")
+    input(t("app.press_enter"))
+
+
+# ---------------------------------------------------------------------------
 # Main menu
 # ---------------------------------------------------------------------------
 
@@ -591,6 +798,7 @@ def show_main_menu(servers_dir: str, project_dir: str) -> Optional[dict[str, Any
         print(t("menu.main.download", n=3))
         print(t("menu.main.manage", n=4))
         print(t("menu.main.export", n=5))
+        print("  [6] OpenFrp \u5185\u7f51\u7a7f\u900f")
         print(t("menu.main.exit", n=0))
         print()
 
@@ -643,8 +851,13 @@ def show_main_menu(servers_dir: str, project_dir: str) -> Optional[dict[str, Any
                 input(t("app.press_enter"))
             continue
 
+        elif choice == "6":
+            servers_now = list_servers(servers_dir)
+            _openfrp_menu(servers_now, servers_dir, project_dir)
+            continue
+
         else:
-            print(t("app.invalid_choice", max=5))
+            print(t("app.invalid_choice", max=6))
 
 
 def _select_server_for_launch(

@@ -14,7 +14,14 @@ msl_cache.json
 __pycache__/
 *.pyc
 
+website/
+
 # Nuitka 构建输出
 build/
+
+# MkDocs 构建输出
+site/
+wiki/site/
+wiki/
 
 # GitHub Actions 工作流（CI 配置，纳入版本控制）
