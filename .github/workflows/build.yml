@@ -1,0 +1,81 @@
+name: Build
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Cache pip packages
+        uses: actions/cache@v4
+        with:
+          path: ~\AppData\Local\pip\Cache
+          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+
+      - name: Install dependencies
+        run: |
+          pip install nuitka imageio
+
+      - name: Build with Nuitka
+        run: |
+          python -m nuitka `
+            --standalone `
+            --assume-yes-for-downloads `
+            --enable-plugin=anti-bloat `
+            --windows-console-mode=force `
+            --windows-icon-from-ico=icon.png `
+            --output-dir=build\MSTL `
+            --product-name=MSTL `
+            --file-description="Minecraft Terminal Server Launcher" `
+            --product-version="1.0.0" `
+            --file-version="1.0.0" `
+            --copyright="MSTL" `
+            --include-data-dir=locales=locales `
+            start.py
+
+      - name: List build output
+        run: Get-ChildItem -Path build\MSTL -Recurse | Select-Object FullName, Length
+
+      - name: Compress build output
+        shell: powershell
+        run: |
+          $source = "build\MSTL\start.dist"
+          if (-not (Test-Path $source)) {
+            Write-Host "Build output not found at $source"
+            exit 1
+          }
+          $zipFile = "MSTL-${{ github.ref_name }}.zip"
+          Compress-Archive -Path "$source\*" -DestinationPath $zipFile -Force
+          Write-Host "Created $zipFile"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: MSTL-${{ github.ref_name }}
+          path: MSTL-${{ github.ref_name }}.zip
+
+      - name: Create Release and Upload Asset
+        uses: softprops/action-gh-release@v1
+        with:
+          files: MSTL-${{ github.ref_name }}.zip
+          tag_name: ${{ github.ref_name }}
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
