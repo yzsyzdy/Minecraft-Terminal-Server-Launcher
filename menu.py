@@ -398,6 +398,54 @@ def _show_mod_menu(server_cfg: dict, server_dir: str) -> None:
 # Server type dispatch
 # ---------------------------------------------------------------------------
 
+def _edit_server_config(server_cfg: dict, server_dir: str) -> None:
+    """Edit server advanced settings: JVM args, priority, etc."""
+    while True:
+        clear_screen()
+        print()
+        print(t("menu.config.title", name=server_cfg.get("name", "?")))
+        print()
+        prio = server_cfg.get("process_priority", "normal")
+        print(t("menu.config.1", n=1, val=prio))
+        print(t("menu.config.2", n=2, val=" ".join(server_cfg.get("extra_jvm_args", []))))
+        print(t("menu.config.3", n=3, val=" ".join(server_cfg.get("extra_server_args", []))))
+        print(t("menu.plugin.back", n=0))
+        print()
+        c = input("  " + t("menu.main.prompt", max=3)).strip()
+        if c == "0":
+            return
+        elif c == "1":
+            print()
+            print(t("menu.config.prio_prompt"))
+            print(t("menu.config.prio_normal", n=1))
+            print(t("menu.config.prio_below", n=2))
+            print(t("menu.config.prio_low", n=3))
+            p = input("  " + t("menu.main.prompt", max=3)).strip()
+            mapping = {"1": "normal", "2": "below_normal", "3": "low"}
+            if p in mapping:
+                server_cfg["process_priority"] = mapping[p]
+                save_server_config(server_cfg, server_dir)
+                print(t("menu.config.saved"))
+            else:
+                print(t("menu.config.prio_invalid"))
+        elif c == "2":
+            print()
+            cur = " ".join(server_cfg.get("extra_jvm_args", []))
+            raw = input(t("menu.config.extra_prompt", cur=cur)).strip()
+            server_cfg["extra_jvm_args"] = raw.split() if raw else []
+            save_server_config(server_cfg, server_dir)
+            print(t("menu.config.saved"))
+        elif c == "3":
+            print()
+            cur = " ".join(server_cfg.get("extra_server_args", []))
+            raw = input(t("menu.config.extra_prompt", cur=cur)).strip()
+            server_cfg["extra_server_args"] = raw.split() if raw else []
+            save_server_config(server_cfg, server_dir)
+            print(t("menu.config.saved"))
+        else:
+            print(t("app.invalid_choice_short"))
+
+
 def _run_management_for_server(server_cfg: dict, server_dir: str) -> None:
     """Check server type and jump to the appropriate management menu."""
     stype = classify_server_type(server_cfg, server_dir)
@@ -459,10 +507,21 @@ def _pick_server_for_management(servers: list[dict], servers_dir: str) -> None:
             if 0 <= idx < len(servers):
                 server_dir = servers[idx]["_path"]
                 server_cfg = load_server_config(server_dir)
-                _run_management_for_server(server_cfg, server_dir)
+                print()
+                print(t("menu.manage.sub_prompt"))
+                print(t("menu.manage.sub_manage", n=1))
+                print(t("menu.manage.sub_config", n=2))
+                print(t("menu.plugin.back", n=0))
+                print()
+                sub_c = input("  " + t("menu.main.prompt", max=2)).strip()
+                if sub_c == "1":
+                    _run_management_for_server(server_cfg, server_dir)
+                elif sub_c == "2":
+                    _edit_server_config(server_cfg, server_dir)
+                else:
+                    print(t("app.invalid_choice_short"))
         except ValueError:
-            pass
-        print(t("app.invalid_choice_short"))
+            print(t("app.invalid_choice_short"))
 
 
 # ---------------------------------------------------------------------------

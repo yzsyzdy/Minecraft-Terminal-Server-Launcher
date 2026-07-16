@@ -65,7 +65,6 @@ def _prompt_eula(name: str) -> bool:
     return ans == "y"
 
 
-
 def _project_dir() -> str:
     if getattr(sys, "frozen", False):
         return os.path.dirname(os.path.abspath(sys.executable))
@@ -115,7 +114,10 @@ def _start_server(server_cfg: dict, config: dict, project_dir: str) -> int:
     print(t("server.info_mc", ver=server_cfg.get("mc_version", "?")))
     print(t("server.info_java", path=java_abs))
     print(t("server.info_jar", path=jar_abs))
+    proc_prio = server_cfg.get("process_priority", "normal")
     print(t("server.info_memory", min=min_mem, max=max_mem))
+    if proc_prio != "normal":
+        print(t("server.info_priority", priority=proc_prio))
     print()
 
     while True:
@@ -125,12 +127,14 @@ def _start_server(server_cfg: dict, config: dict, project_dir: str) -> int:
                     java_path=java_abs, jar_path=jar_abs,
                     min_mem=min_mem, max_mem=max_mem,
                     extra_jvm_args=extra_jvm, extra_server_args=extra_srv,
+                    process_priority=proc_prio,
                 )
             else:
                 exit_code = start_minecraft_server(
                     java_path=java_abs, jar_path=jar_abs,
                     min_mem=min_mem, max_mem=max_mem,
                     extra_jvm_args=extra_jvm, extra_server_args=extra_srv,
+                    process_priority=proc_prio,
                 )
         except FileNotFoundError as e:
             print(t("app.error_file_not_found", msg=str(e)))

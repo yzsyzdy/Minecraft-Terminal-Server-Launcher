@@ -107,6 +107,22 @@
     "menu.hybrid.unsupported_bedrock": "  [{name}] Bedrock server does not support this feature.",
     "menu.hybrid.unsupported_unknown": "  [{name}] Unknown server type.",
 
+    "menu.manage.sub_prompt": "  Select operation:",
+    "menu.manage.sub_manage": "  [{n}] Plugin/Mod management",
+    "menu.manage.sub_config": "  [{n}] Server config",
+
+    "menu.config.title": "  [Config] Server: {name}",
+    "menu.config.1": "  [{n}] Process priority = {val}",
+    "menu.config.2": "  [{n}] Extra JVM args = {val}",
+    "menu.config.3": "  [{n}] Extra server args = {val}",
+    "menu.config.prio_prompt": "  Select process priority:",
+    "menu.config.prio_normal": "  [{n}] normal",
+    "menu.config.prio_below": "  [{n}] below_normal",
+    "menu.config.prio_low": "  [{n}] low",
+    "menu.config.prio_invalid": "  Invalid choice.",
+    "menu.config.saved": "  [Saved] Config updated.",
+    "menu.config.extra_prompt": "  Enter args (separated by space) [{cur}]: ",
+
     "import.prompt": "  Enter zip file path (drag & drop supported): ",
     "import.file_missing": "  [Error] File not found: {path}",
     "import.unsupported_format": "  [Error] Unsupported format: {ext}. Only .zip is supported.",
@@ -206,6 +222,7 @@
     "server.info_java": "  Java:      {path}",
     "server.info_jar": "  Jar:       {path}",
     "server.info_memory": "  Memory:    min {min} / max {max}",
+    "server.info_priority": "  Priority:  {priority}",
 
     "search.query_plugin": "  Enter plugin name or keyword: ",
     "search.searching_plugins": "  [Search] Querying SpigotMC + Modrinth + Hangar ...",

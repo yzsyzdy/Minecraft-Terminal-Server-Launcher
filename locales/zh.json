@@ -108,6 +108,22 @@
     "menu.hybrid.unsupported_bedrock": "  [{name}] 基岩版服务端不支持此功能。",
     "menu.hybrid.unsupported_unknown": "  [{name}] 无法识别服务端类型。",
 
+    "menu.manage.sub_prompt": "  请选择操作：",
+    "menu.manage.sub_manage": "  [{n}] 插件/模组管理",
+    "menu.manage.sub_config": "  [{n}] 服务器配置",
+
+    "menu.config.title": "  [配置] 服务器: {name}",
+    "menu.config.1": "  [{n}] 进程优先级 = {val}",
+    "menu.config.2": "  [{n}] 额外 JVM 参数 = {val}",
+    "menu.config.3": "  [{n}] 额外服务端参数 = {val}",
+    "menu.config.prio_prompt": "  请选择进程优先级：",
+    "menu.config.prio_normal": "  [{n}] normal",
+    "menu.config.prio_below": "  [{n}] below_normal",
+    "menu.config.prio_low": "  [{n}] low",
+    "menu.config.prio_invalid": "  无效的选择。",
+    "menu.config.saved": "  [已保存] 配置已更新。",
+    "menu.config.extra_prompt": "  请输入参数（用空格分隔）[{cur}]：",
+
     "import.prompt": "  请输入压缩包路径（支持拖拽文件到窗口）：",
     "import.file_missing": "  [错误] 文件不存在: {path}",
     "import.unsupported_format": "  [错误] 不支持的文件格式: {ext}，仅支持 .zip",
@@ -207,6 +223,7 @@
     "server.info_java": "  Java:      {path}",
     "server.info_jar": "  核心:      {path}",
     "server.info_memory": "  内存:      最小 {min} / 最大 {max}",
+    "server.info_priority": "  优先级:    {priority}",
 
     "search.query_plugin": "  请输入插件名称或关键词: ",
     "search.searching_plugins": "  [搜索] 正在查询 SpigotMC + Modrinth + Hangar ...",

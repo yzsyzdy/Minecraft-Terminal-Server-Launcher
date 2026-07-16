@@ -107,6 +107,22 @@
     "menu.hybrid.unsupported_bedrock": "  [{name}] Bedrock-сервер не поддерживает эту функцию.",
     "menu.hybrid.unsupported_unknown": "  [{name}] Неизвестный тип сервера.",
 
+    "menu.manage.sub_prompt": "  Выберите действие:",
+    "menu.manage.sub_manage": "  [{n}] Управление плагинами/модами",
+    "menu.manage.sub_config": "  [{n}] Конфигурация сервера",
+
+    "menu.config.title": "  [Конфигурация] Сервер: {name}",
+    "menu.config.1": "  [{n}] Приоритет процесса = {val}",
+    "menu.config.2": "  [{n}] Доп. аргументы JVM = {val}",
+    "menu.config.3": "  [{n}] Доп. аргументы сервера = {val}",
+    "menu.config.prio_prompt": "  Выберите приоритет процесса:",
+    "menu.config.prio_normal": "  [{n}] normal",
+    "menu.config.prio_below": "  [{n}] below_normal",
+    "menu.config.prio_low": "  [{n}] low",
+    "menu.config.prio_invalid": "  Неверный выбор.",
+    "menu.config.saved": "  [Сохранено] Конфигурация обновлена.",
+    "menu.config.extra_prompt": "  Введите аргументы (через пробел) [{cur}]: ",
+
     "import.prompt": "  Укажите путь к zip-файлу (поддерживается перетаскивание): ",
     "import.file_missing": "  [Ошибка] Файл не найден: {path}",
     "import.unsupported_format": "  [Ошибка] Неподдерживаемый формат: {ext}. Поддерживается только .zip.",
@@ -206,6 +222,7 @@
     "server.info_java": "  Java:      {path}",
     "server.info_jar": "  JAR:       {path}",
     "server.info_memory": "  Память:    мин {min} / макс {max}",
+    "server.info_priority": "  Приоритет: {priority}",
 
     "search.query_plugin": "  Введите название плагина: ",
     "search.searching_plugins": "  [Поиск] Запрос к SpigotMC + Modrinth + Hangar ...",

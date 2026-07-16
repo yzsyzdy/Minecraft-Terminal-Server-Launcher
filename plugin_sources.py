@@ -62,7 +62,9 @@ def spiget_search(query: str, limit: int = 10) -> list[PluginResult]:
             "source": "SpigotMC",
             "id": str(tid),
             "name": item.get("name", "?"),
-            "author": item.get("author", {}).get("name", "?") if isinstance(item.get("author"), dict) else "?",
+            "author": (
+                item.get("author", {}).get("name", "?")
+                if isinstance(item.get("author"), dict) else "?"),
             "description": item.get("tag", ""),
             "downloads": item.get("downloads", 0),
             "tested_versions": [v for v in tested if isinstance(v, str)],

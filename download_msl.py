@@ -135,7 +135,12 @@ def msl_get_server_types(project_dir: str = "") -> Optional[dict]:
 
 def msl_get_versions(server_type: str, project_dir: str = "") -> Optional[dict]:
     key = f"versions_{server_type}"
-    return _msl_cache_fetch(key, f"/mirrors/{server_type}", project_dir) if project_dir else _msl_request(f"/mirrors/{server_type}")
+    if project_dir:
+        data = _msl_cache_fetch(key, f"/mirrors/{server_type}",
+                                project_dir)
+    else:
+        data = _msl_request(f"/mirrors/{server_type}")
+    return data
 
 
 def msl_get_download_url(server_type: str, version: str) -> Optional[dict]:
@@ -452,6 +457,7 @@ def show_download_server_menu(servers_dir: str, project_dir: str) -> Optional[st
         "name": server_name, "mc_version": selected_version, "jar": jar_filename,
         "java_path": post_cfg["java_path"], "min_mem": post_cfg["min_mem"],
         "max_mem": post_cfg["max_mem"], "extra_jvm_args": [], "extra_server_args": [],
+        "process_priority": "normal",
     }, server_dir)
 
     size_mb = os.path.getsize(jar_path) / 1024 / 1024
