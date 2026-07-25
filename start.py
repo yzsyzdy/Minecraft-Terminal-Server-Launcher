@@ -71,8 +71,7 @@ def _project_dir() -> str:
     return os.path.dirname(os.path.abspath(__file__))
 
 
-def _start_server(server_cfg: dict, config: dict, project_dir: str) -> int:
-    server_path = server_cfg["_path"]
+def _start_server(server_cfg: dict, server_path: str, config: dict, project_dir: str) -> int:
     server_java = server_cfg.get("java_path") or config.get("java_path")
 
     try:
@@ -105,10 +104,13 @@ def _start_server(server_cfg: dict, config: dict, project_dir: str) -> int:
     frpc_proc = None
     if of_cfg.get("auto_start") and of_cfg.get("token") and of_cfg.get("proxy_id"):
         from openfrp.tunnel_manager import launch_frpc
+        print()
         frpc_proc = launch_frpc(project_dir, server_cfg)
+        print()
     elif of_cfg.get("auto_start"):
         print("  [OpenFrp] auto_start enabled but token or proxy_id missing, skipping.")
 
+    print("━" * 50)
     print()
     print(t("server.info_name", name=name))
     print(t("server.info_mc", ver=server_cfg.get("mc_version", "?")))
@@ -179,8 +181,9 @@ def main():
         sys.exit(0)
 
     server_cfg = load_server_config(selected["_path"])
+    server_path = selected["_path"]
 
-    exit_code = _start_server(server_cfg, config, project_dir)
+    exit_code = _start_server(server_cfg, server_path, config, project_dir)
     from openfrp.tunnel_manager import stop_frpc
     stop_frpc()
 

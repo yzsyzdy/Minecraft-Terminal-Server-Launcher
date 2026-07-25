@@ -249,24 +249,57 @@ def get_frpc_release_info() -> Optional[dict[str, Any]]:
     return result.get("data")
 
 
-def get_frpc_download_url() -> Optional[tuple[str, str, str]]:
+def get_frpc_download_urls() -> Optional[tuple[str, list[str], str]]:
     """
-    Resolve the download URL for the current system.
-    Returns (version_full, download_url, file_name) or None.
+    Resolve all possible download URLs for the current system.
+    Returns (version_full, [download_url, ...], file_name) or None.
     """
     data = get_frpc_release_info()
     if not data:
         return None
 
+    latest_ver = data.get("latest_ver", "")
     latest_full = data.get("latest_full", "")
     sources = data.get("source") or []
-    if not sources or not latest_full:
+    if not latest_full:
         return None
 
-    base_url = sources[0].get("value", "")
     _, _, file_name = _os_arch()
-    download_url = f"{base_url}/{latest_full}/{file_name}"
-    return latest_full, download_url, file_name
+    urls = []
+
+    # 0) User-provided Gitee mirror (most reliable)
+    gitee_url = (
+        "https://gitee.com/yzsyzdy/breeze_sever_tg/releases/download/files/"
+        f"{file_name}"
+    )
+    urls.append(gitee_url)
+
+    # 1) Mirrors from OpenFrp API
+    for src in sources:
+        base = src.get("value", "")
+        if base:
+            url = f"{base}/{latest_full}/{file_name}"
+            urls.append(url)
+
+    # 2) GitHub release (most reliable fallback)
+    #    Pattern: https://github.com/OpenFrp/frpc-release/releases/download/{tag}/{file}
+    tag = latest_full or f"v{latest_ver}"
+    github_url = (
+        f"https://github.com/OpenFrp/frpc-release/releases/download/"
+        f"{tag}/{file_name}"
+    )
+    urls.append(github_url)
+
+    if not urls:
+        return None
+    return latest_full, urls, file_name
+
+
+_FRPC_USER_AGENT = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/120.0.0.0 Safari/537.36"
+)
 
 
 def get_frpc_local_path(project_dir: str) -> str:
@@ -275,25 +308,84 @@ def get_frpc_local_path(project_dir: str) -> str:
     return os.path.join(project_dir, "openfrp", file_name)
 
 
+def _download_frpc_file(url: str, target_path: str) -> bool:
+    """Download frpc binary with a browser-like User-Agent."""
+    import urllib.request, urllib.error
+    try:
+        req = urllib.request.Request(
+            url, headers={"User-Agent": _FRPC_USER_AGENT})
+        with urllib.request.urlopen(req, timeout=300) as resp:
+            # Check content-type early
+            ct = resp.headers.get("Content-Type", "")
+            if "text/html" in ct or "text/plain" in ct:
+                print(f"\n  [错误] 服务器返回了 {ct}，不是文件下载链接")
+                return False
+
+            total = resp.length or 0
+            downloaded = 0
+            chunk_size = 8192
+            os.makedirs(os.path.dirname(target_path) or ".", exist_ok=True)
+            with open(target_path, "wb") as f:
+                while True:
+                    chunk = resp.read(chunk_size)
+                    if not chunk:
+                        break
+                    f.write(chunk)
+                    downloaded += len(chunk)
+                    if total > 0:
+                        pct = downloaded / total * 100
+                        filled = int(30 * downloaded / total)
+                        bar = "\u2588" * filled + "\u2591" * (30 - filled)
+                        print(f"    frpc [{bar}] {pct:5.1f}%",
+                              end="\r", flush=True)
+                    else:
+                        print(f"    frpc {downloaded / 1024 / 1024:.1f} MB...",
+                              end="\r", flush=True)
+        print()
+
+        # Validate: zip must start with PK\x03\x04
+        if target_path.endswith(".zip"):
+            with open(target_path, "rb") as f:
+                magic = f.read(4)
+            if magic != b"PK\x03\x04":
+                print(f"  [错误] 下载的文件不是有效的 zip 文件")
+                return False
+
+        return True
+    except (urllib.error.HTTPError, urllib.error.URLError, OSError) as e:
+        print(f"\n  {t('app.error', msg=f'Download failed: {e}')}")
+        return False
+
+
 def download_frpc(project_dir: str) -> Optional[str]:
     """
     Download the latest frpc for current platform.
+    Tries all available download sources in order.
     Returns the local file path, or None on failure.
     """
-    info = get_frpc_download_url()
+    info = get_frpc_download_urls()
     if not info:
         print("  [OpenFrp] " + t("app.error", msg="Failed to get frpc download info"))
         return None
 
-    _, download_url, file_name = info
+    _, urls, file_name = info
     target_dir = os.path.join(project_dir, "openfrp")
     os.makedirs(target_dir, exist_ok=True)
     target_path = os.path.join(target_dir, file_name)
 
-    from download_msl import multithreaded_download
-    print(f"  [OpenFrp] Downloading frpc {file_name} ...")
-    if multithreaded_download(download_url, target_path, desc="frpc"):
-        return target_path
+    for i, url in enumerate(urls):
+        print(f"  [OpenFrp] Downloading frpc {file_name} (mirror {i + 1}/{len(urls)}) ...")
+        if _download_frpc_file(url, target_path):
+            if os.path.getsize(target_path) > 0:
+                return target_path
+            # Empty file = failed silently
+            try:
+                os.remove(target_path)
+            except OSError:
+                pass
+        print(f"  [OpenFrp] Mirror {i + 1} failed, trying next...")
+
+    print("  [OpenFrp] " + t("app.error", msg="All download mirrors failed"))
     return None
 
 
@@ -316,36 +408,52 @@ def launch_frpc(project_dir: str, server_cfg: dict) -> Optional[subprocess.Popen
         print("  [OpenFrp] " + t("app.error", msg="token or proxy_id not configured"))
         return None
 
-    frpc_exe = get_frpc_local_path(project_dir)
-    if not os.path.isfile(frpc_exe):
+    frpc_dir = os.path.join(project_dir, "openfrp")
+    base_name = "frpc.exe" if platform.system().lower() == "windows" else "frpc"
+    frpc_bin = os.path.join(frpc_dir, base_name)
+    frpc_archive = get_frpc_local_path(project_dir)  # e.g. frpc_windows_amd64.zip
+
+    # Resolve frpc binary: check cache, extract, or download
+    if not os.path.isfile(frpc_bin):
+        if os.path.isfile(frpc_archive):
+            print("  [OpenFrp] Extracting frpc...")
+            result = _extract_frpc_if_needed(frpc_archive, project_dir)
+            if os.path.isfile(result):
+                frpc_bin = result
+            else:
+                print("  [OpenFrp] Archive corrupt, re-downloading...")
+                try:
+                    os.remove(frpc_archive)
+                except OSError:
+                    pass
+
+    if not os.path.isfile(frpc_bin):
         print("  [OpenFrp] frpc not found, downloading...")
         new_path = download_frpc(project_dir)
-        if not new_path or not os.path.isfile(new_path):
-            print("  [OpenFrp] " + t("app.error", msg="failed to download frpc"))
-            return None
-        # Check if extracted (zip contains the exe)
-        if not new_path.lower().endswith(".exe") and not os.access(new_path, os.X_OK):
-            frpc_exe = _extract_frpc_if_needed(new_path, project_dir)
-        else:
-            frpc_exe = new_path
+        if new_path and os.path.isfile(new_path):
+            result = _extract_frpc_if_needed(new_path, project_dir)
+            if os.path.isfile(result):
+                frpc_bin = result
 
-    # On Windows, frpc zip contains frpc.exe
-    if not os.path.isfile(frpc_exe):
-        frpc_exe = os.path.join(os.path.dirname(frpc_exe), "frpc.exe")
-    if not os.path.isfile(frpc_exe):
-        print("  [OpenFrp] " + t("app.error", msg=f"frpc not found at {frpc_exe}"))
+    if not os.path.isfile(frpc_bin):
+        print("  [OpenFrp] " + t("app.error", msg="failed to obtain frpc"))
         return None
 
-    cmd = [frpc_exe, "-u", token, "-p", str(proxy_id)]
+    cmd = [frpc_bin, "-u", token, "-p", str(proxy_id)]
     print(f"  [OpenFrp] Starting frpc for tunnel #{proxy_id} ...")
+    print(f"  [OpenFrp] {cmd[0]} -u {token[:6]}... -p {proxy_id}")
+    print()
 
     try:
         proc = subprocess.Popen(
             cmd,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
+            stdout=None,
+            stderr=None,
         )
         _frpc_process = proc
+        # Give frpc a moment to connect
+        import time
+        time.sleep(2)
         return proc
     except OSError as e:
         print(f"  [OpenFrp] " + t("app.error", msg=str(e)))
@@ -372,27 +480,50 @@ def _extract_frpc_if_needed(archive_path: str, project_dir: str) -> str:
     base_name = "frpc.exe" if platform.system().lower() == "windows" else "frpc"
     expected = os.path.join(target_dir, base_name)
 
-    if archive_path.endswith(".zip"):
-        with zipfile.ZipFile(archive_path, "r") as zf:
-            for m in zf.infolist():
-                if m.filename.endswith("frpc.exe") or m.filename.endswith("/frpc"):
-                    zf.extract(m, target_dir)
-                    extracted = os.path.join(target_dir, m.filename)
-                    if extracted != expected:
-                        shutil.move(extracted, expected)
-                    break
-    elif archive_path.endswith(".tar.gz"):
-        with tarfile.open(archive_path, "r:gz") as tf:
-            for m in tf.getmembers():
-                if m.name.endswith("/frpc") or m.name == "frpc":
-                    tf.extract(m, target_dir)
-                    extracted = os.path.join(target_dir, m.name)
-                    if extracted != expected:
-                        shutil.move(extracted, expected)
-                    break
+    # Helper: find any candidate binary in a directory tree
+    def _find_binary(dirpath: str) -> str:
+        for root, _dirs, files in os.walk(dirpath):
+            for f in files:
+                if f == base_name or f.lower() == base_name.lower():
+                    return os.path.join(root, f)
+                if "frpc" in f.lower() and (
+                    f.endswith(".exe") or "." not in f
+                ):
+                    return os.path.join(root, f)
+        return ""
 
     try:
-        os.remove(archive_path)
-    except OSError:
-        pass
-    return expected if os.path.isfile(expected) else archive_path
+        if archive_path.endswith(".zip"):
+            with zipfile.ZipFile(archive_path, "r") as zf:
+                for m in zf.infolist():
+                    if m.filename.endswith("frpc.exe") or m.filename.endswith("/frpc"):
+                        zf.extract(m, target_dir)
+                        extracted = os.path.join(target_dir, m.filename)
+                        if extracted != expected:
+                            shutil.move(extracted, expected)
+                        return expected
+                # No exact match — extract everything, then search
+                zf.extractall(target_dir)
+        elif archive_path.endswith(".tar.gz"):
+            with tarfile.open(archive_path, "r:gz") as tf:
+                for m in tf.getmembers():
+                    if m.name.endswith("/frpc") or m.name == "frpc":
+                        tf.extract(m, target_dir)
+                        extracted = os.path.join(target_dir, m.name)
+                        if extracted != expected:
+                            shutil.move(extracted, expected)
+                        return expected
+                # No exact match — extract everything
+                tf.extractall(target_dir)
+    except (zipfile.BadZipFile, tarfile.TarError, OSError):
+        return ""  # signal caller that extraction failed
+
+    # If we get here, no exact match was found — search for any frpc binary
+    found = _find_binary(target_dir)
+    if found and found != expected:
+        try:
+            shutil.move(found, expected)
+            return expected
+        except OSError:
+            return found
+    return found or expected

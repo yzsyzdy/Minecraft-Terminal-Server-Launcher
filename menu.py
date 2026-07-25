@@ -861,7 +861,7 @@ def show_main_menu(servers_dir: str, project_dir: str) -> Optional[dict[str, Any
         print(t("menu.main.exit", n=0))
         print()
 
-        choice = input(t("menu.main.prompt", max=5)).strip()
+        choice = input(t("menu.main.prompt", max=6)).strip()
 
         if choice == "0":
             print(t("app.exit_user"))

@@ -15,6 +15,10 @@ __pycache__/
 *.pyc
 
 website/
+openfrp/__pycache__
+
+openfrp/frpc_windows_amd64.zip
+openfrp/frpc.exe
 
 # Nuitka 构建输出
 build/
