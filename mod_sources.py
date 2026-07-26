@@ -10,7 +10,7 @@ import os
 import urllib.parse
 from typing import Any, Optional
 
-from constants import MODRINTH_BASE
+from constants import MODRINTH_BASE, USER_AGENT
 from http_utils import fetch_json
 
 API_TIMEOUT = 15
