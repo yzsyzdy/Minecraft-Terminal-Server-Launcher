@@ -6,13 +6,15 @@
 
 import json
 import os
+import re
 import shutil
 import urllib.request
 import urllib.error
 from typing import Any, Optional
 
 from i18n import t
-from constants import USER_AGENT, SPIGET_BASE
+from constants import SPIGET_BASE, USER_AGENT
+from http_utils import fetch_json
 
 # ---------------------------------------------------------------------------
 # 通用结构
@@ -25,20 +27,10 @@ VersionResult = dict[str, Any]
 """标准化版本信息：{version, download_url, game_versions, loaders}"""
 
 
-def _fetch_json(url: str, timeout: int = 15) -> Optional[Any]:
-    """GET 请求返回 JSON。"""
-    try:
-        req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            return json.loads(resp.read().decode("utf-8"))
-    except (urllib.error.HTTPError, urllib.error.URLError, OSError, json.JSONDecodeError) as e:
-        return None
-
-
 def _download_jar(url: str, target_path: str) -> bool:
     """下载 jar 文件到目标路径（使用多线程下载）。"""
     from download_msl import multithreaded_download
-    return multithreaded_download(url, target_path, desc="Download"
+    return multithreaded_download(url, target_path, desc="Download")
 
 
 # ---------------------------------------------------------------------------
@@ -49,7 +41,7 @@ def _download_jar(url: str, target_path: str) -> bool:
 def spiget_search(query: str, limit: int = 10) -> list[PluginResult]:
     """搜索 SpigotMC 插件。"""
     url = f"{SPIGET_BASE}/search/resources/{query}?size={limit}&fields=id,name,tag,testedVersions,downloads"
-    data = _fetch_json(url)
+    data = fetch_json(url)
     if not data or not isinstance(data, list):
         return []
     results: list[PluginResult] = []
@@ -76,7 +68,7 @@ def spiget_get_download(resource_id: str) -> Optional[str]:
     """获取 SpigotMC 下载重定向 URL。"""
     # 先拿最新版本信息
     ver_url = f"{SPIGET_BASE}/resources/{resource_id}/versions/latest"
-    ver_data = _fetch_json(ver_url)
+    ver_data = fetch_json(ver_url)
     if ver_data and isinstance(ver_data, dict):
         name = ver_data.get("name", "")
         # 下载端点返回 302 重定向
@@ -88,7 +80,7 @@ def spiget_get_download(resource_id: str) -> Optional[str]:
 def spiget_get_resource_details(resource_id: str) -> Optional[dict]:
     """获取 SpigotMC 资源详情，包含 external、file.externalUrl 等字段。"""
     url = f"{SPIGET_BASE}/resources/{resource_id}"
-    data = _fetch_json(url)
+    data = fetch_json(url)
     if not data or not isinstance(data, dict):
         return None
     return data
@@ -117,7 +109,6 @@ def _spiget_download_external_github(external_url: str, target_dir: str,
       - https://github.com/{owner}/{repo}/releases/download/{tag}/{file}
     返回 jar 文件名，失败返回 None。
     """
-    import re
     from download_msl import multithreaded_download
 
     # 尝试匹配 releases/tag/ 格式
@@ -215,12 +206,10 @@ MODRINTH_BASE = "https://api.modrinth.com/v2"
 
 
 def modrinth_search(query: str, limit: int = 10) -> list[PluginResult]:
-    """搜索 Modrinth 插件/模组。"""
+    """搜索 Modrinth 插件。使用 facets 过滤 project_type:plugin"""
     url = (f"{MODRINTH_BASE}/search?query={query}&limit={limit}"
            f"&facets={{\"project_type:plugin\"}}")
-    # 先不用 facets，获取全部结果
-    url = f"{MODRINTH_BASE}/search?query={query}&limit={limit}"
-    data = _fetch_json(url)
+    data = fetch_json(url)
     if not data or not isinstance(data, dict):
         return []
     hits = data.get("hits") or []
@@ -245,7 +234,7 @@ def modrinth_search(query: str, limit: int = 10) -> list[PluginResult]:
 def modrinth_get_versions(project_id: str) -> list[dict]:
     """获取 Modrinth 项目的所有版本。"""
     url = f"{MODRINTH_BASE}/project/{project_id}/version"
-    data = _fetch_json(url)
+    data = fetch_json(url)
     if not data or not isinstance(data, list):
         return []
     return data
@@ -284,7 +273,7 @@ HANGAR_BASE = "https://hangar.papermc.io/api/v1"
 def hangar_search(query: str, limit: int = 10) -> list[PluginResult]:
     """搜索 Hangar 插件。"""
     url = f"{HANGAR_BASE}/projects?q={query}&limit={limit}&sort=-stars"
-    data = _fetch_json(url)
+    data = fetch_json(url)
     if not data or not isinstance(data, dict):
         return []
     result_list = data.get("result") or []
@@ -312,7 +301,7 @@ def hangar_get_download(author: str, slug: str) -> Optional[tuple[str, str]]:
     返回 (version_name, download_url) 或 None。
     """
     url = f"{HANGAR_BASE}/projects/{author}/{slug}/versions?limit=1&offset=0"
-    data = _fetch_json(url)
+    data = fetch_json(url)
     if not data or not isinstance(data, dict):
         return None
     versions = data.get("result") or []

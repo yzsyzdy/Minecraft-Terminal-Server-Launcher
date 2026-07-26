@@ -83,6 +83,26 @@ def _msl_save_cache(cache: dict, project_dir: str) -> None:
         json.dump(cache, f, ensure_ascii=False, indent=2)
 
 
+def _msl_cache_prune(cache: dict) -> dict:
+    """清理超过 7 天的缓存条目。"""
+    today = _today_str()
+    pruned = {}
+    for key, entry in cache.items():
+        if isinstance(entry, dict) and entry.get("cached_at") == today:
+            pruned[key] = entry
+        elif isinstance(entry, dict) and entry.get("cached_at", "").startswith("20"):
+            # 保留当天和最近 7 天的缓存，超出则丢弃
+            try:
+                from datetime import datetime, timedelta
+                cache_date = datetime.strptime(entry["cached_at"], "%Y-%m-%d")
+                cached_today = datetime.strptime(today, "%Y-%m-%d")
+                if (cached_today - cache_date).days <= 7:
+                    pruned[key] = entry
+            except (ValueError, KeyError):
+                pass
+    return pruned
+
+
 def _msl_cache_fetch(cache_key: str, path: str, project_dir: str) -> Any:
     cache = _msl_load_cache(project_dir)
     entry = cache.get(cache_key)
@@ -107,6 +127,7 @@ def _msl_cache_fetch(cache_key: str, path: str, project_dir: str) -> Any:
         print(t("app.error", msg=data.get("message", "Abnormal"))); return None
     result = data.get("data")
     cache[cache_key] = {"cached_at": today, "data": result}
+    cache = _msl_cache_prune(cache)
     _msl_save_cache(cache, project_dir)
     return result
 

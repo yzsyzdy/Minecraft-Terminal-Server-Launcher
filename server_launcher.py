@@ -103,15 +103,6 @@ def console_title(title: str) -> None:
             pass
 
 
-_JVM_OPENS = [
-    "--add-opens", "java.base/java.lang=ALL-UNNAMED",
-    "--add-opens", "java.base/java.lang.reflect=ALL-UNNAMED",
-    "--add-opens", "java.base/java.util=ALL-UNNAMED",
-    "--add-opens", "java.base/java.io=ALL-UNNAMED",
-    "--add-opens", "java.base/sun.nio.ch=ALL-UNNAMED",
-]
-
-
 def _validate_java_jar(java_path: str, jar_path: str) -> str:
     """Validate Java and jar files, return working directory."""
     java_path = os.path.abspath(java_path)
@@ -135,7 +126,7 @@ def _build_jvm_cmd(
     nogui: bool = True,
 ) -> list[str]:
     """Build the full JVM command list."""
-    cmd = [java_path, f"-Xmx{max_mem}", f"-Xms{min_mem}"] + _JVM_OPENS
+    cmd = [java_path, f"-Xmx{max_mem}", f"-Xms{min_mem}"]
     if extra_jvm_args:
         cmd.extend(extra_jvm_args)
     cmd += ["-jar", jar_path]
@@ -199,7 +190,7 @@ def start_minecraft_server(
                 process.wait(timeout=10)
             except subprocess.TimeoutExpired:
                 process.kill()
-        os._exit(0)
+        raise KeyboardInterrupt()
 
     original_sigint = signal.getsignal(signal.SIGINT)
     signal.signal(signal.SIGINT, _handle_sigint)
@@ -207,7 +198,7 @@ def start_minecraft_server(
         for line in process.stdout:
             print(line, end="")
     except KeyboardInterrupt:
-        _handle_sigint(None, None)
+        pass
     process.wait()
     signal.signal(signal.SIGINT, original_sigint)
     return process.returncode
@@ -234,5 +225,23 @@ def start_server_interactive(
 
     process = _start_priority_process(
         cmd, workdir, process_priority)
-    process.wait()
+
+    # 注册 SIGINT 处理器，确保子进程被正确终止
+    def _handle_sigint(sig, frame):
+        print(t("launch.sigint"))
+        if process.poll() is None:
+            process.terminate()
+            try:
+                process.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                process.kill()
+        raise KeyboardInterrupt()
+
+    original_sigint = signal.getsignal(signal.SIGINT)
+    signal.signal(signal.SIGINT, _handle_sigint)
+    try:
+        process.wait()
+    except KeyboardInterrupt:
+        pass
+    signal.signal(signal.SIGINT, original_sigint)
     return process.returncode

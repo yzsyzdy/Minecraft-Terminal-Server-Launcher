@@ -10,12 +10,16 @@ import os
 import platform
 import subprocess
 import shutil
+import time
+import zipfile
+import tarfile
 import urllib.request
 import urllib.error
 from typing import Any, Optional
 from dataclasses import dataclass, field
 
 from constants import USER_AGENT, OPENFRP_API, OPENFRP_SOFTWARE
+from http_utils import fetch_json
 from i18n import t
 
 
@@ -88,20 +92,6 @@ class NodeInfo:
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _fetch_json(url: str, data: Optional[dict] = None,
-                headers: Optional[dict] = None, timeout: int = 15) -> Optional[Any]:
-    """GET or POST JSON request. Returns parsed JSON or None."""
-    req_headers = {"User-Agent": USER_AGENT, "Content-Type": "application/json"}
-    if headers:
-        req_headers.update(headers)
-
-    body = json.dumps(data).encode("utf-8") if data else None
-    try:
-        req = urllib.request.Request(url, data=body, headers=req_headers, method="POST" if data else "GET")
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            return json.loads(resp.read().decode("utf-8"))
-    except (urllib.error.HTTPError, urllib.error.URLError, OSError, json.JSONDecodeError) as e:
-        return None
 
 
 def _os_arch() -> str:
@@ -137,7 +127,7 @@ def get_tunnels_by_token(token: str) -> Optional[list[tuple[str, list[TunnelInfo
     Returns list of (node_name, [TunnelInfo]) grouped by node.
     """
     url = f"{OPENFRP_API}/api?action=getallproxies&user={token}"
-    result = _fetch_json(url, timeout=10)
+    result = fetch_json(url, timeout=10)
     if not result or not result.get("success"):
         return None
 
@@ -159,7 +149,7 @@ def get_tunnels_by_token(token: str) -> Optional[list[tuple[str, list[TunnelInfo
 def get_node_list(auth_token: str) -> Optional[list[NodeInfo]]:
     """Fetch all nodes (API 6). Requires Authorization header."""
     url = f"{OPENFRP_API}/frp/api/getNodeList"
-    result = _fetch_json(url, headers={"Authorization": auth_token}, timeout=10)
+    result = fetch_json(url, headers={"Authorization": auth_token}, timeout=10)
     if not result or not result.get("flag"):
         return None
     data = result.get("data") or {}
@@ -183,7 +173,7 @@ def get_node_list(auth_token: str) -> Optional[list[NodeInfo]]:
 def create_tunnel(auth_token: str, params: dict) -> Optional[str]:
     """Create a new tunnel (API 4). Returns msg string on success."""
     url = f"{OPENFRP_API}/frp/api/newProxy"
-    result = _fetch_json(url, data=params, headers={"Authorization": auth_token})
+    result = fetch_json(url, data=params, headers={"Authorization": auth_token})
     if not result:
         return None
     return result.get("msg", "")
@@ -192,7 +182,7 @@ def create_tunnel(auth_token: str, params: dict) -> Optional[str]:
 def delete_tunnel(auth_token: str, proxy_id: int) -> Optional[str]:
     """Delete a tunnel (API 5). Returns msg string on success."""
     url = f"{OPENFRP_API}/frp/api/removeProxy"
-    result = _fetch_json(url, data={"proxy_id": proxy_id},
+    result = fetch_json(url, data={"proxy_id": proxy_id},
                          headers={"Authorization": auth_token})
     if not result:
         return None
@@ -202,7 +192,7 @@ def delete_tunnel(auth_token: str, proxy_id: int) -> Optional[str]:
 def edit_tunnel(auth_token: str, params: dict) -> Optional[str]:
     """Edit an existing tunnel (API 7). Returns msg string on success."""
     url = f"{OPENFRP_API}/frp/api/editProxy"
-    result = _fetch_json(url, data=params, headers={"Authorization": auth_token})
+    result = fetch_json(url, data=params, headers={"Authorization": auth_token})
     if not result:
         return None
     return result.get("msg", "")
@@ -211,7 +201,7 @@ def edit_tunnel(auth_token: str, params: dict) -> Optional[str]:
 def get_tunnels_by_auth(auth_token: str) -> Optional[list[TunnelInfo]]:
     """Fetch all tunnels using Authorization (API 3)."""
     url = f"{OPENFRP_API}/frp/api/getUserProxies"
-    result = _fetch_json(url, headers={"Authorization": auth_token}, timeout=10)
+    result = fetch_json(url, headers={"Authorization": auth_token}, timeout=10)
     if not result or not result.get("flag"):
         return None
     data = result.get("data") or {}
@@ -222,7 +212,7 @@ def get_tunnels_by_auth(auth_token: str) -> Optional[list[TunnelInfo]]:
 def get_user_info(auth_token: str) -> Optional[dict]:
     """Fetch user info (API 2). Returns data dict."""
     url = f"{OPENFRP_API}/frp/api/getUserInfo"
-    result = _fetch_json(url, headers={"Authorization": auth_token})
+    result = fetch_json(url, headers={"Authorization": auth_token})
     if not result or not result.get("flag"):
         return None
     return result.get("data")
@@ -231,7 +221,7 @@ def get_user_info(auth_token: str) -> Optional[dict]:
 def user_sign(auth_token: str) -> Optional[str]:
     """Daily sign-in (API 9). Returns msg. Auto-sign is against ToS."""
     url = f"{OPENFRP_API}/frp/api/userSign"
-    result = _fetch_json(url, headers={"Authorization": auth_token})
+    result = fetch_json(url, headers={"Authorization": auth_token})
     if not result:
         return None
     return result.get("msg", "")
@@ -243,7 +233,7 @@ def user_sign(auth_token: str) -> Optional[str]:
 
 def get_frpc_release_info() -> Optional[dict[str, Any]]:
     """Fetch latest frpc version info and download sources."""
-    result = _fetch_json(OPENFRP_SOFTWARE, timeout=10)
+    result = fetch_json(OPENFRP_SOFTWARE, timeout=10)
     if not result or not result.get("flag"):
         return None
     return result.get("data")
@@ -310,7 +300,6 @@ def get_frpc_local_path(project_dir: str) -> str:
 
 def _download_frpc_file(url: str, target_path: str) -> bool:
     """Download frpc binary with a browser-like User-Agent."""
-    import urllib.request, urllib.error
     try:
         req = urllib.request.Request(
             url, headers={"User-Agent": _FRPC_USER_AGENT})
@@ -398,7 +387,6 @@ def launch_frpc(project_dir: str, server_cfg: dict) -> Optional[subprocess.Popen
     Returns the Popen object, or None on failure.
     """
     global _frpc_process
-    import subprocess
 
     of_cfg = server_cfg.get("openfrp", {}) or {}
     token = of_cfg.get("token", "")
@@ -452,7 +440,6 @@ def launch_frpc(project_dir: str, server_cfg: dict) -> Optional[subprocess.Popen
         )
         _frpc_process = proc
         # Give frpc a moment to connect
-        import time
         time.sleep(2)
         return proc
     except OSError as e:
@@ -474,8 +461,9 @@ def stop_frpc() -> None:
 
 
 def _extract_frpc_if_needed(archive_path: str, project_dir: str) -> str:
-    """Extract frpc from downloaded zip/tar.gz. Returns path to the binary."""
-    import zipfile, tarfile
+    """Extract frpc from downloaded zip/tar.gz. Returns path to the binary.
+    Cleans up the archive on success.
+    """
     target_dir = os.path.dirname(archive_path)
     base_name = "frpc.exe" if platform.system().lower() == "windows" else "frpc"
     expected = os.path.join(target_dir, base_name)
@@ -492,6 +480,23 @@ def _extract_frpc_if_needed(archive_path: str, project_dir: str) -> str:
                     return os.path.join(root, f)
         return ""
 
+    # Clean up extra files after extraction (keep only the binary)
+    def _cleanup_extras(keep: str) -> None:
+        for root, dirs, files in os.walk(target_dir):
+            for f in files:
+                fp = os.path.join(root, f)
+                if fp != keep and fp != archive_path:
+                    try:
+                        os.remove(fp)
+                    except OSError:
+                        pass
+            for d in dirs:
+                fp = os.path.join(root, d)
+                try:
+                    shutil.rmtree(fp)
+                except OSError:
+                    pass
+
     try:
         if archive_path.endswith(".zip"):
             with zipfile.ZipFile(archive_path, "r") as zf:
@@ -501,6 +506,7 @@ def _extract_frpc_if_needed(archive_path: str, project_dir: str) -> str:
                         extracted = os.path.join(target_dir, m.filename)
                         if extracted != expected:
                             shutil.move(extracted, expected)
+                        _cleanup_extras(expected)
                         return expected
                 # No exact match — extract everything, then search
                 zf.extractall(target_dir)
@@ -512,6 +518,7 @@ def _extract_frpc_if_needed(archive_path: str, project_dir: str) -> str:
                         extracted = os.path.join(target_dir, m.name)
                         if extracted != expected:
                             shutil.move(extracted, expected)
+                        _cleanup_extras(expected)
                         return expected
                 # No exact match — extract everything
                 tf.extractall(target_dir)
@@ -520,10 +527,14 @@ def _extract_frpc_if_needed(archive_path: str, project_dir: str) -> str:
 
     # If we get here, no exact match was found — search for any frpc binary
     found = _find_binary(target_dir)
-    if found and found != expected:
-        try:
-            shutil.move(found, expected)
-            return expected
-        except OSError:
-            return found
-    return found or expected
+    if found:
+        if found != expected:
+            try:
+                shutil.move(found, expected)
+            except OSError:
+                pass
+        _cleanup_extras(expected)
+        return expected if os.path.isfile(expected) else found
+
+    _cleanup_extras("")
+    return ""

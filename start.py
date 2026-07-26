@@ -71,7 +71,8 @@ def _project_dir() -> str:
     return os.path.dirname(os.path.abspath(__file__))
 
 
-def _start_server(server_cfg: dict, server_path: str, config: dict, project_dir: str) -> int:
+def _start_server(server_cfg: dict, server_path: str, config: dict, project_dir: str) -> tuple[int, bool]:
+    _frpc_started = False
     server_java = server_cfg.get("java_path") or config.get("java_path")
 
     try:
@@ -84,13 +85,13 @@ def _start_server(server_cfg: dict, server_path: str, config: dict, project_dir:
         )
     except FileNotFoundError as e:
         print(t("app.error_file_not_found", msg=str(e)))
-        return 1
+        return 1, _frpc_started
 
     jar_rel = server_cfg.get("jar", "server.jar")
     jar_abs = os.path.abspath(os.path.join(server_path, jar_rel))
     if not os.path.isfile(jar_abs):
         print(t("app.error_jar_missing", path=jar_abs))
-        return 1
+        return 1, _frpc_started
 
     min_mem = server_cfg.get("min_mem", "1G")
     max_mem = server_cfg.get("max_mem", "4G")
@@ -101,11 +102,14 @@ def _start_server(server_cfg: dict, server_path: str, config: dict, project_dir:
 
     # OpenFrp auto-start
     of_cfg = server_cfg.get("openfrp", {}) or {}
-    frpc_proc = None
     if of_cfg.get("auto_start") and of_cfg.get("token") and of_cfg.get("proxy_id"):
         from openfrp.tunnel_manager import launch_frpc
         print()
         frpc_proc = launch_frpc(project_dir, server_cfg)
+        if frpc_proc is not None:
+            _frpc_started = True
+        else:
+            print("  [警告] frpc 启动失败，隧道可能不可用")
         print()
     elif of_cfg.get("auto_start"):
         print("  [OpenFrp] auto_start enabled but token or proxy_id missing, skipping.")
@@ -140,10 +144,10 @@ def _start_server(server_cfg: dict, server_path: str, config: dict, project_dir:
                 )
         except FileNotFoundError as e:
             print(t("app.error_file_not_found", msg=str(e)))
-            return 1
+            return 1, _frpc_started
         except KeyboardInterrupt:
             print(t("app.cancel"))
-            return 0
+            return 0, _frpc_started
 
         if not _is_eula_unagreed(server_path):
             break
@@ -161,7 +165,7 @@ def _start_server(server_cfg: dict, server_path: str, config: dict, project_dir:
             print(t("eula.refused"))
         break
 
-    return exit_code
+    return exit_code, _frpc_started
 
 
 def main():
@@ -183,9 +187,12 @@ def main():
     server_cfg = load_server_config(selected["_path"])
     server_path = selected["_path"]
 
-    exit_code = _start_server(server_cfg, server_path, config, project_dir)
-    from openfrp.tunnel_manager import stop_frpc
-    stop_frpc()
+    exit_code, frpc_started = _start_server(server_cfg, server_path, config, project_dir)
+
+    # 仅在 frpc 已被成功启动时才停止它
+    if frpc_started:
+        from openfrp.tunnel_manager import stop_frpc
+        stop_frpc()
 
     name = server_cfg.get("name", "?")
     print(t("app.done", name=name, code=exit_code))

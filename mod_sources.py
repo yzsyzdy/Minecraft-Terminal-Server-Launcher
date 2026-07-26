@@ -7,13 +7,11 @@
 
 import json
 import os
-import urllib.request
 import urllib.parse
-import urllib.error
-import urllib.error
 from typing import Any, Optional
 
-from constants import USER_AGENT, MODRINTH_BASE, CURSEFORGE_OFFICIAL, CURSEFORGE_PROXY
+from constants import MODRINTH_BASE
+from http_utils import fetch_json
 
 API_TIMEOUT = 15
 
@@ -36,11 +34,15 @@ _MOD_LOADER_NAMES: set[str] = {"fabric", "forge", "neoforge", "quilt"}
 _curseforge_api_key: str = ""
 
 
+def _curseforge_base() -> str:
+    """根据 API key 返回正确的 CurseForge 基础 URL。"""
+    return "https://api.curseforge.com/v1" if _curseforge_api_key else "https://api.curse.tools/v1/cf"
+
+
 def set_curseforge_api_key(key: str) -> None:
     """设置 CurseForge API key。有 key 时自动切换官方 API，无 key 时使用 curse.tools 代理。"""
-    global _curseforge_api_key, CURSEFORGE_BASE
+    global _curseforge_api_key
     _curseforge_api_key = key
-    CURSEFORGE_BASE = "https://api.curseforge.com/v1" if key else "https://api.curse.tools/v1/cf"
 
 
 def extract_mod_loader(name: str) -> str:
@@ -52,17 +54,6 @@ def extract_mod_loader(name: str) -> str:
     return "fabric"  # 默认
 
 
-def _fetch_json(url: str, headers: Optional[dict] = None, timeout: int = API_TIMEOUT) -> Optional[Any]:
-    """GET 请求返回 JSON。"""
-    req_hdrs = {"User-Agent": USER_AGENT}
-    if headers:
-        req_hdrs.update(headers)
-    try:
-        req = urllib.request.Request(url, headers=req_hdrs)
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            return json.loads(resp.read().decode("utf-8"))
-    except (urllib.error.HTTPError, urllib.error.URLError, OSError, json.JSONDecodeError):
-        return None
 
 
 # ---------------------------------------------------------------------------
@@ -91,7 +82,7 @@ def modrinth_search(query: str, mc_version: str = "", loader: str = "",
     url = (f"{MODRINTH_BASE}/search?query={encoded_query}&limit={limit}"
            f"&facets={encoded_facets}")
 
-    data = _fetch_json(url)
+    data = fetch_json(url)
     if not data or not isinstance(data, dict):
         return []
     hits = data.get("hits") or []
@@ -122,7 +113,7 @@ def modrinth_get_suitable_version(slug: str, mc_version: str,
     使用 /v2/project/{slug}/version 接口（同时支持 slug 和 UUID）。
     """
     url = f"{MODRINTH_BASE}/project/{urllib.parse.quote(slug, safe='')}/version"
-    data = _fetch_json(url)
+    data = fetch_json(url)
     if not data or not isinstance(data, list):
         return None
 
@@ -179,7 +170,7 @@ def modrinth_download(project_id: str, target_dir: str, name: str,
 # CurseForge
 # ---------------------------------------------------------------------------
 
-CURSEFORGE_BASE = "https://api.curse.tools/v1/cf"  # 默认使用免费代理，有 API key 时自动切换
+# 不再使用模块级 CURSEFORGE_BASE 常量，改用 _curseforge_base() 函数动态获取
 
 # Minecraft 模组的 classId
 CURSE_CLASS_MOD = 6
@@ -218,8 +209,8 @@ def curseforge_search(query: str, mc_version: str = "", loader: str = "",
         if curse_loader:
             params.append(f"modLoaderType={curse_loader}")
 
-    url = f"{CURSEFORGE_BASE}/mods/search?{'&'.join(params)}"
-    data = _fetch_json(url, headers=_curse_headers(), timeout=API_TIMEOUT)
+    url = f"{_curseforge_base()}/mods/search?{'&'.join(params)}"
+    data = fetch_json(url, headers=_curse_headers(), timeout=API_TIMEOUT)
     if not data or not isinstance(data, dict):
         return []
     items = data.get("data") or []
@@ -255,7 +246,7 @@ def curseforge_get_download_url(mod_id: str, mc_version: str,
     返回 (filename, download_url, file_size) 或 None。
     """
     # 获取模组文件列表
-    url = f"{CURSEFORGE_BASE}/mods/{mod_id}/files?pageSize=50&sortOrder=desc"
+    url = f"{_curseforge_base()}/mods/{mod_id}/files?pageSize=50&sortOrder=desc"
     if mc_version:
         url += f"&gameVersion={mc_version}"
     if loader:
@@ -263,7 +254,7 @@ def curseforge_get_download_url(mod_id: str, mc_version: str,
         if curse_loader:
             url += f"&modLoaderType={curse_loader}"
 
-    data = _fetch_json(url, headers=_curse_headers(), timeout=API_TIMEOUT)
+    data = fetch_json(url, headers=_curse_headers(), timeout=API_TIMEOUT)
     if not data or not isinstance(data, dict):
         return None
     files = data.get("data") or []
