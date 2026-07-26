@@ -11,6 +11,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "interactive": True,
     "language": "",
     "curseforge_api_key": "",
+    "download_threads": 16,
 }
 
 

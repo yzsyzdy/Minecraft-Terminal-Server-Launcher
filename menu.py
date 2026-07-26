@@ -8,8 +8,8 @@ import shutil
 from typing import Any, Optional
 
 from clear import clear_screen
-from i18n import t
-from config import load_config
+from i18n import t, load_language, available_languages, detect_os_language
+from config import load_config, save_config
 from server_manager import (
     _prompt_zip_path,
     import_server_from_zip,
@@ -835,6 +835,84 @@ def _openfrp_bind_tunnel(servers: list[dict], servers_dir: str, project_dir: str
 
 
 # ---------------------------------------------------------------------------
+# Settings menu
+# ---------------------------------------------------------------------------
+
+def _settings_menu(project_dir: str) -> None:
+    """Settings: language, download threads."""
+    from download_msl import set_download_threads
+
+    while True:
+        config = load_config(project_dir)
+        current_lang = config.get("language", "") or "auto"
+        current_threads = config.get("download_threads", 16)
+
+        clear_screen()
+        print()
+        print(t("settings.menu_title"))
+        print()
+        print(t("settings.lang_option", n=1, lang=current_lang))
+        print(t("settings.threads_option", n=2, count=current_threads))
+        print(t("settings.back", n=0))
+        print()
+        choice = input(t("settings.prompt")).strip()
+
+        if choice == "0":
+            return
+
+        elif choice == "1":
+            # 切换语言
+            langs = available_languages()
+            clear_screen()
+            print()
+            print(t("settings.lang_title"))
+            print()
+            for i, (code, display) in enumerate(langs, 1):
+                print(f"  [{i}] {display} ({code})")
+            print(f"  [A] {t('settings.lang_auto')}")
+            print(t("settings.back", n=0))
+            print()
+            c = input(t("settings.lang_prompt", max=len(langs))).strip().lower()
+            if c == "0":
+                continue
+            if c == "a":
+                config["language"] = ""
+            else:
+                try:
+                    idx = int(c) - 1
+                    if 0 <= idx < len(langs):
+                        config["language"] = langs[idx][0]
+                except ValueError:
+                    print(t("app.invalid_choice_short"))
+                    continue
+            save_config(config, project_dir)
+            load_language(config["language"] or detect_os_language())
+            print(t("settings.lang_saved"))
+            input(t("app.press_enter"))
+
+        elif choice == "2":
+            # 设置下载线程数
+            print()
+            print(t("settings.threads_prompt", current=current_threads))
+            c = input("  > ").strip()
+            if c:
+                try:
+                    n = int(c)
+                    if n < 1:
+                        n = 1
+                    config["download_threads"] = n
+                    save_config(config, project_dir)
+                    set_download_threads(n)
+                    print(t("settings.threads_saved", count=n))
+                except ValueError:
+                    print(t("settings.threads_invalid"))
+            input(t("app.press_enter"))
+
+        else:
+            print(t("app.invalid_choice_short"))
+
+
+# ---------------------------------------------------------------------------
 # Main menu
 # ---------------------------------------------------------------------------
 
@@ -861,10 +939,11 @@ def show_main_menu(servers_dir: str, project_dir: str) -> Optional[dict[str, Any
         print(t("menu.main.manage", n=4))
         print(t("menu.main.export", n=5))
         print("  [6] OpenFrp \u5185\u7f51\u7a7f\u900f")
+        print(t("menu.main.settings", n=7))
         print(t("menu.main.exit", n=0))
         print()
 
-        choice = input(t("menu.main.prompt", max=6)).strip()
+        choice = input(t("menu.main.prompt", max=7)).strip()
 
         if choice == "0":
             print(t("app.exit_user"))
@@ -918,8 +997,12 @@ def show_main_menu(servers_dir: str, project_dir: str) -> Optional[dict[str, Any
             _openfrp_menu(servers_now, servers_dir, project_dir)
             continue
 
+        elif choice == "7":
+            _settings_menu(project_dir)
+            continue
+
         else:
-            print(t("app.invalid_choice", max=6))
+            print(t("app.invalid_choice", max=7))
 
 
 def _select_server_for_launch(

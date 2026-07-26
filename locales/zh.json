@@ -18,7 +18,7 @@
     "app.no_servers_export": "  没有可导出的服务器。",
     "app.no_servers_manage": "  没有可管理的服务器。",
     "app.no_servers_start": "  没有可用服务器，请先导入或下载。",
-    "app.invalid_choice": "  无效选择，请输入{max}。",
+    "app.invalid_choice": "  无效选择，请输入 0-{max}。",
     "app.invalid_choice_short": "  无效选择。",
     "app.import_complete": "  导入完成！",
     "app.download_complete": "  下载完成！",
@@ -37,6 +37,7 @@
     "menu.main.download": "  [{n}] 下载服务器",
     "menu.main.manage": "  [{n}] 管理插件/模组",
     "menu.main.export": "  [{n}] 导出服务器",
+    "menu.main.settings": "  [{n}] 设置",
     "menu.main.exit": "  [{n}] 退出",
     "menu.main.prompt": "  请选择 (0-{max}): ",
 
@@ -307,5 +308,18 @@
     "openfrp.bind_proxy_id": "  隧道 ID (留空保持现有): ",
     "openfrp.bind_auto_start": "  随服务器启动自动启动 frpc? (y/N): ",
     "openfrp.bind_pid_invalid": "  [错误] 隧道 ID 必须是数字",
-    "openfrp.bind_complete": "  [OpenFrp] 绑定完成: proxy_id={proxy_id}, auto_start={auto_start}"
+    "openfrp.bind_complete": "  [OpenFrp] 绑定完成: proxy_id={proxy_id}, auto_start={auto_start}",
+
+    "settings.menu_title": "  [设置]",
+    "settings.lang_option": "  [{n}] 语言 = {lang}",
+    "settings.threads_option": "  [{n}] 下载线程数 = {count}",
+    "settings.back": "  [{n}] 返回",
+    "settings.prompt": "  请选择 (0-2): ",
+    "settings.lang_title": "  选择语言：",
+    "settings.lang_auto": "自动检测",
+    "settings.lang_prompt": "  请选择 (1-{max}, A=自动, 0=返回): ",
+    "settings.lang_saved": "  [设置] 语言已保存。",
+    "settings.threads_prompt": "  输入下载线程数 [{current}]（默认 16，建议 4-32）：",
+    "settings.threads_saved": "  [设置] 下载线程数已设为 {count}。",
+    "settings.threads_invalid": "  [错误] 请输入一个有效的正整数。"
 }
