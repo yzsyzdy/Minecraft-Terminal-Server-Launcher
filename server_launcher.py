@@ -182,6 +182,40 @@ def _print_launch_info(
 
 
 # ---------------------------------------------------------------------------
+# SIGINT 处理器（统一实现，避免重复注册）
+# ---------------------------------------------------------------------------
+
+from contextlib import contextmanager
+
+
+@contextmanager
+def _sigint_handler(process: subprocess.Popen):
+    """上下文管理器：注册 SIGINT 处理器，退出时自动恢复。
+
+    在 with 块内，Ctrl+C 会优雅终止子进程并抛出 KeyboardInterrupt。
+    退出 with 块后自动恢复原有的 SIGINT 处理器。
+    """
+    def _handle_sigint(sig, frame):
+        print(t("launch.sigint"))
+        if process.poll() is None:
+            process.terminate()
+            try:
+                process.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                process.kill()
+        raise KeyboardInterrupt()
+
+    original_sigint = signal.getsignal(signal.SIGINT)
+    signal.signal(signal.SIGINT, _handle_sigint)
+    try:
+        yield
+    except KeyboardInterrupt:
+        pass  # 已终止子进程，只需等待真正的退出
+    finally:
+        signal.signal(signal.SIGINT, original_sigint)
+
+
+# ---------------------------------------------------------------------------
 # 非交互模式启动
 # ---------------------------------------------------------------------------
 
@@ -199,11 +233,11 @@ def start_minecraft_server(
     """以非交互模式启动服务器（仅输出日志，不接受控制台输入）。
 
     工作原理:
-      1. 验证 Java 和核心 jar 路径
-      2. 按优先级配置启动子进程
-      3. 逐行读取 stdout 并打印到控制台
-      4. 注册 SIGINT 处理器实现优雅关闭
-      5. 返回 Minecraft 服务端的退出码
+       1. 验证 Java 和核心 jar 路径
+       2. 按优先级配置启动子进程
+       3. 逐行读取 stdout 并打印到控制台
+       4. 注册 SIGINT 处理器实现优雅关闭
+       5. 返回 Minecraft 服务端的退出码
 
     Returns:
         服务端进程的退出码 (0 = 正常退出)
@@ -224,27 +258,13 @@ def start_minecraft_server(
         text=True, encoding="utf-8", bufsize=1,
     )
 
-    # SIGINT 处理器: 终止服务端子进程后抛出 KeyboardInterrupt，
-    # 让调用方（start.py）有机会清理 frpc 等附属进程。
-    def _handle_sigint(sig, frame):
-        print(t("launch.sigint"))
-        if process.poll() is None:
-            process.terminate()
-            try:
-                process.wait(timeout=10)
-            except subprocess.TimeoutExpired:
-                process.kill()
-        raise KeyboardInterrupt()
-
-    original_sigint = signal.getsignal(signal.SIGINT)
-    signal.signal(signal.SIGINT, _handle_sigint)
-    try:
-        for line in process.stdout:
-            print(line, end="")
-    except KeyboardInterrupt:
-        pass  # 已终止子进程，只需等待真正的退出
+    with _sigint_handler(process):
+        try:
+            for line in process.stdout:
+                print(line, end="")
+        except KeyboardInterrupt:
+            pass
     process.wait()
-    signal.signal(signal.SIGINT, original_sigint)
     return process.returncode
 
 
@@ -282,22 +302,9 @@ def start_server_interactive(
     process = _start_priority_process(
         cmd, workdir, process_priority)
 
-    # 同样注册 SIGINT 处理器
-    def _handle_sigint(sig, frame):
-        print(t("launch.sigint"))
-        if process.poll() is None:
-            process.terminate()
-            try:
-                process.wait(timeout=10)
-            except subprocess.TimeoutExpired:
-                process.kill()
-        raise KeyboardInterrupt()
-
-    original_sigint = signal.getsignal(signal.SIGINT)
-    signal.signal(signal.SIGINT, _handle_sigint)
-    try:
-        process.wait()
-    except KeyboardInterrupt:
-        pass
-    signal.signal(signal.SIGINT, original_sigint)
+    with _sigint_handler(process):
+        try:
+            process.wait()
+        except KeyboardInterrupt:
+            pass
     return process.returncode

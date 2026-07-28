@@ -281,7 +281,7 @@ MC_JAVA_COMPAT: list[tuple[str, str, str, str, str]] = [
     ("1.13", "1.16.5", "8",  "11", "Java 11 offers better performance"),
     ("1.17", "1.17.1", "16", "17", "Java 8 no longer works"),
     ("1.18", "1.20.4", "17", "17", ""),
-    ("1.20.5", "1.25", "21", "21", "Officially required version"),
+    ("1.20.5", "1.24", "21", "21", "Officially required version"),
     ("1.25", "999",    "25", "25", "Latest snapshot"),
 ]
 
@@ -327,7 +327,12 @@ def get_java_requirement(mc_version: str) -> Optional[dict]:
 
 
 def _os_platform() -> str:
-    return "windows" if sys.platform.startswith("win") else "linux"
+    """检测当前操作系统，支持 Windows、macOS、Linux。"""
+    if sys.platform.startswith("win"):
+        return "windows"
+    if sys.platform.startswith("darwin"):
+        return "darwin"
+    return "linux"
 
 
 def _java_major_version(version_str: str) -> int:

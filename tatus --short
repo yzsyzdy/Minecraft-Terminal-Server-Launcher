@@ -1,0 +1,10 @@
+warning: in the working copy of 'openfrp/tunnel_manager.py', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'server_launcher.py', LF will be replaced by CRLF the next time Git touches it
+ clear.py                  |   8 [32m+[m[31m-[m
+ config.json               |   2 [32m+[m[31m-[m
+ download_msl.py           |  10 [32m+[m[31m-[m
+ java_tools.py             |   9 [32m+[m[31m-[m
+ locales/neko.json         |   1 [32m+[m
+ openfrp/tunnel_manager.py | 227 [32m++++++++++++++++++++[m[31m--------------------------[m
+ server_launcher.py        |  93 [32m++++++++++[m[31m---------[m
+ 7 files changed, 170 insertions(+), 180 deletions(-)

@@ -28,6 +28,8 @@ from typing import Any, Optional
 from dataclasses import dataclass, field
 
 from constants import USER_AGENT, OPENFRP_API, OPENFRP_SOFTWARE
+from http_utils import fetch_json
+from download_msl import download_file_with_progress
 from i18n import t
 
 
@@ -101,30 +103,9 @@ class NodeInfo:
 
 
 # ---------------------------------------------------------------------------
-# HTTP 请求工具
+# HTTP 请求工具（使用 http_utils.fetch_json 统一实现）
+# 不再重复实现 _fetch_json，详见 http_utils.py
 # ---------------------------------------------------------------------------
-
-def _fetch_json(url: str, data: Optional[dict] = None,
-                headers: Optional[dict] = None, timeout: int = 15) -> Optional[Any]:
-    """通用的 JSON API 请求封装。
-
-    同时支持 GET (data=None) 和 POST (data=dict)。
-    所有 OpenFrp API 调用都走这个函数，统一 User-Agent 和超时。
-    请求失败一律返回 None，不抛异常。
-    """
-    req_headers = {"User-Agent": USER_AGENT, "Content-Type": "application/json"}
-    if headers:
-        req_headers.update(headers)
-
-    body = json.dumps(data).encode("utf-8") if data else None
-    try:
-        req = urllib.request.Request(url, data=body, headers=req_headers,
-                                     method="POST" if data else "GET")
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            return json.loads(resp.read().decode("utf-8"))
-    except (urllib.error.HTTPError, urllib.error.URLError,
-            OSError, json.JSONDecodeError) as e:
-        return None
 
 
 def _os_arch() -> tuple[str, str, str]:
@@ -168,7 +149,7 @@ def get_tunnels_by_token(token: str) -> Optional[list[tuple[str, list[TunnelInfo
         失败返回 None。
     """
     url = f"{OPENFRP_API}/api?action=getallproxies&user={token}"
-    result = _fetch_json(url, timeout=10)
+    result = fetch_json(url, timeout=10)
     if not result or not result.get("success"):
         return None
 
@@ -194,7 +175,7 @@ def get_node_list(auth_token: str) -> Optional[list[NodeInfo]]:
     创建隧道前需要先选节点，节点根据地理位置和负载状态过滤。
     """
     url = f"{OPENFRP_API}/frp/api/getNodeList"
-    result = _fetch_json(url, headers={"Authorization": auth_token}, timeout=10)
+    result = fetch_json(url, headers={"Authorization": auth_token}, timeout=10)
     if not result or not result.get("flag"):
         return None
     data = result.get("data") or {}
@@ -218,7 +199,7 @@ def get_node_list(auth_token: str) -> Optional[list[NodeInfo]]:
 def create_tunnel(auth_token: str, params: dict) -> Optional[str]:
     """创建新隧道 (API 4)。返回服务端提示消息。"""
     url = f"{OPENFRP_API}/frp/api/newProxy"
-    result = _fetch_json(url, data=params, headers={"Authorization": auth_token})
+    result = fetch_json(url, data=params, headers={"Authorization": auth_token})
     if not result:
         return None
     return result.get("msg", "")
@@ -227,7 +208,7 @@ def create_tunnel(auth_token: str, params: dict) -> Optional[str]:
 def delete_tunnel(auth_token: str, proxy_id: int) -> Optional[str]:
     """删除隧道 (API 5)。"""
     url = f"{OPENFRP_API}/frp/api/removeProxy"
-    result = _fetch_json(url, data={"proxy_id": proxy_id},
+    result = fetch_json(url, data={"proxy_id": proxy_id},
                          headers={"Authorization": auth_token})
     if not result:
         return None
@@ -237,7 +218,7 @@ def delete_tunnel(auth_token: str, proxy_id: int) -> Optional[str]:
 def edit_tunnel(auth_token: str, params: dict) -> Optional[str]:
     """编辑隧道 (API 7)。"""
     url = f"{OPENFRP_API}/frp/api/editProxy"
-    result = _fetch_json(url, data=params, headers={"Authorization": auth_token})
+    result = fetch_json(url, data=params, headers={"Authorization": auth_token})
     if not result:
         return None
     return result.get("msg", "")
@@ -249,7 +230,7 @@ def get_tunnels_by_auth(auth_token: str) -> Optional[list[TunnelInfo]]:
     比 API 8 多返回 online 在线状态。
     """
     url = f"{OPENFRP_API}/frp/api/getUserProxies"
-    result = _fetch_json(url, headers={"Authorization": auth_token}, timeout=10)
+    result = fetch_json(url, headers={"Authorization": auth_token}, timeout=10)
     if not result or not result.get("flag"):
         return None
     data = result.get("data") or {}
@@ -260,7 +241,7 @@ def get_tunnels_by_auth(auth_token: str) -> Optional[list[TunnelInfo]]:
 def get_user_info(auth_token: str) -> Optional[dict]:
     """获取用户信息 (API 2，含流量使用情况)。"""
     url = f"{OPENFRP_API}/frp/api/getUserInfo"
-    result = _fetch_json(url, headers={"Authorization": auth_token})
+    result = fetch_json(url, headers={"Authorization": auth_token})
     if not result or not result.get("flag"):
         return None
     return result.get("data")
@@ -273,7 +254,7 @@ def user_sign(auth_token: str) -> Optional[str]:
     所以此函数仅用于手动签到，不做定时调用。
     """
     url = f"{OPENFRP_API}/frp/api/userSign"
-    result = _fetch_json(url, headers={"Authorization": auth_token})
+    result = fetch_json(url, headers={"Authorization": auth_token})
     if not result:
         return None
     return result.get("msg", "")
@@ -287,7 +268,7 @@ def user_sign(auth_token: str) -> Optional[str]:
 
 def get_frpc_release_info() -> Optional[dict[str, Any]]:
     """从 OpenFrp API 获取最新 frpc 版本信息和 CDN 源列表。"""
-    result = _fetch_json(OPENFRP_SOFTWARE, timeout=10)
+    result = fetch_json(OPENFRP_SOFTWARE, timeout=10)
     if not result or not result.get("flag"):
         return None
     return result.get("data")
@@ -297,9 +278,8 @@ def get_frpc_download_urls() -> Optional[tuple[str, list[str], str]]:
     """生成所有可用的 frpc 下载 URL。
 
     优先级:
-      [0] Gitee 用户镜像 (最可靠，由用户自己维护)
-      [1] OpenFrp API 返回的官方 CDN 源
-      [2] GitHub Releases (最后兜底)
+      [0] OpenFrp API 返回的官方 CDN 源
+      [1] GitHub Releases (最后兜底)
 
     Returns:
         (version_full, [url1, url2, ...], file_name)
@@ -317,14 +297,7 @@ def get_frpc_download_urls() -> Optional[tuple[str, list[str], str]]:
     _, _, file_name = _os_arch()
     urls = []
 
-    # 用户维护的 Gitee 镜像，CDN 宕机时的救命稻草
-    gitee_url = (
-        "https://gitee.com/yzsyzdy/breeze_sever_tg/releases/download/files/"
-        f"{file_name}"
-    )
-    urls.append(gitee_url)
-
-    # OpenFrp 官方 API 返回的 CDN 镜像列表
+    # OpenFrp 官方 API 返回的 CDN 镜像列表（由 OpenFrp 官方维护）
     for src in sources:
         base = src.get("value", "")
         if base:
@@ -360,56 +333,30 @@ def get_frpc_local_path(project_dir: str) -> str:
 
 
 def _download_frpc_file(url: str, target_path: str) -> bool:
-    """下载单个 frpc 文件（单线程 + 进度条 + 完整性校验）。
+    """下载单个 frpc 文件（使用公共下载函数 + frpc 专用校验）。
 
     校验点:
-      1. Content-Type 排除 HTML（OneDrive 等误返回网页）
-      2. zip 魔数 PK\\x03\\x04 确保文件合法
+      1. 使用 Chrome User-Agent 避免 CDN 拦截
+      2. Content-Type 排除 HTML（OneDrive 等误返回网页）
+      3. zip 魔数 PK\\x03\\x04 确保文件合法
     """
-    try:
-        req = urllib.request.Request(
-            url, headers={"User-Agent": _FRPC_USER_AGENT})
-        with urllib.request.urlopen(req, timeout=300) as resp:
-            # 某些 CDN 误返回网页而不是文件（如 1dr.zyghit.cn 返回 OneDrive 页面）
-            ct = resp.headers.get("Content-Type", "")
-            if "text/html" in ct or "text/plain" in ct:
-                print(f"\n  [错误] 服务器返回了 {ct}，不是文件下载链接")
-                return False
-
-            total = resp.length or 0
-            downloaded = 0
-            chunk_size = 8192
-            os.makedirs(os.path.dirname(target_path) or ".", exist_ok=True)
-            with open(target_path, "wb") as f:
-                while True:
-                    chunk = resp.read(chunk_size)
-                    if not chunk:
-                        break
-                    f.write(chunk)
-                    downloaded += len(chunk)
-                    if total > 0:
-                        pct = downloaded / total * 100
-                        filled = int(30 * downloaded / total)
-                        bar = "\u2588" * filled + "\u2591" * (30 - filled)
-                        print(f"    frpc [{bar}] {pct:5.1f}%",
-                              end="\r", flush=True)
-                    else:
-                        print(f"    frpc {downloaded / 1024 / 1024:.1f} MB...",
-                              end="\r", flush=True)
-        print()
-
-        # zip 文件必须以 PK\x03\x04 开头
-        if target_path.endswith(".zip"):
-            with open(target_path, "rb") as f:
-                magic = f.read(4)
-            if magic != b"PK\x03\x04":
-                print(f"  [错误] 下载的文件不是有效的 zip 文件")
-                return False
-
-        return True
-    except (urllib.error.HTTPError, urllib.error.URLError, OSError) as e:
-        print(f"\n  {t('app.error', msg=f'Download failed: {e}')}")
+    headers = {"User-Agent": _FRPC_USER_AGENT}
+    if not download_file_with_progress(url, target_path, desc="frpc", headers=headers):
         return False
+
+    # zip 文件必须以 PK\x03\x04 开头
+    if target_path.endswith(".zip"):
+        with open(target_path, "rb") as f:
+            magic = f.read(4)
+        if magic != b"PK\x03\x04":
+            print(f"\n  [错误] 下载的文件不是有效的 zip 文件")
+            try:
+                os.remove(target_path)
+            except OSError:
+                pass
+            return False
+
+    return True
 
 
 def download_frpc(project_dir: str) -> Optional[str]:
@@ -447,97 +394,98 @@ def download_frpc(project_dir: str) -> Optional[str]:
 # frpc 进程生命周期管理
 # ---------------------------------------------------------------------------
 
-_frpc_process: Optional[subprocess.Popen] = None
+class FrpcManager:
+    """frpc 进程管理器，封装生命周期管理，支持多实例追踪。"""
+
+    _instance: Optional["FrpcManager"] = None
+    _process: Optional[subprocess.Popen] = None
+
+    @classmethod
+    def get_instance(cls) -> "FrpcManager":
+        if cls._instance is None:
+            cls._instance = cls()
+        return cls._instance
+
+    def launch(self, project_dir: str, server_cfg: dict) -> Optional[subprocess.Popen]:
+        """启动 frpc 子进程。"""
+        of_cfg = server_cfg.get("openfrp", {}) or {}
+        token = of_cfg.get("token", "")
+        proxy_id = of_cfg.get("proxy_id", 0)
+
+        if not token or not proxy_id:
+            print("  [OpenFrp] " + t("app.error", msg="token or proxy_id not configured"))
+            return None
+
+        frpc_dir = os.path.join(project_dir, "openfrp")
+        base_name = "frpc.exe" if platform.system().lower() == "windows" else "frpc"
+        frpc_bin = os.path.join(frpc_dir, base_name)
+        frpc_archive = get_frpc_local_path(project_dir)
+
+        # 尝试获取 frpc 二进制文件: 缓存 → 解压 → 下载
+        if not os.path.isfile(frpc_bin):
+            if os.path.isfile(frpc_archive):
+                print("  [OpenFrp] Extracting frpc...")
+                result = _extract_frpc_if_needed(frpc_archive, project_dir)
+                if os.path.isfile(result):
+                    frpc_bin = result
+                else:
+                    print("  [OpenFrp] Archive corrupt, re-downloading...")
+                    try:
+                        os.remove(frpc_archive)
+                    except OSError:
+                        pass
+
+        if not os.path.isfile(frpc_bin):
+            print("  [OpenFrp] frpc not found, downloading...")
+            new_path = download_frpc(project_dir)
+            if new_path and os.path.isfile(new_path):
+                result = _extract_frpc_if_needed(new_path, project_dir)
+                if os.path.isfile(result):
+                    frpc_bin = result
+
+        if not os.path.isfile(frpc_bin):
+            print("  [OpenFrp] " + t("app.error", msg="failed to obtain frpc"))
+            return None
+
+        cmd = [frpc_bin, "-u", token, "-p", str(proxy_id)]
+        print(f"  [OpenFrp] Starting frpc for tunnel #{proxy_id} ...")
+        print(f"  [OpenFrp] {cmd[0]} -u {token[:6]}... -p {proxy_id}")
+        print()
+
+        try:
+            proc = subprocess.Popen(
+                cmd,
+                stdout=None,
+                stderr=None,
+            )
+            self._process = proc
+            time.sleep(2)
+            return proc
+        except OSError as e:
+            print(f"  [OpenFrp] " + t("app.error", msg=str(e)))
+            return None
+
+    def stop(self) -> None:
+        """停止正在运行的 frpc 进程。"""
+        if self._process and self._process.poll() is None:
+            print("  [OpenFrp] Stopping frpc...")
+            self._process.terminate()
+            try:
+                self._process.wait(timeout=5)
+            except Exception:
+                self._process.kill()
+            self._process = None
 
 
+# 保持向后兼容的全局函数
 def launch_frpc(project_dir: str, server_cfg: dict) -> Optional[subprocess.Popen]:
-    """启动 frpc 子进程。
-
-    全流程:
-      1. 检查 frpc.exe 是否存在
-      2. 如果不存在但 .zip 存在 -> 解压
-      3. 如果都不存在 -> 下载 -> 解压
-      4. 启动 frpc -u {token} -p {proxy_id}
-      5. 等 2 秒让 frpc 建立连接
-
-    frpc 的 stdout/stderr 直接输出到控制台（继承父进程），
-    方便用户看到连接状态和错误信息。
-    """
-    global _frpc_process
-
-    of_cfg = server_cfg.get("openfrp", {}) or {}
-    token = of_cfg.get("token", "")
-    proxy_id = of_cfg.get("proxy_id", 0)
-
-    if not token or not proxy_id:
-        print("  [OpenFrp] " + t("app.error", msg="token or proxy_id not configured"))
-        return None
-
-    frpc_dir = os.path.join(project_dir, "openfrp")
-    base_name = "frpc.exe" if platform.system().lower() == "windows" else "frpc"
-    frpc_bin = os.path.join(frpc_dir, base_name)
-    frpc_archive = get_frpc_local_path(project_dir)
-
-    # 尝试获取 frpc 二进制文件: 缓存 → 解压 → 下载
-    if not os.path.isfile(frpc_bin):
-        if os.path.isfile(frpc_archive):
-            print("  [OpenFrp] Extracting frpc...")
-            result = _extract_frpc_if_needed(frpc_archive, project_dir)
-            if os.path.isfile(result):
-                frpc_bin = result
-            else:
-                print("  [OpenFrp] Archive corrupt, re-downloading...")
-                try:
-                    os.remove(frpc_archive)
-                except OSError:
-                    pass
-
-    if not os.path.isfile(frpc_bin):
-        print("  [OpenFrp] frpc not found, downloading...")
-        new_path = download_frpc(project_dir)
-        if new_path and os.path.isfile(new_path):
-            result = _extract_frpc_if_needed(new_path, project_dir)
-            if os.path.isfile(result):
-                frpc_bin = result
-
-    if not os.path.isfile(frpc_bin):
-        print("  [OpenFrp] " + t("app.error", msg="failed to obtain frpc"))
-        return None
-
-    cmd = [frpc_bin, "-u", token, "-p", str(proxy_id)]
-    print(f"  [OpenFrp] Starting frpc for tunnel #{proxy_id} ...")
-    print(f"  [OpenFrp] {cmd[0]} -u {token[:6]}... -p {proxy_id}")
-    print()
-
-    try:
-        proc = subprocess.Popen(
-            cmd,
-            stdout=None,  # 继承父进程控制台，用户能看到 frpc 输出
-            stderr=None,
-        )
-        _frpc_process = proc
-        time.sleep(2)  # 等 frpc 建立连接后再启动 MC 服务器
-        return proc
-    except OSError as e:
-        print(f"  [OpenFrp] " + t("app.error", msg=str(e)))
-        return None
+    """启动 frpc 子进程（使用 FrpcManager 单例）。"""
+    return FrpcManager.get_instance().launch(project_dir, server_cfg)
 
 
 def stop_frpc() -> None:
-    """停止正在运行的 frpc 进程。
-
-    通过全局变量 _frpc_process 追踪当前 frpc 实例。
-    先尝试优雅 terminate，5 秒后强制 kill。
-    """
-    global _frpc_process
-    if _frpc_process and _frpc_process.poll() is None:
-        print("  [OpenFrp] Stopping frpc...")
-        _frpc_process.terminate()
-        try:
-            _frpc_process.wait(timeout=5)
-        except Exception:
-            _frpc_process.kill()
-        _frpc_process = None
+    """停止正在运行的 frpc 进程（使用 FrpcManager 单例）。"""
+    FrpcManager.get_instance().stop()
 
 
 def _extract_frpc_if_needed(archive_path: str, project_dir: str) -> str:

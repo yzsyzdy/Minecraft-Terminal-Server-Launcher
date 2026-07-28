@@ -1,5 +1,6 @@
 {
     "_lang": "萌猫语",
+    "_warning": "这是一个彩蛋语言文件，不要在 config.json 中设置 language 为 neko！请使用 zh 或 en",
     "_fallback": false,
 
     "app.title": "MSTL — Minecraft 服务器终端启动器喵",

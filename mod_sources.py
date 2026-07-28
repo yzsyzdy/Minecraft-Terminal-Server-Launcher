@@ -41,9 +41,15 @@ def _curseforge_base() -> str:
 
 
 def set_curseforge_api_key(key: str) -> None:
-    """设置 CurseForge API key。有 key 时自动切换官方 API，无 key 时使用 curse.tools 代理。"""
+    """设置 CurseForge API key。
+
+    优先级: 环境变量 MSTL_CURSEFORGE_KEY > 传入参数 key > 空字符串
+    有 key 时自动切换官方 API，无 key 时使用 curse.tools 代理。
+    """
     global _curseforge_api_key
-    _curseforge_api_key = key
+    # 环境变量优先级最高，避免 API key 在配置文件中明文存储
+    env_key = os.environ.get("MSTL_CURSEFORGE_KEY", "").strip()
+    _curseforge_api_key = env_key or key or ""
 
 
 def extract_mod_loader(name: str) -> str:

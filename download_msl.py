@@ -229,10 +229,24 @@ def _download_chunk(url: str, start: int, end: int, target_path: str,
         return False
 
 
-def _download_with_progress(url: str, target_path: str, desc: str = "") -> bool:
-    """Single-thread download (fallback when multi-thread is not viable)."""
+def download_file_with_progress(url: str, target_path: str, desc: str = "",
+                                headers: Optional[dict] = None) -> bool:
+    """单线程文件下载（带进度条）。
+
+    Args:
+        url: 下载 URL
+        target_path: 本地保存路径
+        desc: 进度条描述文字
+        headers: 自定义请求头（可选）
+
+    Returns:
+        成功返回 True，失败返回 False
+    """
+    req_headers = {"User-Agent": MSL_USER_AGENT}
+    if headers:
+        req_headers.update(headers)
     try:
-        req = urllib.request.Request(url, headers={"User-Agent": MSL_USER_AGENT})
+        req = urllib.request.Request(url, headers=req_headers)
         with urllib.request.urlopen(req, timeout=300) as resp:
             total = resp.length
             downloaded = 0
@@ -260,6 +274,10 @@ def _download_with_progress(url: str, target_path: str, desc: str = "") -> bool:
         return False
 
 
+# 向后兼容别名
+_download_with_progress = download_file_with_progress
+
+
 def multithreaded_download(url: str, target_path: str, desc: str = "",
                            num_threads: int = _DEFAULT_DOWNLOAD_THREADS) -> bool:
     """
@@ -269,14 +287,16 @@ def multithreaded_download(url: str, target_path: str, desc: str = "",
     Falls back to single-thread if not supported or file is too small.
     On chunk failure, retries with single-thread download.
     """
-    # 先获取文件大小用于分块
-    _, file_size = _check_range_support(url)
+    # 检查服务器是否支持 Range 请求，同时获取文件大小
+    range_supported, file_size = _check_range_support(url)
 
     if file_size < _MIN_CHUNK_SIZE or file_size <= 0:
-        return _download_with_progress(url, target_path, desc)
+        return download_file_with_progress(url, target_path, desc)
 
-    # 即使 HEAD 未报告 Range 支持，仍尝试多线程
-    #（部分 CDN 对 HEAD/GET 响应不一致，实际 GET 支持 Range）
+    # 如果服务器明确不支持 Range 请求，直接使用单线程下载
+    if not range_supported:
+        return download_file_with_progress(url, target_path, desc)
+
     actual_threads = min(num_threads, max(1, file_size // _MIN_CHUNK_SIZE))
     if actual_threads <= 1:
         return _download_with_progress(url, target_path, desc)
@@ -331,7 +351,7 @@ def multithreaded_download(url: str, target_path: str, desc: str = "",
             except OSError:
                 pass
             print(f"\n  {t('download.retry_fallback')}")
-            return _download_with_progress(url, target_path, desc)
+            return download_file_with_progress(url, target_path, desc)
 
     final_bar = "\u2588" * bar_width
     print(f"    {desc} [{final_bar}] 100.0%  "
