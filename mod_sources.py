@@ -12,6 +12,7 @@ from typing import Any, Optional
 
 from constants import MODRINTH_BASE, USER_AGENT
 from http_utils import fetch_json
+from i18n import t
 
 API_TIMEOUT = 15
 
@@ -148,8 +149,6 @@ def modrinth_download(project_id: str, target_dir: str, name: str,
     """
     from download_msl import multithreaded_download
 
-    from i18n import t
-
     info = modrinth_get_suitable_version(project_id, mc_version, loader)
     if not info:
         print(t("mod.no_version_match"))
@@ -267,11 +266,12 @@ def curseforge_get_download_url(mod_id: str, mc_version: str,
     file_size = latest.get("fileLength", 0)
 
     # 构建 CDN 下载 URL
+    # CurseForge CDN 路径格式: /files/{id前4位补零到4位}/{id}/{filename}
     file_id = latest.get("id", 0)
-    # 从 file ID 拆出第一段作为 CDN 子路径的一部分
-    file_id_str = str(file_id)
-    sub_path = file_id_str[:4] if len(file_id_str) >= 4 else file_id_str
-    cdn_url = f"https://edge.forgecdn.net/files/{sub_path}/{file_id}/{filename}"
+    if not file_id:
+        return None
+    prefix = str(file_id).zfill(4)[:4]  # zfill 确保至少4位，然后取前4位
+    cdn_url = f"https://edge.forgecdn.net/files/{prefix}/{file_id}/{filename}"
 
     return filename, cdn_url, file_size
 
@@ -284,7 +284,6 @@ def curseforge_download(mod_id: str, target_dir: str, name: str,
     """
     from download_msl import multithreaded_download
 
-    from i18n import t
     info = curseforge_get_download_url(mod_id, mc_version, loader)
     if not info:
         print(t("mod.no_version_match"))

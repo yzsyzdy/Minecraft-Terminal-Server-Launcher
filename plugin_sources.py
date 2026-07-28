@@ -64,19 +64,6 @@ def spiget_search(query: str, limit: int = 10) -> list[PluginResult]:
     return results
 
 
-def spiget_get_download(resource_id: str) -> Optional[str]:
-    """获取 SpigotMC 下载重定向 URL。"""
-    # 先拿最新版本信息
-    ver_url = f"{SPIGET_BASE}/resources/{resource_id}/versions/latest"
-    ver_data = fetch_json(ver_url)
-    if ver_data and isinstance(ver_data, dict):
-        name = ver_data.get("name", "")
-        # 下载端点返回 302 重定向
-        download_url = f"{SPIGET_BASE}/resources/{resource_id}/download"
-        return download_url
-    return None
-
-
 def spiget_get_resource_details(resource_id: str) -> Optional[dict]:
     """获取 SpigotMC 资源详情，包含 external、file.externalUrl 等字段。"""
     url = f"{SPIGET_BASE}/resources/{resource_id}"

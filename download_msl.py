@@ -151,10 +151,20 @@ def _msl_request(path: str) -> Any:
 
 
 def msl_get_server_types(project_dir: str = "") -> Optional[dict]:
+    """获取 MSL 镜像支持的所有服务端类型列表。
+
+    按类型分类: pluginsCore / modsCore / vanillaCore / proxyCore / bedrockCore。
+    有 project_dir 时会走每日缓存，避免频繁请求（MSL API 有限速:
+    30次/小时, 60次/天）。
+    """
     return _msl_cache_fetch("server_types", "/mirrors", project_dir) if project_dir else _msl_request("/mirrors")
 
 
 def msl_get_versions(server_type: str, project_dir: str = "") -> Optional[dict]:
+    """获取指定服务端类型的可用版本列表。
+
+    版本列表会过滤掉 pre/rc/snapshot 等测试版，只显示稳定版。
+    """
     key = f"versions_{server_type}"
     if project_dir:
         data = _msl_cache_fetch(key, f"/mirrors/{server_type}",
@@ -165,6 +175,11 @@ def msl_get_versions(server_type: str, project_dir: str = "") -> Optional[dict]:
 
 
 def msl_get_download_url(server_type: str, version: str) -> Optional[dict]:
+    """获取指定服务端和版本的下载地址。
+
+    注意: 下载 URL 不缓存，因为 MSL API 的限速按请求计（非按响应缓存）。
+    返回的 dict 包含 url、sha256、size 等字段。
+    """
     return _msl_request(f"/download/server/{server_type}/{version}")
 
 

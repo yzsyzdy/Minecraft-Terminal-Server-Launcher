@@ -320,5 +320,9 @@
     "settings.lang_saved": "  [Настройки] Язык сохранён.",
     "settings.threads_prompt": "  Потоков загрузки [{current}] (по умолч. 16, рекоменд. 4-32): ",
     "settings.threads_saved": "  [Настройки] Потоков загрузки установлено: {count}.",
-    "settings.threads_invalid": "  [Ошибка] Введите положительное целое число."
+    "settings.threads_invalid": "  [Ошибка] Введите положительное целое число.",
+    "settings.update_option": "  [{n}] Проверить обновления",
+    "settings.update_no_version": "  [Обновление] Нет локальной версии (version.json не найден)",
+    "settings.update_available": "  [Обновление] Версия {latest} доступна (текущая: {cur})",
+    "settings.update_latest": "  [Обновление] Уже последняя версия (v{ver})"
 }

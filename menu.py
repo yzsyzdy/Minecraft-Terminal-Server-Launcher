@@ -10,6 +10,7 @@ from typing import Any, Optional
 from clear import clear_screen
 from i18n import t, load_language, available_languages, detect_os_language
 from config import load_config, save_config
+from constants import REPO_URL
 from server_manager import (
     _prompt_zip_path,
     import_server_from_zip,
@@ -853,6 +854,7 @@ def _settings_menu(project_dir: str) -> None:
         print()
         print(t("settings.lang_option", n=1, lang=current_lang))
         print(t("settings.threads_option", n=2, count=current_threads))
+        print(t("settings.update_option", n=3))
         print(t("settings.back", n=0))
         print()
         choice = input(t("settings.prompt")).strip()
@@ -906,6 +908,18 @@ def _settings_menu(project_dir: str) -> None:
                     print(t("settings.threads_saved", count=n))
                 except ValueError:
                     print(t("settings.threads_invalid"))
+            input(t("app.press_enter"))
+
+        elif choice == "3":
+            from check_update import check_for_update
+            has_update, cur_ver, latest_ver = check_for_update()
+            if not cur_ver:
+                print(t("settings.update_no_version"))
+            elif has_update:
+                print(t("settings.update_available", cur=cur_ver, latest=latest_ver))
+                print(f"         {REPO_URL}/releases/tag/{latest_ver}")
+            else:
+                print(t("settings.update_latest", ver=cur_ver))
             input(t("app.press_enter"))
 
         else:

@@ -382,7 +382,19 @@ def _export_collect_files(server_dir: str, selected: set[str]) -> list[tuple[str
 
 def export_server_to_zip(server_dir: str, output_path: str,
                           selected_categories: set[str]) -> Optional[str]:
-    """Export a server to a zip archive. Returns output_path or None."""
+    """将服务器文件导出为 zip 存档。
+
+    参数:
+        server_dir: 服务器目录 (servers/<name>)
+        output_path: 输出的 zip 文件路径
+        selected_categories: 要包含的分类集合，如 {"world", "plugins"}
+
+    每类文件通过 _export_collect_files 收集，支持通配符和目录递归。
+    进度用 tqdm 风格的进度条显示。
+
+    Returns:
+        成功返回 output_path，失败返回 None
+    """
     files = _export_collect_files(server_dir, selected_categories)
     if not files:
         print(t("export.no_files"))

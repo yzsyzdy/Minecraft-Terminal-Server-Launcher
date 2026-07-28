@@ -320,5 +320,9 @@
     "settings.lang_saved": "  [Settings] Language saved.",
     "settings.threads_prompt": "  Download threads [{current}] (default 16, recommended 4-32): ",
     "settings.threads_saved": "  [Settings] Download threads set to {count}.",
-    "settings.threads_invalid": "  [Error] Please enter a valid positive integer."
+    "settings.threads_invalid": "  [Error] Please enter a valid positive integer.",
+    "settings.update_option": "  [{n}] Check for updates",
+    "settings.update_no_version": "  [Update] No local version info (version.json not found)",
+    "settings.update_available": "  [Update] Version {latest} available (current: {cur})",
+    "settings.update_latest": "  [Update] Already up to date (v{ver})"
 }

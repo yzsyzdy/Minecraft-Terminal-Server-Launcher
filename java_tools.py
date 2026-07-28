@@ -413,7 +413,9 @@ def _extract_and_rename_jdk(archive: str, target_dir: str, os_name: str) -> Opti
                     shutil.rmtree(tmp)
                 zf.extractall(tmp)
                 if roots:
-                    src = os.path.join(tmp, list(roots)[0])
+                    # 按字母序取第一个根目录，避免 set 无序导致随机选择
+                    root_dir = sorted(roots)[0]
+                    src = os.path.join(tmp, root_dir)
                     if os.path.isdir(src):
                         shutil.move(src, target_dir)
                 shutil.rmtree(tmp, ignore_errors=True)
@@ -429,7 +431,8 @@ def _extract_and_rename_jdk(archive: str, target_dir: str, os_name: str) -> Opti
                     shutil.rmtree(tmp)
                 tf.extractall(tmp)
                 if roots:
-                    src = os.path.join(tmp, list(roots)[0])
+                    root_dir = sorted(roots)[0]
+                    src = os.path.join(tmp, root_dir)
                     if os.path.isdir(src):
                         shutil.move(src, target_dir)
                 shutil.rmtree(tmp, ignore_errors=True)

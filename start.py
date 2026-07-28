@@ -1,20 +1,18 @@
 """
 MSTL — Minecraft Terminal Server Launcher
 
-Copyright (C) 2026  yzsyzdy
+启动入口。完整流程:
+  1. 加载 config.json，检测语言
+  2. 显示主菜单（show_main_menu）
+  3. 用户选择服务器后进入 _start_server
+  4. _start_server 按需启动 OpenFrp frpc 隧道
+  5. 解析 Java、验证核心 jar
+  6. 启动 Minecraft 服务端（交互或非交互模式）
+  7. 处理 EULA 协议（首次运行时需要同意）
+  8. 服务器退出后清理 frpc 进程
 
-This program is free software: you can redistribute it and/or modify
-it under the terms of the GNU General Public License as published by
-the Free Software Foundation, either version 3 of the License, or
-(at your option) any later version.
-
-This program is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-GNU General Public License for more details.
-
-You should have received a copy of the GNU General Public License
-along with this program.  If not, see <https://www.gnu.org/licenses/>.
+Copyright (C) 2026 yzsyzdy
+License: GNU General Public License v3.0
 """
 
 import os
@@ -26,12 +24,23 @@ from menu import show_main_menu
 from java_tools import resolve_java
 from server_launcher import start_minecraft_server, start_server_interactive
 from i18n import t, load_language, detect_os_language
+from constants import REPO_URL
 
+
+# ---------------------------------------------------------------------------
+# EULA 协议处理
+# Mojang 要求首次运行服务器前同意 EULA
+# ---------------------------------------------------------------------------
 
 def _is_eula_unagreed(server_path: str) -> bool:
+    """检查 eula.txt 中是否包含 eula=false。
+
+    服务端首次运行会自动生成 eula.txt。如果用户还没同意，
+    文件内容就是 eula=false。检测到后提示用户同意。
+    """
     eula_path = os.path.join(server_path, "eula.txt")
     if not os.path.isfile(eula_path):
-        return False
+        return False  # 还没生成文件，服务器还没跑过
     try:
         with open(eula_path, "r", encoding="utf-8") as f:
             for line in f:
@@ -43,6 +52,7 @@ def _is_eula_unagreed(server_path: str) -> bool:
 
 
 def _agree_to_eula(server_path: str) -> bool:
+    """将 eula.txt 中的 eula=false 改为 eula=true。"""
     eula_path = os.path.join(server_path, "eula.txt")
     try:
         with open(eula_path, "r", encoding="utf-8") as f:
@@ -56,6 +66,7 @@ def _agree_to_eula(server_path: str) -> bool:
 
 
 def _prompt_eula(name: str) -> bool:
+    """向用户显示 EULA 协议并确认。"""
     print()
     print(t("eula.notice"))
     print()
@@ -66,13 +77,33 @@ def _prompt_eula(name: str) -> bool:
 
 
 def _project_dir() -> str:
+    """获取项目根目录。
+
+    同时支持 Nuitka/PyInstaller 打包后的 frozen 模式
+    和开发时的源码模式。
+    """
     if getattr(sys, "frozen", False):
         return os.path.dirname(os.path.abspath(sys.executable))
     return os.path.dirname(os.path.abspath(__file__))
 
 
-def _start_server(server_cfg: dict, server_path: str, config: dict, project_dir: str) -> tuple[int, bool]:
-    _frpc_started = False
+# ---------------------------------------------------------------------------
+# 核心启动流程
+# ---------------------------------------------------------------------------
+
+def _start_server(server_cfg: dict, server_path: str,
+                  config: dict, project_dir: str) -> int:
+    """启动一个 Minecraft 服务器的完整流程。
+
+    步骤:
+      1. 解析 Java 路径（自动检测/缓存/下载）
+      2. 验证核心 jar 存在
+      3. 按需启动 OpenFrp frpc 隧道
+      4. 显示服务器信息摘要
+      5. 启动 MC 服务端（交互/非交互）
+      6. 处理 EULA 协议（如果需要）
+      7. 返回服务端退出码
+    """
     server_java = server_cfg.get("java_path") or config.get("java_path")
 
     try:
@@ -85,13 +116,13 @@ def _start_server(server_cfg: dict, server_path: str, config: dict, project_dir:
         )
     except FileNotFoundError as e:
         print(t("app.error_file_not_found", msg=str(e)))
-        return 1, _frpc_started
+        return 1
 
     jar_rel = server_cfg.get("jar", "server.jar")
     jar_abs = os.path.abspath(os.path.join(server_path, jar_rel))
     if not os.path.isfile(jar_abs):
         print(t("app.error_jar_missing", path=jar_abs))
-        return 1, _frpc_started
+        return 1
 
     min_mem = server_cfg.get("min_mem", "1G")
     max_mem = server_cfg.get("max_mem", "4G")
@@ -100,20 +131,20 @@ def _start_server(server_cfg: dict, server_path: str, config: dict, project_dir:
     interactive = config.get("interactive", True)
     name = server_cfg.get("name", "?")
 
-    # OpenFrp auto-start
+    # 如果需要内网穿透，先在 MC 服务器之前启动 frpc
     of_cfg = server_cfg.get("openfrp", {}) or {}
+    frpc_proc = None
     if of_cfg.get("auto_start") and of_cfg.get("token") and of_cfg.get("proxy_id"):
         from openfrp.tunnel_manager import launch_frpc
         print()
         frpc_proc = launch_frpc(project_dir, server_cfg)
-        if frpc_proc is not None:
-            _frpc_started = True
-        else:
+        if frpc_proc is None:
             print("  [警告] frpc 启动失败，隧道可能不可用")
         print()
     elif of_cfg.get("auto_start"):
         print("  [OpenFrp] auto_start enabled but token or proxy_id missing, skipping.")
 
+    # 用分隔线把 frpc 输出和服务器信息分开
     print("━" * 50)
     print()
     print(t("server.info_name", name=name))
@@ -126,6 +157,7 @@ def _start_server(server_cfg: dict, server_path: str, config: dict, project_dir:
         print(t("server.info_priority", priority=proc_prio))
     print()
 
+    # 主循环: 启动 → 检查 EULA → 自动重启
     while True:
         try:
             if interactive:
@@ -144,11 +176,14 @@ def _start_server(server_cfg: dict, server_path: str, config: dict, project_dir:
                 )
         except FileNotFoundError as e:
             print(t("app.error_file_not_found", msg=str(e)))
-            return 1, _frpc_started
+            return 1
         except KeyboardInterrupt:
+            # 由 server_launcher 中的 SIGINT 处理器抛出，
+            # 子进程已被终止，安全返回
             print(t("app.cancel"))
-            return 0, _frpc_started
+            return 0
 
+        # EULA 检查: 如果服务器因为 eula=false 退出，提示用户同意
         if not _is_eula_unagreed(server_path):
             break
 
@@ -158,21 +193,31 @@ def _start_server(server_cfg: dict, server_path: str, config: dict, project_dir:
             if _agree_to_eula(server_path):
                 print(t("eula.agreed"))
                 print()
-                continue
+                continue  # 自动重启服务器
             else:
                 print(t("eula.failed"))
         else:
             print(t("eula.refused"))
         break
 
-    return exit_code, _frpc_started
+    return exit_code
 
 
 def main():
+    """程序入口。"""
     from clear import clear_screen
     clear_screen()
     project_dir = _project_dir()
 
+    # 版本更新检查 (静默执行，不阻塞启动流程)
+    from check_update import check_for_update
+    has_update, cur_ver, latest_ver = check_for_update()
+    if has_update:
+        print(f"  [更新] 新版本 {latest_ver} 已发布 (当前: {cur_ver})")
+        print(f"        下载: {REPO_URL}/releases/tag/{latest_ver}")
+        print()
+
+    # 加载配置和语言
     config = load_config(project_dir)
     lang = config.get("language", "") or detect_os_language()
     load_language(lang)
@@ -180,19 +225,21 @@ def main():
 
     servers_dir = ensure_servers_folder(project_dir)
 
+    # 显示主菜单，用户选择服务器后返回
     selected = show_main_menu(servers_dir, project_dir)
     if selected is None:
         sys.exit(0)
 
+    # selected 是 list_servers 返回的条目（含 _path），
+    # 需要重新加载完整配置
     server_cfg = load_server_config(selected["_path"])
     server_path = selected["_path"]
 
-    exit_code, frpc_started = _start_server(server_cfg, server_path, config, project_dir)
+    exit_code = _start_server(server_cfg, server_path, config, project_dir)
 
-    # 仅在 frpc 已被成功启动时才停止它
-    if frpc_started:
-        from openfrp.tunnel_manager import stop_frpc
-        stop_frpc()
+    # 清理: 无论服务器如何退出，都要停掉 frpc
+    from openfrp.tunnel_manager import stop_frpc
+    stop_frpc()
 
     name = server_cfg.get("name", "?")
     print(t("app.done", name=name, code=exit_code))

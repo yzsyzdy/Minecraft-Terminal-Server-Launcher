@@ -61,6 +61,16 @@ jobs:
             Write-Host "Build output not found at $source"
             exit 1
           }
+
+          # 写入版本信息文件
+          $versionFile = Join-Path $source "version.json"
+          $json = @{
+            version = "${{ github.ref_name }}" -replace '^v', ''
+            tag_name = "${{ github.ref_name }}"
+          } | ConvertTo-Json
+          Set-Content -Path $versionFile -Value $json -Encoding UTF8
+          Write-Host "Created $versionFile"
+
           $zipFile = "MSTL-${{ github.ref_name }}.zip"
           Compress-Archive -Path "$source\*" -DestinationPath $zipFile -Force
           Write-Host "Created $zipFile"

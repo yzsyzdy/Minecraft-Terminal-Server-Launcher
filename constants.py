@@ -4,6 +4,10 @@ Shared constants for MSTL.
 
 USER_AGENT = "MSTL/1.0"
 
+# Project repo
+REPO_URL = "https://github.com/yzsyzdy/Minecraft-Terminal-Server-Launcher"
+REPO_API = "https://api.github.com/repos/yzsyzdy/Minecraft-Terminal-Server-Launcher/releases/latest"
+
 # Spiget API base
 SPIGET_BASE = "https://api.spiget.org/v2"
 

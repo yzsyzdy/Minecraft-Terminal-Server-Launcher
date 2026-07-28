@@ -321,5 +321,9 @@
     "settings.lang_saved": "  [设置] 语言已保存。",
     "settings.threads_prompt": "  输入下载线程数 [{current}]（默认 16，建议 4-32）：",
     "settings.threads_saved": "  [设置] 下载线程数已设为 {count}。",
-    "settings.threads_invalid": "  [错误] 请输入一个有效的正整数。"
+    "settings.threads_invalid": "  [错误] 请输入一个有效的正整数。",
+    "settings.update_option": "  [{n}] 检查更新",
+    "settings.update_no_version": "  [更新] 没有本地版本信息（version.json 不存在）",
+    "settings.update_available": "  [更新] 新版本 {latest} 可用（当前: {cur}）",
+    "settings.update_latest": "  [更新] 已是最新版本 (v{ver})"
 }

@@ -14,7 +14,10 @@ from typing import Optional
 
 from i18n import t
 
-# Module-level ctypes import (Windows only)
+# ---------------------------------------------------------------------------
+# Windows 内核 API 句柄 (模块级一次性加载)
+# ctypes 的 windll 只能在 Windows 上导入，放在模块顶部避免每次调用都 try
+# ---------------------------------------------------------------------------
 _WINDOWS_KERNEL32 = None
 if platform.system() == "Windows":
     try:
@@ -23,22 +26,29 @@ if platform.system() == "Windows":
     except Exception:
         pass
 
-# Priority class constants (Windows)
-# https://docs.microsoft.com/en-us/windows/win32/procthread/priority-class
+# ---------------------------------------------------------------------------
+# 进程优先级常量 (Windows)
+# 参考: https://docs.microsoft.com/en-us/windows/win32/procthread/priority-class
+# ---------------------------------------------------------------------------
 _PRIORITY_CLASS = {
-    "normal":       0x0020,   # NORMAL_PRIORITY_CLASS
-    "below_normal": 0x4000,   # BELOW_NORMAL_PRIORITY_CLASS
-    "low":          0x0040,   # IDLE_PRIORITY_CLASS
+    "normal":       0x0020,   # NORMAL_PRIORITY_CLASS  — 默认
+    "below_normal": 0x4000,   # BELOW_NORMAL_PRIORITY_CLASS — 不影响 MC 帧率
+    "low":          0x0040,   # IDLE_PRIORITY_CLASS    — 只在 CPU 空闲时运行
 }
-# PROCESS_MODE_BACKGROUND_BEGIN (Windows 8+, lowers I/O priority)
+# PROCESS_MODE_BACKGROUND_BEGIN (Windows 8+, 同时降低 I/O 优先级)
 _BG_BEGIN = 0x00100000
 
 
 def _set_priority_windows(handle: int, creationflags: int,
                           priority: str) -> int:
-    """Apply Windows priority and I/O background mode.
+    """在 Windows 上设置进程优先级和 I/O 后台模式。
 
-    Returns the effective creationflags.
+    两种方式配合使用:
+    1. creationflags — 进程创建时指定优先级类
+    2. SetPriorityClass — 创建后用 ctypes 补充设置
+
+    对 "low" 优先级额外启用后台 I/O 模式（磁盘访问也会被限速）。
+    返回最终的 creationflags 值。
     """
     base_class = creationflags
     if base_class == 0 and priority in _PRIORITY_CLASS:
@@ -47,11 +57,9 @@ def _set_priority_windows(handle: int, creationflags: int,
     if _WINDOWS_KERNEL32 is None or priority == "normal":
         return base_class
 
-    # Set the priority class
     _WINDOWS_KERNEL32.SetPriorityClass(handle, base_class)
 
-    # For 'low' also enable background I/O mode so the process
-    # is throttled on disk access as well.
+    # 只有 "low" 才启用_BG_BEGIN，否则 below_normal 会被意外覆盖为 idle
     if priority == "low":
         try:
             _WINDOWS_KERNEL32.SetPriorityClass(handle, _BG_BEGIN)
@@ -65,10 +73,10 @@ def _start_priority_process(
     cmd: list[str], cwd: str, priority: str,
     **popen_kw,
 ) -> subprocess.Popen:
-    """Start a subprocess with the given priority hint.
+    """按指定优先级启动子进程。
 
-    On Windows this sets creationflags + PostCreation SetPriorityClass.
-    On Unix/macOS it applies os.nice() via preexec_fn.
+    Windows 通过 creationflags 和 SetPriorityClass 双重保证。
+    Unix/macOS 通过 preexec_fn 在 fork 后调用 os.nice()。
     """
     creationflags = 0
     preexec_fn = None
@@ -87,7 +95,8 @@ def _start_priority_process(
         preexec_fn=preexec_fn, **popen_kw,
     )
 
-    # Post-creation adjustment on Windows
+    # Windows 上 creationflags 只在 CreateProcess 时生效，
+    # SetPriorityClass 可以覆盖后续调整
     if system == "Windows" and priority != "normal":
         _set_priority_windows(proc._handle, creationflags, priority)
 
@@ -95,7 +104,7 @@ def _start_priority_process(
 
 
 def console_title(title: str) -> None:
-    """Set console window title (Windows only)."""
+    """设置控制台窗口标题 (仅 Windows)。"""
     if _WINDOWS_KERNEL32 is not None:
         try:
             _WINDOWS_KERNEL32.SetConsoleTitleW(title)
@@ -103,8 +112,22 @@ def console_title(title: str) -> None:
             pass
 
 
+# ---------------------------------------------------------------------------
+# JVM 参数构建
+# ---------------------------------------------------------------------------
+
+# 必要模块开放: Mojang 的混淆代码用反射访问平台模块
+_JVM_OPENS = [
+    "--add-opens", "java.base/java.lang=ALL-UNNAMED",
+    "--add-opens", "java.base/java.lang.reflect=ALL-UNNAMED",
+    "--add-opens", "java.base/java.util=ALL-UNNAMED",
+    "--add-opens", "java.base/java.io=ALL-UNNAMED",
+    "--add-opens", "java.base/sun.nio.ch=ALL-UNNAMED",
+]
+
+
 def _validate_java_jar(java_path: str, jar_path: str) -> str:
-    """Validate Java and jar files, return working directory."""
+    """验证 Java 和核心 jar 是否存在，返回工作目录。"""
     java_path = os.path.abspath(java_path)
     jar_path = os.path.abspath(jar_path)
     if not os.path.isfile(java_path):
@@ -125,8 +148,12 @@ def _build_jvm_cmd(
     extra_server_args: Optional[list[str]] = None,
     nogui: bool = True,
 ) -> list[str]:
-    """Build the full JVM command list."""
-    cmd = [java_path, f"-Xmx{max_mem}", f"-Xms{min_mem}"]
+    """构建完整的 JVM 命令行参数列表。
+
+    参数顺序不可随意调换:
+      java -Xmx -Xms --add-opens ... -jar jar nogui [extra]
+    """
+    cmd = [java_path, f"-Xmx{max_mem}", f"-Xms{min_mem}"] + _JVM_OPENS
     if extra_jvm_args:
         cmd.extend(extra_jvm_args)
     cmd += ["-jar", jar_path]
@@ -142,7 +169,7 @@ def _print_launch_info(
     min_mem: str, max_mem: str, cmd: list[str],
     interactive: bool = False,
 ) -> None:
-    """Print launch info summary."""
+    """打印启动摘要信息。"""
     print(t("launch.workdir", dir=workdir))
     print(t("launch.java", path=os.path.abspath(java_path)))
     print(t("launch.jar", path=os.path.abspath(jar_path)))
@@ -153,6 +180,10 @@ def _print_launch_info(
         print(t("launch.command", cmd=" ".join(cmd)))
     print()
 
+
+# ---------------------------------------------------------------------------
+# 非交互模式启动
+# ---------------------------------------------------------------------------
 
 def start_minecraft_server(
     java_path: str,
@@ -165,7 +196,18 @@ def start_minecraft_server(
     extra_server_args: Optional[list[str]] = None,
     process_priority: str = "normal",
 ) -> int:
-    """Start server (non-interactive, log output only). Returns exit code."""
+    """以非交互模式启动服务器（仅输出日志，不接受控制台输入）。
+
+    工作原理:
+      1. 验证 Java 和核心 jar 路径
+      2. 按优先级配置启动子进程
+      3. 逐行读取 stdout 并打印到控制台
+      4. 注册 SIGINT 处理器实现优雅关闭
+      5. 返回 Minecraft 服务端的退出码
+
+    Returns:
+        服务端进程的退出码 (0 = 正常退出)
+    """
     console_title(t("console.title_noinput"))
     workdir = _validate_java_jar(java_path, jar_path) \
         if workdir is None else os.path.abspath(workdir)
@@ -182,6 +224,8 @@ def start_minecraft_server(
         text=True, encoding="utf-8", bufsize=1,
     )
 
+    # SIGINT 处理器: 终止服务端子进程后抛出 KeyboardInterrupt，
+    # 让调用方（start.py）有机会清理 frpc 等附属进程。
     def _handle_sigint(sig, frame):
         print(t("launch.sigint"))
         if process.poll() is None:
@@ -198,11 +242,15 @@ def start_minecraft_server(
         for line in process.stdout:
             print(line, end="")
     except KeyboardInterrupt:
-        pass
+        pass  # 已终止子进程，只需等待真正的退出
     process.wait()
     signal.signal(signal.SIGINT, original_sigint)
     return process.returncode
 
+
+# ---------------------------------------------------------------------------
+# 交互模式启动
+# ---------------------------------------------------------------------------
 
 def start_server_interactive(
     java_path: str,
@@ -213,7 +261,15 @@ def start_server_interactive(
     extra_server_args: Optional[list[str]] = None,
     process_priority: str = "normal",
 ) -> int:
-    """Start server with interactive console input."""
+    """以交互模式启动服务器（stdin/stdout 直通，可输入命令）。
+
+    交互模式下 MC 服务端默认监听控制台输入（help、stop 等命令），
+    所以不能像非交互模式那样用 PIPE 接管 stdout。
+    这里让子进程直接继承父进程的 stdin/stdout。
+
+    Returns:
+        服务端进程的退出码
+    """
     console_title(t("console.title"))
     workdir = _validate_java_jar(java_path, jar_path)
     cmd = _build_jvm_cmd(
@@ -226,7 +282,7 @@ def start_server_interactive(
     process = _start_priority_process(
         cmd, workdir, process_priority)
 
-    # 注册 SIGINT 处理器，确保子进程被正确终止
+    # 同样注册 SIGINT 处理器
     def _handle_sigint(sig, frame):
         print(t("launch.sigint"))
         if process.poll() is None:

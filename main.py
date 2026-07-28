@@ -1,58 +1,46 @@
 """
-main.py — 模块入口（re-export）
+MSTL — Minecraft Terminal Server Launcher
+公共 API 导出模块。
 
-将所有子模块的公开 API 集中导入，方便外部调用。
-实际实现分布在以下模块：
-  config.py         配置管理
-  server_manager.py 服务器目录管理、导入压缩包
-  download_msl.py   MSL 服务端下载
-  java_tools.py     Java 检测、JDK 下载、版本兼容
-  server_launcher.py 服务器启动
-  menu.py           交互菜单
+所有子模块的公开接口在此汇集，方便 import 和管理。
 """
 
-from config import load_config, save_config, DEFAULT_CONFIG
+from config import load_config, save_config
 from server_manager import (
     ensure_servers_folder,
     list_servers,
     load_server_config,
     save_server_config,
     import_server_from_zip,
+    export_server_to_zip,
     classify_server_type,
-    DEFAULT_SERVER_CONFIG,
+    EXPORT_CATEGORIES,
 )
-from download_msl import (
-    msl_get_server_types,
-    msl_get_versions,
-    msl_get_download_url,
-    show_download_server_menu,
-    multithreaded_download,
-    set_download_threads,
+from server_launcher import (
+    start_minecraft_server,
+    start_server_interactive,
 )
-from java_tools import (
-    JavaInfo,
-    detect_java_versions,
-    load_java_list,
-    save_java_list,
-    resolve_java,
-    get_java_requirement,
-    MC_JAVA_COMPAT,
-    JDK_MIRROR_URLS,
-)
-from server_launcher import start_minecraft_server, start_server_interactive
-from i18n import t, load_language, available_languages, detect_os_language
+from java_tools import resolve_java, detect_java_versions
+from download_msl import show_download_server_menu
 from menu import show_main_menu
-from openfrp.tunnel_manager import (
-    get_tunnels_by_token, get_tunnels_by_auth, get_node_list,
-    create_tunnel, delete_tunnel, edit_tunnel,
-    download_frpc, get_frpc_local_path,
-    get_frpc_download_url, get_frpc_release_info,
-    launch_frpc, stop_frpc,
-    TunnelInfo, NodeInfo,
-)
-from mod_sources import (
-    search_all_mods,
-    download_mod,
-    extract_mod_loader,
-    set_curseforge_api_key,
-)
+from plugin_sources import search_all, download_plugin
+from mod_sources import search_all_mods, download_mod, set_curseforge_api_key
+from i18n import t, load_language, available_languages
+
+# OpenFrp 隧道管理 (可选，由 start.py 按需导入)
+# from openfrp.tunnel_manager import (launch_frpc, stop_frpc, ...)
+
+__all__ = [
+    "load_config", "save_config",
+    "ensure_servers_folder", "list_servers",
+    "load_server_config", "save_server_config",
+    "import_server_from_zip", "export_server_to_zip",
+    "classify_server_type", "EXPORT_CATEGORIES",
+    "start_minecraft_server", "start_server_interactive",
+    "resolve_java", "detect_java_versions",
+    "show_download_server_menu",
+    "show_main_menu",
+    "search_all", "download_plugin",
+    "search_all_mods", "download_mod", "set_curseforge_api_key",
+    "t", "load_language", "available_languages",
+]
