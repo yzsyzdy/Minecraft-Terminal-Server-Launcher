@@ -14,12 +14,15 @@ _current_lang: str = ""
 
 
 def _locale_dir() -> str:
-    """Locate the locales/ directory relative to the project root."""
-    if getattr(sys, "frozen", False):
-        base = os.path.dirname(os.path.abspath(sys.executable))
-    else:
-        base = os.path.dirname(os.path.abspath(__file__))
-    return os.path.join(base, "locales")
+    """Locate the locales/ directory.
+
+    locales 通过 --include-data-dir 嵌入 exe，解压后与 __file__ 同目录
+    （onefile 模式在临时目录，standalone 在 .dist 目录，源码模式在项目根）。
+    不要用 sys.executable：onefile 模式下它可能指向用户放置 exe 的原始路径，
+    而资源实际解压在临时目录。
+    """
+    from paths import bundled_dir
+    return os.path.join(bundled_dir(), "locales")
 
 
 def load_language(lang: str) -> None:

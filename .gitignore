@@ -20,6 +20,12 @@ openfrp/__pycache__
 openfrp/frpc_windows_amd64.zip
 openfrp/frpc.exe
 
+# 原版 frp 运行时产物（二进制与含 token 的配置不提交，源码 frp/*.py 正常跟踪）
+frp/frpc*
+frp/frpc.toml
+!frp/*.py
+!frp/__init__.py
+
 # Nuitka 构建输出
 build/
 

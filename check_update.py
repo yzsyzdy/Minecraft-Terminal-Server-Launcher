@@ -19,12 +19,15 @@ from constants import REPO_API, USER_AGENT
 VERSION_FILENAME = "version.json"
 
 
+def _bundled_dir() -> str:
+    """定位打包时嵌入的资源目录。"""
+    from paths import bundled_dir
+    return bundled_dir()
+
+
 def _read_local_version() -> str:
-    """读取本地 version.json，返回版本号字符串。不存在返回空字符串。"""
-    # frozen 模式下 version.json 在 exe 同级目录
-    base = os.path.dirname(
-        os.path.abspath(sys.executable if getattr(sys, "frozen", False) else __file__))
-    path = os.path.join(base, VERSION_FILENAME)
+    """读取 version.json，返回版本号字符串。不存在返回空字符串。"""
+    path = os.path.join(_bundled_dir(), VERSION_FILENAME)
     try:
         with open(path, "r", encoding="utf-8") as f:
             data = json.load(f)

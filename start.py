@@ -19,7 +19,7 @@ import os
 import sys
 
 from config import load_config, save_config
-from server_manager import ensure_servers_folder, load_server_config
+from server_manager import ensure_servers_folder, load_server_config, list_servers
 from menu import show_main_menu
 from java_tools import resolve_java
 from server_launcher import start_minecraft_server, start_server_interactive
@@ -77,14 +77,9 @@ def _prompt_eula(name: str) -> bool:
 
 
 def _project_dir() -> str:
-    """获取项目根目录。
-
-    同时支持 Nuitka/PyInstaller 打包后的 frozen 模式
-    和开发时的源码模式。
-    """
-    if getattr(sys, "frozen", False):
-        return os.path.dirname(os.path.abspath(sys.executable))
-    return os.path.dirname(os.path.abspath(__file__))
+    """获取项目根目录（用户数据存放位置）。"""
+    from paths import app_dir
+    return app_dir()
 
 
 # ---------------------------------------------------------------------------
@@ -225,10 +220,25 @@ def main():
 
     servers_dir = ensure_servers_folder(project_dir)
 
-    # 显示主菜单，用户选择服务器后返回
-    selected = show_main_menu(servers_dir, project_dir)
+    # 如果配置了自动启动的服务器，直接跳过主菜单
+    selected = None
+    auto_name = config.get("auto_start_server", "")
+    if auto_name:
+        for s in list_servers(servers_dir):
+            if s.get("name") == auto_name:
+                selected = s
+                print(f"  [Auto] 自动启动服务器: {auto_name}")
+                print()
+                break
+        if selected is None:
+            print(f"  [警告] 配置的自动启动服务器 '{auto_name}' 不存在，进入主菜单")
+            print()
+
+    # 未配置自动启动或服务器不存在时，显示主菜单
     if selected is None:
-        sys.exit(0)
+        selected = show_main_menu(servers_dir, project_dir)
+        if selected is None:
+            sys.exit(0)
 
     # selected 是 list_servers 返回的条目（含 _path），
     # 需要重新加载完整配置

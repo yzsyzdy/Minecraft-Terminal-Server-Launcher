@@ -35,6 +35,9 @@ jobs:
 
       - name: Build with Nuitka
         run: |
+          $version = "${{ github.ref_name }}" -replace '^v', ''
+          Write-Host "Building MSTL v$version (standalone)"
+
           python -m nuitka `
             --standalone `
             --assume-yes-for-downloads `
@@ -44,14 +47,15 @@ jobs:
             --output-dir=build\MSTL `
             --product-name=MSTL `
             --file-description="Minecraft Terminal Server Launcher" `
-            --product-version="1.0.0" `
-            --file-version="1.0.0" `
+            --product-version=$version `
+            --file-version=$version `
             --copyright="MSTL" `
             --include-data-dir=locales=locales `
+            --output-filename=MSTL.exe `
             start.py
 
       - name: List build output
-        run: Get-ChildItem -Path build\MSTL -Recurse | Select-Object FullName, Length
+        run: Get-ChildItem -Path build\MSTL\start.dist | Select-Object FullName, Length
 
       - name: Compress build output
         shell: powershell
@@ -62,7 +66,7 @@ jobs:
             exit 1
           }
 
-          # 写入版本信息文件
+          # 写入版本信息文件（standalone 模式下 version.json 直接放在 exe 旁）
           $versionFile = Join-Path $source "version.json"
           $json = @{
             version = "${{ github.ref_name }}" -replace '^v', ''

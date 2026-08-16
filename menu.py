@@ -19,6 +19,7 @@ from server_manager import (
     save_server_config,
     classify_server_type,
     export_server_to_zip,
+    ensure_servers_folder,
     EXPORT_CATEGORIES,
 )
 
@@ -635,6 +636,36 @@ from openfrp.tunnel_manager import (
     download_frpc, get_frpc_local_path, TunnelInfo,
 )
 
+from frp.tunnel_manager import (
+    load_frp_config, save_frp_config, launch_frpc, stop_frpc,
+    is_frpc_running, download_frpc as frp_download_frpc,
+    get_frpc_bin_path, get_frpc_toml_path, get_latest_frp_version,
+)
+
+
+def _tunnel_menu(servers: list[dict], servers_dir: str, project_dir: str) -> None:
+    """内网穿透总菜单: 选择 OpenFrp 或原版 frp。"""
+    while True:
+        clear_screen()
+        print()
+        print(t("tunnel.menu_title"))
+        print()
+        print(t("tunnel.openfrp", n=1))
+        print(t("tunnel.frp", n=2))
+        print(t("tunnel.back", n=0))
+        print()
+        choice = input(t("tunnel.prompt")).strip()
+
+        if choice == "0":
+            return
+        elif choice == "1":
+            _openfrp_menu(servers, servers_dir, project_dir)
+        elif choice == "2":
+            _frp_menu(project_dir)
+        else:
+            print(t("app.invalid_choice_short"))
+            input(t("app.press_enter"))
+
 
 def _openfrp_menu(servers: list[dict], servers_dir: str, project_dir: str) -> None:
     """OpenFrp tunnel management menu."""
@@ -642,6 +673,7 @@ def _openfrp_menu(servers: list[dict], servers_dir: str, project_dir: str) -> No
         clear_screen()
         print()
         print(t("openfrp.menu_title"))
+        print(t("openfrp.community_notice"))
         print()
         print(t("openfrp.menu_list_tunnels", n=1))
         print(t("openfrp.menu_download_frpc", n=2))
@@ -663,6 +695,201 @@ def _openfrp_menu(servers: list[dict], servers_dir: str, project_dir: str) -> No
             _openfrp_bind_tunnel(servers, servers_dir, project_dir)
         else:
             print(t("app.invalid_choice_short"))
+
+
+def _frp_menu(project_dir: str) -> None:
+    """原版 frp 隧道管理菜单。"""
+    while True:
+        clear_screen()
+        print()
+        print(t("frp.menu_title"))
+        print()
+        if is_frpc_running():
+            print(t("frp.status_running"))
+        else:
+            print(t("frp.status_stopped"))
+        print()
+        print(t("frp.menu_download", n=1))
+        print(t("frp.menu_config", n=2))
+        print(t("frp.menu_proxies", n=3))
+        print(t("frp.menu_add_proxy", n=4))
+        print(t("frp.menu_delete_proxy", n=5))
+        print(t("frp.menu_start", n=6))
+        print(t("frp.menu_stop", n=7))
+        print(t("frp.menu_back", n=0))
+        print()
+        choice = input(t("frp.menu_prompt")).strip()
+
+        if choice == "0":
+            return
+        elif choice == "1":
+            _frp_download(project_dir)
+        elif choice == "2":
+            _frp_edit_config(project_dir)
+        elif choice == "3":
+            _frp_list_proxies(project_dir)
+        elif choice == "4":
+            _frp_add_proxy(project_dir)
+        elif choice == "5":
+            _frp_delete_proxy(project_dir)
+        elif choice == "6":
+            _frp_start(project_dir)
+        elif choice == "7":
+            stop_frpc()
+            input(t("app.press_enter"))
+        else:
+            print(t("app.invalid_choice_short"))
+            input(t("app.press_enter"))
+
+
+def _frp_download(project_dir: str) -> None:
+    """下载或更新原版 frpc。"""
+    print()
+    bin_path = get_frpc_bin_path(project_dir)
+    if os.path.isfile(bin_path):
+        size = os.path.getsize(bin_path) / 1024 / 1024
+        print(t("frp.frpc_exists", path=bin_path, size=size))
+        if input(t("openfrp.frpc_redownload")).strip().lower() != "y":
+            return
+
+    latest = get_latest_frp_version()
+    if latest:
+        print(t("frp.latest_version", ver=latest))
+    path = frp_download_frpc(project_dir)
+    if path:
+        print(t("frp.frpc_downloaded", path=path))
+    else:
+        print(t("frp.frpc_download_failed"))
+    input(t("app.press_enter"))
+
+
+def _frp_edit_config(project_dir: str) -> None:
+    """编辑 frpc.toml 服务器连接配置。"""
+    cfg = load_frp_config(project_dir)
+    print()
+    print(t("frp.config_title"))
+    print()
+    addr = input(t("frp.config_server_addr", cur=cfg.get("serverAddr", ""))).strip()
+    port = input(t("frp.config_server_port", cur=cfg.get("serverPort", 7000))).strip()
+    token = input(t("frp.config_token", cur=cfg.get("auth", {}).get("token", ""))).strip()
+
+    if addr:
+        cfg["serverAddr"] = addr
+    if port:
+        try:
+            cfg["serverPort"] = int(port)
+        except ValueError:
+            print(t("frp.config_port_invalid"))
+    if token:
+        cfg.setdefault("auth", {})["token"] = token
+
+    if save_frp_config(project_dir, cfg):
+        print(t("frp.config_saved", path=get_frpc_toml_path(project_dir)))
+    else:
+        print(t("frp.config_save_failed"))
+    input(t("app.press_enter"))
+
+
+def _frp_list_proxies(project_dir: str) -> None:
+    """列出当前所有隧道。"""
+    cfg = load_frp_config(project_dir)
+    proxies = cfg.get("proxies", [])
+    print()
+    if not proxies:
+        print(t("frp.no_proxies"))
+    else:
+        for i, p in enumerate(proxies, 1):
+            name = p.get("name", "?")
+            ptype = p.get("type", "?")
+            local = f"{p.get('localIP', '127.0.0.1')}:{p.get('localPort', '?')}"
+            remote = p.get("remotePort", "?")
+            print(f"  [{i}] {name} ({ptype}) {local} -> :{remote}")
+    print()
+    print(t("frp.proxy_count", count=len(proxies)))
+    input(t("app.press_enter"))
+
+
+def _frp_add_proxy(project_dir: str) -> None:
+    """添加新隧道。"""
+    cfg = load_frp_config(project_dir)
+    proxies = cfg.setdefault("proxies", [])
+
+    print()
+    print(t("frp.add_title"))
+    name = input(t("frp.proxy_name")).strip()
+    if not name:
+        return
+    ptype = input(t("frp.proxy_type", defval="tcp")).strip() or "tcp"
+    local_ip = input(t("frp.proxy_local_ip", defval="127.0.0.1")).strip() or "127.0.0.1"
+    local_port = input(t("frp.proxy_local_port")).strip()
+    remote_port = input(t("frp.proxy_remote_port")).strip()
+    if not local_port or not remote_port:
+        print(t("frp.add_invalid"))
+        input(t("app.press_enter"))
+        return
+
+    proxy = {
+        "name": name,
+        "type": ptype,
+        "localIP": local_ip,
+        "localPort": int(local_port),
+    }
+    if ptype == "tcp" and remote_port:
+        proxy["remotePort"] = int(remote_port)
+    elif ptype == "udp" and remote_port:
+        proxy["remotePort"] = int(remote_port)
+    elif ptype == "http":
+        proxy["customDomains"] = name
+
+    proxies.append(proxy)
+    if save_frp_config(project_dir, cfg):
+        print(t("frp.add_saved", name=name))
+    else:
+        print(t("frp.add_save_failed"))
+    input(t("app.press_enter"))
+
+
+def _frp_delete_proxy(project_dir: str) -> None:
+    """删除指定隧道。"""
+    cfg = load_frp_config(project_dir)
+    proxies = cfg.get("proxies", [])
+    if not proxies:
+        print()
+        print(t("frp.no_proxies"))
+        input(t("app.press_enter"))
+        return
+
+    print()
+    for i, p in enumerate(proxies, 1):
+        print(f"  [{i}] {p.get('name', '?')} ({p.get('type', '?')})")
+    print(t("frp.delete_back", n=0))
+    print()
+    c = input(t("frp.delete_prompt")).strip()
+    if c == "0":
+        return
+    try:
+        idx = int(c) - 1
+        if 0 <= idx < len(proxies):
+            removed = proxies.pop(idx)
+            cfg["proxies"] = proxies
+            if save_frp_config(project_dir, cfg):
+                print(t("frp.delete_saved", name=removed.get("name", "?")))
+            else:
+                print(t("frp.delete_save_failed"))
+        else:
+            print(t("app.invalid_choice_short"))
+    except ValueError:
+        print(t("app.invalid_choice_short"))
+    input(t("app.press_enter"))
+
+
+def _frp_start(project_dir: str) -> None:
+    """启动原版 frpc。"""
+    print()
+    proc = launch_frpc(project_dir)
+    if proc is None:
+        print(t("frp.start_failed"))
+        input(t("app.press_enter"))
 
 
 def _openfrp_list_tunnels(project_dir: str) -> None:
@@ -840,13 +1067,16 @@ def _openfrp_bind_tunnel(servers: list[dict], servers_dir: str, project_dir: str
 # ---------------------------------------------------------------------------
 
 def _settings_menu(project_dir: str) -> None:
-    """Settings: language, download threads."""
+    """Settings: language, download threads, update, auto-start."""
     from download_msl import set_download_threads
 
     while True:
         config = load_config(project_dir)
         current_lang = config.get("language", "") or "auto"
         current_threads = config.get("download_threads", 16)
+        auto_server = config.get("auto_start_server", "") or "-"
+        from startup import is_startup_enabled
+        startup_state = t("settings.on") if is_startup_enabled() else t("settings.off")
 
         clear_screen()
         print()
@@ -855,6 +1085,8 @@ def _settings_menu(project_dir: str) -> None:
         print(t("settings.lang_option", n=1, lang=current_lang))
         print(t("settings.threads_option", n=2, count=current_threads))
         print(t("settings.update_option", n=3))
+        print(t("settings.auto_start_option", n=4, name=auto_server))
+        print(t("settings.startup_option", n=5, state=startup_state))
         print(t("settings.back", n=0))
         print()
         choice = input(t("settings.prompt")).strip()
@@ -922,6 +1154,49 @@ def _settings_menu(project_dir: str) -> None:
                 print(t("settings.update_latest", ver=cur_ver))
             input(t("app.press_enter"))
 
+        elif choice == "4":
+            # 设置启动时自动启动的服务器
+            servers = list_servers(ensure_servers_folder(project_dir))
+            clear_screen()
+            print()
+            print(t("settings.auto_start_title"))
+            print()
+            if servers:
+                for i, s in enumerate(servers, 1):
+                    print(f"  [{i}] {s['name']}")
+            print(f"  [0] {t('settings.auto_start_none')}")
+            print()
+            c = input(t("settings.auto_start_prompt", max=len(servers))).strip()
+            if c == "0":
+                config["auto_start_server"] = ""
+                save_config(config, project_dir)
+                print(t("settings.auto_start_saved_none"))
+            else:
+                try:
+                    idx = int(c) - 1
+                    if 0 <= idx < len(servers):
+                        config["auto_start_server"] = servers[idx]["name"]
+                        save_config(config, project_dir)
+                        print(t("settings.auto_start_saved", name=servers[idx]["name"]))
+                    else:
+                        print(t("app.invalid_choice_short"))
+                except ValueError:
+                    print(t("app.invalid_choice_short"))
+            input(t("app.press_enter"))
+
+        elif choice == "5":
+            # 切换开机自启动
+            from startup import is_startup_enabled, set_startup_enabled
+            target = not is_startup_enabled()
+            if set_startup_enabled(target):
+                if target:
+                    print(t("settings.startup_enabled"))
+                else:
+                    print(t("settings.startup_disabled"))
+            else:
+                print(t("settings.startup_unsupported"))
+            input(t("app.press_enter"))
+
         else:
             print(t("app.invalid_choice_short"))
 
@@ -952,7 +1227,7 @@ def show_main_menu(servers_dir: str, project_dir: str) -> Optional[dict[str, Any
         print(t("menu.main.download", n=3))
         print(t("menu.main.manage", n=4))
         print(t("menu.main.export", n=5))
-        print("  [6] OpenFrp \u5185\u7f51\u7a7f\u900f")
+        print(t("menu.main.tunnel", n=6))
         print(t("menu.main.settings", n=7))
         print(t("menu.main.exit", n=0))
         print()
@@ -1008,7 +1283,7 @@ def show_main_menu(servers_dir: str, project_dir: str) -> Optional[dict[str, Any
 
         elif choice == "6":
             servers_now = list_servers(servers_dir)
-            _openfrp_menu(servers_now, servers_dir, project_dir)
+            _tunnel_menu(servers_now, servers_dir, project_dir)
             continue
 
         elif choice == "7":

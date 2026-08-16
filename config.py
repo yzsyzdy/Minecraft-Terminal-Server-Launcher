@@ -12,6 +12,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "language": "",
     "curseforge_api_key": "",
     "download_threads": 16,
+    "auto_start_server": "",
 }
 
 
