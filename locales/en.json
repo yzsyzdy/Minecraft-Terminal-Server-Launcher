@@ -410,5 +410,17 @@
     "web.error.not_running": "Instance {name} is not running",
     "web.error.unknown_instance": "No such instance: {name}",
     "web.error.spawn_failed": "Failed to spawn process: {msg}",
-    "web.error.send_failed": "Failed to write to process: {msg}"
+    "web.error.send_failed": "Failed to write to process: {msg}",
+    "web.panel.clear": "Clear",
+    "web.panel.follow": "Follow output",
+    "web.panel.jump_bottom": "Jump to bottom",
+    "web.panel.quick": "Quick commands",
+    "web.detail.memory": "Memory {min} / {max}",
+    "web.detail.pid": "PID {pid}",
+    "web.detail.exit_code": "Exit code {code}",
+    "web.detail.command": "Launch command",
+    "web.detail.workdir": "Directory {path}",
+    "web.conn.online": "Connected",
+    "web.conn.connecting": "Connecting",
+    "web.conn.offline": "Disconnected"
 }

@@ -352,5 +352,17 @@
     "web.error.not_running": "实例 {name} 没在跑喵",
     "web.error.unknown_instance": "找不到实例 {name} 喵",
     "web.error.spawn_failed": "启动进程失败喵: {msg}",
-    "web.error.send_failed": "写入进程失败喵: {msg}"
+    "web.error.send_failed": "写入进程失败喵: {msg}",
+    "web.panel.clear": "清屏喵",
+    "web.panel.follow": "跟着输出跑喵",
+    "web.panel.jump_bottom": "回到底部喵",
+    "web.panel.quick": "快捷指令",
+    "web.detail.memory": "内存 {min} / {max} 喵",
+    "web.detail.pid": "PID {pid}",
+    "web.detail.exit_code": "退出码 {code} 喵",
+    "web.detail.command": "启动命令",
+    "web.detail.workdir": "目录 {path}",
+    "web.conn.online": "连上啦",
+    "web.conn.connecting": "连接中…",
+    "web.conn.offline": "断开了喵"
 }

@@ -51,6 +51,18 @@ WEB_STRINGS = (
     "web.state.stopping",
     "web.auth.invalid",
     "web.auth.help",
+    "web.panel.clear",
+    "web.panel.follow",
+    "web.panel.jump_bottom",
+    "web.panel.quick",
+    "web.detail.memory",
+    "web.detail.pid",
+    "web.detail.exit_code",
+    "web.detail.command",
+    "web.detail.workdir",
+    "web.conn.online",
+    "web.conn.connecting",
+    "web.conn.offline",
 )
 
 
@@ -217,13 +229,23 @@ def _make_handler(manager: RuntimeManager, servers_dir: str, token: str):
                     "name": name,
                     "mc_version": entry.get("mc_version", ""),
                     "jar": entry.get("jar", ""),
+                    "min_mem": entry.get("min_mem", ""),
+                    "max_mem": entry.get("max_mem", ""),
+                    "java_path": entry.get("java_path") or "",
+                    "workdir": path,
                     "state": "stopped",
                     "exit_code": None,
                     "pid": None,
+                    "started_at": None,
+                    "java": "",
+                    "command": [],
                 }
+                # 跑过的实例，运行时里存着更准的一份快照（真实 java、拼接后的命令、退出码）
                 runtime = manager.state_of(name)
                 if runtime:
-                    row.update({k: runtime[k] for k in ("state", "exit_code", "pid")})
+                    row.update({key: runtime[key] for key in (
+                        "state", "exit_code", "pid", "started_at", "java",
+                        "workdir", "min_mem", "max_mem", "command")})
                 instances.append(row)
             self._json({
                 "ok": True,
@@ -237,6 +259,8 @@ def _make_handler(manager: RuntimeManager, servers_dir: str, token: str):
             self.wfile.flush()
 
         def _stream(self, query: dict[str, str]) -> None:
+            """name 为空表示订阅所有实例，前端默认就走这条：一次连接同时盯住
+            全部实例的状态，也不必在切实例时重连。"""
             name = query.get("name") or ""
             self.send_response(HTTPStatus.OK)
             self.send_header("Content-Type", "text/event-stream; charset=utf-8")
@@ -248,9 +272,14 @@ def _make_handler(manager: RuntimeManager, servers_dir: str, token: str):
             inbox: "queue.Queue[dict]" = queue.Queue()
             unsubscribe = manager.subscribe(inbox.put)
             try:
-                runtime = manager.get(name)
-                for event in (runtime.history() if runtime else []):
-                    self._sse(event)
+                if name:
+                    runtime = manager.get(name)
+                    for event in (runtime.history() if runtime else []):
+                        self._sse(event)
+                else:
+                    for events in manager.histories().values():
+                        for event in events:
+                            self._sse(event)
                 while True:
                     try:
                         event = inbox.get(timeout=15)
@@ -258,7 +287,7 @@ def _make_handler(manager: RuntimeManager, servers_dir: str, token: str):
                         self.wfile.write(b": ping\n\n")
                         self.wfile.flush()
                         continue
-                    if event.get("instance") != name:
+                    if name and event.get("instance") != name:
                         continue
                     self._sse(event)
             except (BrokenPipeError, ConnectionResetError, OSError):

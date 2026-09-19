@@ -410,5 +410,17 @@
     "web.error.not_running": "Экземпляр {name} не запущен",
     "web.error.unknown_instance": "Экземпляр не найден: {name}",
     "web.error.spawn_failed": "Не удалось запустить процесс: {msg}",
-    "web.error.send_failed": "Не удалось записать в процесс: {msg}"
+    "web.error.send_failed": "Не удалось записать в процесс: {msg}",
+    "web.panel.clear": "Очистить",
+    "web.panel.follow": "Следовать за выводом",
+    "web.panel.jump_bottom": "Вниз",
+    "web.panel.quick": "Быстрые команды",
+    "web.detail.memory": "Память {min} / {max}",
+    "web.detail.pid": "PID {pid}",
+    "web.detail.exit_code": "Код выхода {code}",
+    "web.detail.command": "Команда запуска",
+    "web.detail.workdir": "Папка {path}",
+    "web.conn.online": "Подключено",
+    "web.conn.connecting": "Подключение",
+    "web.conn.offline": "Отключено"
 }

@@ -9,9 +9,11 @@ The terminal menu suits someone sitting at the machine. The web panel suits ever
 The panel is deliberately small and revolves around one loop: see instances → start → watch the console live → send commands / stop.
 
 - **See instances**: lists everything under `servers/`, with version, core, and running state
+- **Instance details**: selecting one shows a strip above the console with memory, PID or exit code, Java, working directory, and the assembled launch command
 - **Start / stop**: stopping is graceful. It sends `stop` to the console first, and only force-kills after a timeout
 - **Live console**: pushed over SSE, line by line, and appended to `logs/mstl-console.log` inside the instance directory at the same time
-- **Send commands**: whatever you type in the box goes straight to the server process, equivalent to the interactive console in the terminal
+- **Send commands**: whatever you type in the box goes straight to the server process, equivalent to the interactive console in the terminal. There are also one-click `list` / `save-all` / `help` chips, while `say` just fills in the prefix
+- **Console controls**: clear, toggle auto-scroll, colour `WARN` and `ERROR` separately, and pause following automatically when you scroll up
 
 ## Signing in
 
@@ -53,12 +55,12 @@ The entire contract between the front end and the back end is this:
 | Method | Path | Description |
 |---|---|---|
 | `GET` | `/api/state` | Instance list plus a batch of UI strings in the current language |
-| `GET` | `/api/stream?name=<instance>` | SSE event stream for that instance (history plus live) |
+| `GET` | `/api/stream` | SSE event stream; one subscription covers every instance. Add `?name=<instance>` to narrow it to one |
 | `POST` | `/api/start` | Body `{"name": "..."}` |
 | `POST` | `/api/stop` | Body `{"name": "..."}` |
 | `POST` | `/api/command` | Body `{"name": "...", "command": "..."}` |
 
-There are only two event shapes: `{"type": "line", ...}` for a console line and `{"type": "state", ...}` for a state change. Lines with `kind: "note"` are produced by MSTL itself, already translated by the server before being pushed.
+There are only two event shapes: `{"type": "line", ...}` for a console line and `{"type": "state", ...}` for a state change. Every event carries an `instance` field saying where it came from. Lines with `kind: "note"` are produced by MSTL itself, already translated by the server before being pushed.
 
 ## Known limits
 

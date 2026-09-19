@@ -232,6 +232,9 @@ class ServerRuntime:
         self._emit_state()
 
     def _push(self, event: Event) -> None:
+        # 事件在落进历史前就带上实例名：这样一条全局流里能分辨哪行来自哪台服，
+        # 重放历史时也不用临时补字段。
+        event.setdefault("instance", self.plan.name)
         with self._lock:
             self._history.append(event)
             if len(self._history) > self._history_limit:

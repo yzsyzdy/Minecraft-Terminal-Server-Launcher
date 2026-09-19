@@ -29,6 +29,13 @@
                            rgba(76,91,212,0) 100%)}
   header b{font-size:16px}
   header .sp{flex:1}
+
+  .dot{width:8px;height:8px;border-radius:50%;flex:0 0 auto;
+        background:var(--dim);transition:background .2s,box-shadow .2s}
+  .dot.online{background:var(--ok);box-shadow:0 0 0 3px rgba(26,127,55,.14)}
+  .dot.connecting{background:var(--warn);box-shadow:0 0 0 3px rgba(154,103,0,.14)}
+  .dot.offline{background:var(--err);box-shadow:0 0 0 3px rgba(207,34,46,.14)}
+
   main{display:grid;grid-template-columns:320px 1fr;height:calc(100vh - 54px)}
   #list{border-right:1px solid var(--line);overflow:auto;padding:10px}
   .empty{color:var(--dim);padding:14px 6px}
@@ -50,6 +57,7 @@
                  background:linear-gradient(180deg,#f2fbf5,#e7f6ec)}
   .badge.stopping{color:var(--warn);border-color:#e6cf94;
                   background:linear-gradient(180deg,#fffaf0,#fdf3dd)}
+
   button{font:inherit;padding:5px 12px;border-radius:6px;border:1px solid var(--line);
          background:#ffffff;color:var(--fg);cursor:pointer;
          transition:background .12s,border-color .12s,color .12s}
@@ -60,28 +68,57 @@
   button.primary:hover:not(:disabled){background:linear-gradient(135deg,#7b86ee,#4c5bd4 55%,#37429f);
                  border-color:var(--accent-3);color:#ffffff}
   button:disabled{opacity:.45;cursor:default}
-  #pane{display:flex;flex-direction:column;min-width:0}
+  button.on{border-color:var(--accent);color:var(--accent);background:var(--sel)}
+
+  #pane{position:relative;display:flex;flex-direction:column;min-width:0}
   #head{padding:12px 16px;border-bottom:1px solid var(--line);
         background:linear-gradient(180deg,#ffffff,#fbfcff);
         display:flex;align-items:center;gap:10px}
+  #head .sp{flex:1}
+
+  #details{display:flex;flex-wrap:wrap;gap:6px;padding:9px 16px;
+           border-bottom:1px solid var(--line);background:#ffffff}
+  #details:empty{display:none}
+  .chip{font-size:12px;max-width:52ch;padding:2px 9px;border-radius:6px;
+        color:var(--dim);border:1px solid var(--line);
+        background:linear-gradient(180deg,#ffffff,#fbfcff);
+        white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .chip b{color:var(--fg);font-weight:600}
+
   #log{flex:1;overflow:auto;margin:0;padding:12px 16px;white-space:pre-wrap;
        word-break:break-all;color:#24292f;
        background:linear-gradient(180deg,#f8fafc,#f3f5f9 55%,#f6f8fa);
        font:12.5px/1.6 ui-monospace,Consolas,monospace}
   #log .note{color:var(--dim)}
   #log .input{color:var(--accent);font-weight:600}
-  #bar{display:flex;gap:8px;padding:10px 16px;border-top:1px solid var(--line);
+  #log .warn{color:var(--warn)}
+  #log .error{color:var(--err)}
+
+  #jump{position:absolute;right:22px;bottom:112px;border-radius:99px;
+        box-shadow:0 3px 10px rgba(31,36,48,.14);font-size:12px;padding:4px 12px}
+
+  #bar{display:flex;flex-direction:column;gap:8px;padding:10px 16px;
+       border-top:1px solid var(--line);
        background:linear-gradient(180deg,#ffffff,#fbfcff)}
+  #chips{display:flex;flex-wrap:wrap;gap:6px}
+  #chips button{font-size:12px;padding:3px 10px;border-radius:99px;color:var(--dim)}
+  #line{display:flex;gap:8px}
   #cmd{flex:1;padding:8px 10px;border-radius:6px;border:1px solid var(--line);
        background:#ffffff;color:var(--fg);font:12.5px ui-monospace,Consolas,monospace}
   #cmd::placeholder{color:var(--dim)}
   #cmd:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px rgba(76,91,212,.12)}
+
+  @media (max-width:780px){
+    main{grid-template-columns:1fr;grid-template-rows:auto minmax(0,1fr)}
+    #list{border-right:none;border-bottom:1px solid var(--line);max-height:34vh}
+    #jump{bottom:132px}
+  }
 </style>
 </head>
 <body>
 <header>
   <b id="title">MSTL</b>
-  <span class="meta" id="hint"></span>
+  <span class="dot" id="conn"></span>
   <span class="sp"></span>
   <button id="refresh">⟳</button>
 </header>
@@ -91,24 +128,51 @@
     <div id="head">
       <span class="name" id="cur"></span>
       <span class="badge" id="curstate"></span>
+      <span class="sp"></span>
+      <button id="clear"></button>
+      <button id="follow"></button>
     </div>
+    <div id="details"></div>
     <pre id="log"></pre>
+    <button id="jump" hidden></button>
     <div id="bar">
-      <input id="cmd" spellcheck="false" autocomplete="off">
-      <button class="primary" id="send"></button>
+      <div id="chips"></div>
+      <div id="line">
+        <input id="cmd" spellcheck="false" autocomplete="off">
+        <button class="primary" id="send"></button>
+      </div>
     </div>
   </div>
 </main>
 <script>
 const $ = (id) => document.getElementById(id);
+const MAX_LINES = 2000;
+const QUICK = [
+  { text: "list" },
+  { text: "save-all" },
+  { text: "help" },
+  { text: "say ", prefill: true }
+];
+
 let strings = {};
 let instances = [];
 let selected = null;
 let stream = null;
+let follow = true;
+let lastAtBottom = true;
+
+function fmt(tpl, values) {
+  return String(tpl == null ? "" : tpl).replace(/\{(\w+)\}/g, (m, k) =>
+    Object.prototype.hasOwnProperty.call(values, k) ? values[k] : m);
+}
 
 function esc(value) {
   return String(value == null ? "" : value)
-    .replace(/[&<>]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
+    .replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+}
+
+function baseName(path) {
+  return String(path || "").split(/[\\/]/).pop();
 }
 
 async function api(path, body) {
@@ -121,24 +185,83 @@ async function api(path, body) {
   if (res.status === 401) {
     document.body.innerHTML =
       '<div style="padding:28px"><h3>' + esc(strings["web.auth.invalid"] || "401") +
-      '</h3><p style="color:#8b98a9">' + esc(strings["web.auth.help"] || "") + '</p></div>';
+      '</h3><p style="color:#6b7480">' + esc(strings["web.auth.help"] || "") + "</p></div>";
     throw new Error("unauthorized");
   }
   return res.json();
+}
+
+/* ---------------------------------------------------------------- 连接状态 */
+
+function setConn(state) {
+  const dot = $("conn");
+  dot.className = "dot " + state;
+  dot.title = strings["web.conn." + (state === "online" ? "online"
+    : state === "connecting" ? "connecting" : "offline")] || state;
+}
+
+function connect() {
+  if (stream) stream.close();
+  setConn("connecting");
+  // 不带 name：一条流同时盯住所有实例
+  stream = new EventSource("/api/stream");
+  stream.onopen = () => setConn("online");
+  stream.onerror = () => {
+    // EventSource 会自己重连：只有它彻底放弃了，才值得显示成断开
+    setConn(stream && stream.readyState === 2 ? "offline" : "connecting");
+  };
+  stream.onmessage = (ev) => {
+    let event;
+    try { event = JSON.parse(ev.data); } catch (e) { return; }
+    setConn("online");
+    handle(event);
+  };
+}
+
+function handle(event) {
+  if (event.type === "state") {
+    const item = instances.find(x => x.name === event.instance);
+    if (item) {
+      item.state = event.state;
+      item.exit_code = event.exit_code;
+      item.pid = event.pid;
+    }
+    render();
+    renderDetails();
+    return;
+  }
+  if (event.type === "line" && event.instance === selected) {
+    if (event.kind === "note") {
+      appendLine("note", event.text || "");
+    } else if (event.kind === "input") {
+      appendLine("input", "> " + (event.text || ""));
+    } else {
+      appendLine(lineClass(event.text), event.text || "");
+    }
+  }
+}
+
+/* ---------------------------------------------------------------- 实例列表 */
+
+async function refresh() {
+  const data = await api("/api/state");
+  if (data.strings) strings = data.strings;
+  instances = data.instances || [];
+  if (selected && !instances.some(x => x.name === selected)) selected = null;
+  applyStrings();
+  render();
+  renderDetails();
 }
 
 function applyStrings() {
   $("title").textContent = strings["web.panel.title"] || "MSTL";
   $("send").textContent = strings["web.panel.send"] || "Send";
   $("cmd").placeholder = strings["web.panel.command"] || "";
-}
-
-async function refresh() {
-  const data = await api("/api/state");
-  if (data.strings) strings = data.strings;
-  instances = data.instances || [];
-  applyStrings();
-  render();
+  $("clear").textContent = strings["web.panel.clear"] || "Clear";
+  $("follow").textContent = strings["web.panel.follow"] || "Follow";
+  $("jump").textContent = strings["web.panel.jump_bottom"] || "Bottom";
+  $("refresh").title = strings["web.panel.instances"] || "";
+  $("follow").className = follow ? "on" : "";
 }
 
 function stateLabel(state) {
@@ -181,56 +304,157 @@ function render() {
   });
 
   const cur = instances.find(x => x.name === selected);
-  $("cur").textContent = cur ? cur.name : "";
   const st = cur ? (cur.state || "stopped") : "";
+  $("cur").textContent = cur ? cur.name : "";
   $("curstate").textContent = cur ? stateLabel(st) : "";
   $("curstate").className = "badge " + st;
 }
 
-function writeLine(cls, text) {
+/* ---------------------------------------------------------------- 详情条 */
+
+function renderDetails() {
+  const box = $("details");
+  const item = instances.find(x => x.name === selected);
+  box.innerHTML = "";
+  if (!item) return;
+
+  const chips = [];
+  if (item.min_mem || item.max_mem) {
+    chips.push({ text: fmt(strings["web.detail.memory"], { min: item.min_mem || "?", max: item.max_mem || "?" }) });
+  }
+  if (item.state === "running" && item.pid) {
+    chips.push({ text: fmt(strings["web.detail.pid"], { pid: item.pid }) });
+  } else if (item.exit_code !== null && item.exit_code !== undefined) {
+    chips.push({ text: fmt(strings["web.detail.exit_code"], { code: item.exit_code }) });
+  }
+  if (item.java) {
+    chips.push({ text: "Java " + baseName(item.java), title: item.java });
+  }
+  if (item.workdir) {
+    chips.push({ text: fmt(strings["web.detail.workdir"], { path: item.workdir }), title: item.workdir });
+  }
+  if (item.command && item.command.length) {
+    chips.push({ text: (strings["web.detail.command"] || "command") + ": " + item.command.join(" "),
+                 title: item.command.join(" ") });
+  }
+
+  chips.forEach(c => {
+    const el = document.createElement("span");
+    el.className = "chip";
+    el.textContent = c.text;
+    if (c.title) el.title = c.title;
+    box.appendChild(el);
+  });
+}
+
+/* ---------------------------------------------------------------- 控制台 */
+
+function lineClass(text) {
+  if (/\b(ERROR|SEVERE|FATAL)\b/.test(text) || /Exception|\bat [\w.$]+\([\w.]+\.java:\d+\)/.test(text)) {
+    return "error";
+  }
+  if (/\bWARN(ING)?\b/.test(text)) return "warn";
+  return "";
+}
+
+function appendLine(cls, text) {
   const el = document.createElement("div");
   if (cls) el.className = cls;
   el.textContent = text;
-  $("log").appendChild(el);
-  $("log").scrollTop = $("log").scrollHeight;
+  const log = $("log");
+  log.appendChild(el);
+  while (log.childElementCount > MAX_LINES) log.removeChild(log.firstChild);
+  if (follow) log.scrollTop = log.scrollHeight;
 }
+
+function clearLog() {
+  $("log").innerHTML = "";
+  $("jump").hidden = true;
+  lastAtBottom = true;
+}
+
+function setFollow(value) {
+  follow = value;
+  applyStrings();
+  if (follow) {
+    const log = $("log");
+    log.scrollTop = log.scrollHeight;
+    $("jump").hidden = true;
+  }
+}
+
+$("log").addEventListener("scroll", () => {
+  const log = $("log");
+  const atBottom = log.scrollHeight - log.scrollTop - log.clientHeight < 24;
+  lastAtBottom = atBottom;
+  if (!atBottom && follow) {
+    follow = false;
+    applyStrings();
+  }
+  $("jump").hidden = atBottom;
+  if (atBottom && !follow) {
+    // 用户自己滚到底了，把跟随接回来
+    follow = true;
+    applyStrings();
+  }
+});
+
+/* ---------------------------------------------------------------- 选择 */
 
 function select(name) {
   selected = name;
-  $("log").innerHTML = "";
-  if (stream) { stream.close(); stream = null; }
+  try { localStorage.setItem("mstl.selected", name || ""); } catch (e) {}
+  clearLog();
   render();
-  if (!name) return;
-  stream = new EventSource("/api/stream?name=" + encodeURIComponent(name));
-  stream.onmessage = (ev) => {
-    let event;
-    try { event = JSON.parse(ev.data); } catch (e) { return; }
-    if (event.type === "line") {
-      if (event.kind === "note") writeLine("note", event.text || "");
-      else if (event.kind === "input") writeLine("input", "> " + (event.text || ""));
-      else writeLine("", event.text || "");
-    } else if (event.type === "state") {
-      const it = instances.find(x => x.name === event.instance);
-      if (it) { it.state = event.state; it.exit_code = event.exit_code; }
-      render();
-    }
-  };
-  stream.onerror = () => {};
+  renderDetails();
+  // 历史由那条全局流回放，这里按 selected 过滤，所以不用重连
 }
 
-function sendCommand() {
-  const value = $("cmd").value.trim();
+/* ---------------------------------------------------------------- 指令 */
+
+function sendCommand(text) {
+  const value = (text == null ? $("cmd").value : text).trim();
   if (!value || !selected) return;
   $("cmd").value = "";
   api("/api/command", { name: selected, command: value }).then(refresh).catch(() => {});
 }
 
-$("send").onclick = sendCommand;
-$("refresh").onclick = () => refresh().catch(() => {});
-$("cmd").addEventListener("keydown", (ev) => { if (ev.key === "Enter") sendCommand(); });
+function buildChips() {
+  const box = $("chips");
+  box.innerHTML = "";
+  QUICK.forEach(q => {
+    const el = document.createElement("button");
+    el.textContent = q.text.trim();
+    el.onclick = () => {
+      if (q.prefill) {
+        $("cmd").value = q.text;
+        $("cmd").focus();
+      } else {
+        sendCommand(q.text);
+      }
+    };
+    box.appendChild(el);
+  });
+}
 
-refresh().catch(() => {});
-setInterval(() => { if (!stream) refresh().catch(() => {}); }, 5000);
+/* ---------------------------------------------------------------- 绑定 */
+
+$("send").onclick = () => sendCommand(null);
+$("cmd").addEventListener("keydown", (ev) => { if (ev.key === "Enter") sendCommand(null); });
+$("refresh").onclick = () => refresh().catch(() => {});
+$("clear").onclick = clearLog;
+$("follow").onclick = () => setFollow(!follow);
+$("jump").onclick = () => setFollow(true);
+
+buildChips();
+
+try {
+  const saved = localStorage.getItem("mstl.selected");
+  if (saved) selected = saved;
+} catch (e) {}
+
+refresh().then(connect).catch(() => { connect(); });
+setInterval(() => refresh().catch(() => {}), 15000);
 </script>
 </body>
 </html>

@@ -411,5 +411,17 @@
     "web.error.not_running": "实例 {name} 未在运行",
     "web.error.unknown_instance": "找不到实例 {name}",
     "web.error.spawn_failed": "启动进程失败: {msg}",
-    "web.error.send_failed": "写入进程失败: {msg}"
+    "web.error.send_failed": "写入进程失败: {msg}",
+    "web.panel.clear": "清屏",
+    "web.panel.follow": "跟随输出",
+    "web.panel.jump_bottom": "回到底部",
+    "web.panel.quick": "快捷指令",
+    "web.detail.memory": "内存 {min} / {max}",
+    "web.detail.pid": "PID {pid}",
+    "web.detail.exit_code": "退出码 {code}",
+    "web.detail.command": "启动命令",
+    "web.detail.workdir": "目录 {path}",
+    "web.conn.online": "已连接",
+    "web.conn.connecting": "连接中",
+    "web.conn.offline": "已断开"
 }
