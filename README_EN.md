@@ -117,7 +117,12 @@ Minecraft-Terminal-Server-Launcher/
 ├── i18n.py               # Translation lookup
 ├── paths.py              # Path resolution across source / standalone / onefile
 ├── http_utils.py         # Shared HTTP JSON helper
-├── server_manager.py     # Server directories, zip import, category-based export
+├── server_manager.py     # Instance storage: dirs, .server.json, type detection, export collection
+├── core/                 # Business core: never prints or prompts; shared by CLI / TUI / Web
+│   ├── report.py         #   one-way event channel from core to the UI
+│   ├── errors.py         #   business exceptions carrying i18n keys
+│   ├── instances.py      #   instances and jar enabled state
+│   └── transfer.py       #   archive import and export
 ├── download_msl.py       # MSL API server download + multithreaded download engine
 ├── java_tools.py         # Java detection, JDK download, version compatibility (Win/Linux)
 ├── server_launcher.py    # Server process launcher, process priority

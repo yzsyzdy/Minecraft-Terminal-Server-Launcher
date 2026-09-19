@@ -11,10 +11,17 @@ from server_manager import (
     list_servers,
     load_server_config,
     save_server_config,
-    import_server_from_zip,
-    export_server_to_zip,
     classify_server_type,
     EXPORT_CATEGORIES,
+)
+from core.errors import CoreError
+from core.instances import (
+    list_jars, set_jar_enabled, delete_jar, import_jar,
+    plugins_dir, mods_dir,
+)
+from core.transfer import (
+    ImportPlan, ExportResult,
+    plan_import, commit_import, abort_import, export_instance,
 )
 from server_launcher import (
     start_minecraft_server,
@@ -34,8 +41,12 @@ __all__ = [
     "load_config", "save_config",
     "ensure_servers_folder", "list_servers",
     "load_server_config", "save_server_config",
-    "import_server_from_zip", "export_server_to_zip",
     "classify_server_type", "EXPORT_CATEGORIES",
+    "CoreError",
+    "list_jars", "set_jar_enabled", "delete_jar", "import_jar",
+    "plugins_dir", "mods_dir",
+    "ImportPlan", "ExportResult",
+    "plan_import", "commit_import", "abort_import", "export_instance",
     "start_minecraft_server", "start_server_interactive",
     "resolve_java", "detect_java_versions",
     "show_download_server_menu",

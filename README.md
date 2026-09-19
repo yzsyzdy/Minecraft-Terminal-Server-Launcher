@@ -119,7 +119,12 @@ Minecraft-Terminal-Server-Launcher/
 ├── i18n.py               # 翻译查找
 ├── paths.py              # 跨模式（源码 / standalone / onefile）路径定位
 ├── http_utils.py         # 统一 HTTP JSON 请求
-├── server_manager.py     # 服务器目录管理、压缩包导入、按类别导出
+├── server_manager.py     # 实例存储：目录扫描、.server.json 读写、类型识别、导出收集
+├── core/                 # 业务核心层：不打印、不提问，CLI / TUI / Web 共用
+│   ├── report.py         #   core 到界面的单向事件通道
+│   ├── errors.py         #   带 i18n key 的业务异常
+│   ├── instances.py      #   实例与 jar 的启用状态
+│   └── transfer.py       #   压缩包导入与导出
 ├── download_msl.py       # MSL API 服务端下载 + 多线程下载引擎
 ├── java_tools.py         # Java 检测、JDK 下载、版本兼容（Win/Linux）
 ├── server_launcher.py    # 服务器进程启动、进程优先级

@@ -8,7 +8,28 @@
 2. **终端界面**。没有 GUI 框架，菜单就是 `print` 加 `input`，所有文案必须走 i18n
 3. **要能打包成单文件 exe**。Nuitka 打包后 `__file__`、`sys.executable`、`sys.argv[0]` 的含义都会变，路径逻辑被单独抽成了 `paths.py`
 
+## 分层
+
+代码分三层：
+
+1. **`core/`** 是业务核心，只做数据与文件，不 `print` 也不 `input`。出事了抛 `CoreError`，有话说就走 `Reporter`
+2. **根目录的各业务模块** 是它的实现细节：实例存储、MSL 下载、Java、插件模组源、隧道
+3. **`menu.py` 与 `start.py`** 是命令行界面，只负责提问与打印
+
+这么做是为了后面的 TUI 与 Web 面板：新界面只依赖 `core/`，业务代码一行不用改。
+
 ## 模块划分
+
+### 核心层 core/
+
+| 模块 | 职责 |
+|---|---|
+| `core/errors.py` | 带 i18n key 的业务异常 `CoreError`，界面层负责翻译呈现 |
+| `core/report.py` | core 到界面的单向事件通道：`log` / `progress` / `warn` |
+| `core/instances.py` | 实例与 jar：扫描、启用/禁用、删除、导入 |
+| `core/transfer.py` | 压缩包进出：`plan_import` / `commit_import` / `export_instance` |
+
+导入特意拆成两步，是因为「多个候选核心该选哪个」不该由 core 拍板。`plan_import` 只负责解压并列出候选，界面层问完用户再调 `commit_import` 落地。
 
 ### 入口与配置
 
@@ -26,7 +47,7 @@
 
 | 模块 | 职责 |
 |---|---|
-| `server_manager.py` | 服务器目录扫描、`.server.json` 读写、压缩包导入、按类别导出、服务端类型识别 |
+| `server_manager.py` | 实例存储：目录扫描、`.server.json` 读写、服务端类型识别、导出分类与文件收集 |
 | `download_msl.py` | 调 MSL API 取服务端类型与版本、每日缓存、多线程下载引擎 |
 | `java_tools.py` | Java 检测（环境变量 + 常见安装路径）、版本解析、兼容性判断、JDK 下载解压 |
 | `server_launcher.py` | 拼 JVM 命令、启动子进程、交互控制台、进程优先级、SIGINT 处理 |

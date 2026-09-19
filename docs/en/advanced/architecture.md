@@ -8,7 +8,28 @@ Three constraints shape most of the code:
 2. **Terminal UI.** No GUI framework. Menus are `print` plus `input`, and every string has to go through i18n
 3. **It has to package into a single-file executable.** After Nuitka packaging, the meaning of `__file__`, `sys.executable`, and `sys.argv[0]` all change, which is why path logic is isolated in `paths.py`
 
+## Layering
+
+The code has three layers:
+
+1. **`core/`** is the business core. It only touches data and files: it never calls `print` or `input`. Failures raise `CoreError`; anything it wants to say goes through a `Reporter`
+2. **The root business modules** are its implementation details: instance storage, MSL downloads, Java, plugin and mod sources, tunneling
+3. **`menu.py` and `start.py`** are the command-line front end, responsible only for prompting and printing
+
+The point of the split is the TUI and web panel still to come: a new front end depends on `core/` alone, with no business code touched.
+
 ## Modules
+
+### Core (`core/`)
+
+| Module | Responsibility |
+|---|---|
+| `core/errors.py` | `CoreError`, a business exception carrying an i18n key for the UI to translate |
+| `core/report.py` | A one-way event channel from core to the UI: `log` / `progress` / `warn` |
+| `core/instances.py` | Instances and jars: scanning, enable/disable, delete, import |
+| `core/transfer.py` | Archive import and export: `plan_import` / `commit_import` / `export_instance` |
+
+Import is deliberately split in two steps, because "which candidate core jar to pick" is not a decision core gets to make. `plan_import` only extracts and lists the candidates; the UI asks the user and then calls `commit_import` to put things in place.
 
 ### Entry point and configuration
 
@@ -26,7 +47,7 @@ Three constraints shape most of the code:
 
 | Module | Responsibility |
 |---|---|
-| `server_manager.py` | Server directory scanning, `.server.json` I/O, archive import, category-based export, server type detection |
+| `server_manager.py` | Instance storage: directory scanning, `.server.json` I/O, server type detection, export categories and file collection |
 | `download_msl.py` | Queries the MSL API for server types and versions, daily caching, and the multithreaded download engine |
 | `java_tools.py` | Java detection (environment variables plus common install paths), version parsing, compatibility checks, JDK download and extraction |
 | `server_launcher.py` | Assembles the JVM command, spawns the subprocess, runs the interactive console, sets process priority, handles SIGINT |

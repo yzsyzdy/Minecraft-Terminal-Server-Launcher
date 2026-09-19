@@ -4,7 +4,6 @@ Interactive menus: main menu, server list, import/download/export guide, plugin/
 
 import sys
 import os
-import shutil
 from typing import Any, Optional
 
 from clear import clear_screen
@@ -12,127 +11,114 @@ from i18n import t, load_language, available_languages, detect_os_language
 from config import load_config, save_config
 from constants import REPO_URL
 from server_manager import (
-    _prompt_zip_path,
-    import_server_from_zip,
     list_servers,
     load_server_config,
     save_server_config,
     classify_server_type,
-    export_server_to_zip,
     ensure_servers_folder,
     EXPORT_CATEGORIES,
 )
+from core.errors import CoreError
+from core import instances as inst
+from core.transfer import abort_import, commit_import, export_instance, plan_import
 
 
 # ---------------------------------------------------------------------------
 # Generic jar management utilities
 # ---------------------------------------------------------------------------
 
-def _list_jars(directory: str) -> tuple[list[str], list[str]]:
-    """Scan directory, return (enabled .jar names, disabled .jar.disabled names)."""
-    enabled: list[str] = []
-    disabled: list[str] = []
-    if not os.path.isdir(directory):
-        return enabled, disabled
-    try:
-        for entry in sorted(os.listdir(directory)):
-            low = entry.lower()
-            if low.endswith(".jar") and not entry.endswith(".disabled"):
-                enabled.append(entry)
-            elif low.endswith(".jar.disabled"):
-                disabled.append(entry)
-            elif low.endswith(".disabled"):
-                base = entry[:-9]
-                if base.lower().endswith(".jar"):
-                    disabled.append(entry)
-    except OSError:
-        pass
-    return enabled, disabled
+class _ConsoleReporter:
+    """把 core 抛出来的事件画到终端上。
+
+    core 只产出 i18n 键和数字，翻译和排版都在这里做。
+    """
+
+    _BAR_WIDTH = 30
+
+    def log(self, key: str, **kwargs) -> None:
+        print("  " + t(key, **kwargs))
+
+    def warn(self, key: str, **kwargs) -> None:
+        print("  " + t(key, **kwargs))
+
+    def progress(self, *, label: str = "", current: Optional[int] = None,
+                 total: Optional[int] = None, ratio: Optional[float] = None,
+                 done: bool = False) -> None:
+        if ratio is None and current is not None and total:
+            ratio = current / total
+        if ratio is None:
+            if label:
+                print("  " + label)
+            return
+        filled = int(self._BAR_WIDTH * ratio)
+        bar = "\u2588" * filled + "\u2591" * (self._BAR_WIDTH - filled)
+        prefix = f"  {label} " if label else "  "
+        print(f"{prefix}[{bar}] {ratio * 100:5.1f}%",
+              end="\n" if done else "\r", flush=True)
+
+
+_REPORTER = _ConsoleReporter()
+
+
+def _report_error(err: CoreError) -> None:
+    """把 core 的业务错误翻成一行提示。"""
+    print("  " + t(err.key, **err.kwargs))
 
 
 def _delete_jar(directory: str) -> None:
-    """Interactively delete a jar file."""
-    enabled, disabled = _list_jars(directory)
-    if not enabled and not disabled:
+    """交互式删除一个 jar。"""
+    if inst.list_jars(directory).total == 0:
         print(t("menu.plugin.nothing_delete"))
         input(t("app.press_enter"))
         return
     target = input(t("menu.plugin.enter_filename")).strip()
     if not target:
         return
-    full_path = os.path.join(directory, target)
-    if not os.path.isfile(full_path):
-        print(t("menu.plugin.add_file_missing", path=target))
+    if input(t("menu.plugin.confirm_delete", name=target)).strip().lower() != "y":
+        print(t("menu.plugin.cancelled"))
         input(t("app.press_enter"))
         return
-    confirm = input(t("menu.plugin.confirm_delete", name=target)).strip().lower()
-    if confirm == "y":
-        try:
-            os.remove(full_path)
-            print(t("menu.plugin.deleted", name=target))
-        except OSError as e:
-            print(t("menu.plugin.delete_failed", msg=str(e)))
-    else:
-        print(t("menu.plugin.cancelled"))
+    try:
+        inst.delete_jar(directory, target)
+        print(t("menu.plugin.deleted", name=target))
+    except CoreError as e:
+        _report_error(e)
     input(t("app.press_enter"))
 
 
 def _toggle_jar(directory: str) -> None:
-    """Interactively disable/enable a jar (.jar <-> .jar.disabled)."""
-    enabled, disabled = _list_jars(directory)
-    if not enabled and not disabled:
+    """交互式启用 / 禁用一个 jar（改后缀实现）。"""
+    if inst.list_jars(directory).total == 0:
         print(t("menu.plugin.nothing_toggle"))
         input(t("app.press_enter"))
         return
     target = input(t("menu.plugin.enter_toggle_file")).strip()
     if not target:
         return
-    full_path = os.path.join(directory, target)
-    if not os.path.isfile(full_path):
-        print(t("menu.plugin.add_file_missing", path=target))
-        input(t("app.press_enter"))
-        return
-    if target.endswith(".disabled"):
-        new_name = target[:-9]
-        if new_name == target:
-            print(t("menu.plugin.state_unrecognized"))
-            input(t("app.press_enter"))
-            return
-        try:
-            os.rename(full_path, os.path.join(directory, new_name))
+    turning_on = target.endswith(inst.DISABLED_SUFFIX)
+    try:
+        new_name = inst.set_jar_enabled(directory, target, enabled=turning_on)
+        if turning_on:
             print(t("menu.plugin.enabled", name=new_name))
-        except OSError as e:
-            print(t("menu.plugin.toggle_failed", msg=str(e)))
-    else:
-        try:
-            os.rename(full_path, os.path.join(directory, target + ".disabled"))
-            print(t("menu.plugin.disabled", name=target + ".disabled"))
-        except OSError as e:
-            print(t("menu.plugin.toggle_failed", msg=str(e)))
+        else:
+            print(t("menu.plugin.disabled", name=new_name))
+    except CoreError as e:
+        _report_error(e)
     input(t("app.press_enter"))
 
 
 def _add_jar_from_file(directory: str) -> None:
-    """Interactively import a local jar file."""
+    """交互式导入本地 jar。"""
     print()
     print(t("menu.plugin.add_prompt"))
     jar_path = input("  > ").strip().strip('"')
     if not jar_path:
         return
-    jar_abs = os.path.abspath(jar_path)
-    if not os.path.isfile(jar_abs):
-        print(t("menu.plugin.add_file_missing", path=jar_abs))
-        input(t("app.press_enter"))
-        return
-    if not jar_abs.lower().endswith(".jar"):
-        print(t("menu.plugin.add_not_jar"))
-        input(t("app.press_enter"))
-        return
     try:
-        shutil.copy2(jar_abs, directory)
-        print(t("menu.plugin.add_imported", name=os.path.basename(jar_abs)))
-    except OSError as e:
-        print(t("menu.plugin.add_copy_failed", msg=str(e)))
+        name = inst.import_jar(directory, jar_path)
+        print(t("menu.plugin.add_imported", name=name))
+    except CoreError as e:
+        _report_error(e)
     input(t("app.press_enter"))
 
 
@@ -141,7 +127,7 @@ def _add_jar_from_file(directory: str) -> None:
 # ---------------------------------------------------------------------------
 
 def _get_plugins_dir(server_dir: str) -> str:
-    return os.path.join(server_dir, "plugins")
+    return inst.plugins_dir(server_dir)
 
 
 def _search_and_download_plugin(server_name: str, plugins_dir: str) -> None:
@@ -218,21 +204,20 @@ def _manage_jars_menu(
     os.makedirs(directory, exist_ok=True)
 
     while True:
-        enabled, disabled = _list_jars(directory)
-        total = len(enabled) + len(disabled)
+        jars = inst.list_jars(directory)
         clear_screen()
         print()
         print(f"  [{label}] {name}")
         print(t("menu.plugin.dir", dir=directory))
         print()
-        if total == 0:
+        if jars.total == 0:
             print(t("menu.plugin.empty"))
         else:
-            print(t("menu.plugin.count", count=total))
+            print(t("menu.plugin.count", count=jars.total))
             print()
-            for p in enabled:
+            for p in jars.enabled:
                 print(f"      [E] {p}")
-            for p in disabled:
+            for p in jars.disabled:
                 print(f"      [D] {p}")
             print()
         print("  [E] = Enabled  [D] = Disabled")
@@ -290,7 +275,7 @@ def _show_plugin_menu(server_cfg: dict, server_dir: str) -> None:
 # ---------------------------------------------------------------------------
 
 def _get_mods_dir(server_dir: str) -> str:
-    return os.path.join(server_dir, "mods")
+    return inst.mods_dir(server_dir)
 
 
 def _search_and_download_mod(name: str, mods_dir: str,
@@ -623,7 +608,12 @@ def _export_server(servers: list[dict], servers_dir: str, project_dir: str) -> N
             return
 
     print(t("menu.export.starting", count=len(selected)))
-    export_server_to_zip(server_dir, out, selected)
+    try:
+        result = export_instance(server_dir, out, selected, reporter=_REPORTER)
+        print(t("export.success", path=result.path,
+                size=result.size_bytes / 1024 / 1024, files=result.file_count))
+    except CoreError as e:
+        _report_error(e)
     input(t("app.press_enter"))
 
 
@@ -1205,6 +1195,77 @@ def _settings_menu(project_dir: str) -> None:
 # Main menu
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# Import / Main menu
+# ---------------------------------------------------------------------------
+
+def _prompt_zip_path() -> Optional[str]:
+    """交互式问一个压缩包路径。"""
+    print()
+    print(t("import.prompt"))
+    raw = input("  > ").strip()
+    if not raw:
+        return None
+    path = os.path.abspath(raw.strip('"'))
+    if not os.path.isfile(path):
+        print(t("import.file_missing", path=path))
+        return None
+    ext = os.path.splitext(path)[1].lower()
+    if ext not in (".zip", ".jar"):
+        print(t("import.unsupported_format", ext=ext))
+        return None
+    return path
+
+
+def _pick_jar_interactive(jars: list[str]) -> Optional[str]:
+    """候选核心 jar 多于一个时，让用户挑一个。"""
+    print()
+    print(t("import.select_jar", count=len(jars)))
+    print()
+    for i, j in enumerate(jars, 1):
+        print(f"  [{i}] {j}")
+    print()
+    while True:
+        try:
+            choice = input(t("import.pick_prompt", max=len(jars))).strip()
+            idx = int(choice) - 1
+            if 0 <= idx < len(jars):
+                return jars[idx]
+        except ValueError:
+            pass
+        print(t("app.invalid_choice_short"))
+
+
+def _import_server_flow(servers_dir: str, project_dir: str) -> None:
+    """导入压缩包：取路径 → 解压计划 → 选核心 → 落地。"""
+    zip_path = _prompt_zip_path()
+    if zip_path is None:
+        input(t("app.press_enter"))
+        return
+
+    try:
+        plan = plan_import(zip_path, project_dir, reporter=_REPORTER)
+    except CoreError as e:
+        _report_error(e)
+        input(t("app.press_enter"))
+        return
+
+    try:
+        jar_rel = plan.auto_choice or _pick_jar_interactive(plan.candidates)
+        if jar_rel is None:
+            abort_import(plan)
+            return
+        detected_key = ("import.detected_auto" if plan.auto_choice
+                        else "import.detected_selected")
+        print(t("import.auto_detect", detected=t(detected_key), jar=jar_rel))
+        server_dir = commit_import(plan, jar_rel, servers_dir, reporter=_REPORTER)
+        print(t("import.dir_info", dir=server_dir))
+    except CoreError as e:
+        abort_import(plan)
+        _report_error(e)
+    input(t("app.press_enter"))
+
+
 def show_main_menu(servers_dir: str, project_dir: str) -> Optional[dict[str, Any]]:
     """
     Main menu. Returns selected server config for launching, or None to exit.
@@ -1249,12 +1310,7 @@ def show_main_menu(servers_dir: str, project_dir: str) -> Optional[dict[str, Any
             continue
 
         elif choice == "2":
-            zip_path = _prompt_zip_path()
-            if zip_path is None:
-                input(t("app.press_enter"))
-                continue
-            import_server_from_zip(zip_path, servers_dir, project_dir)
-            input(t("app.press_enter"))
+            _import_server_flow(servers_dir, project_dir)
             continue
 
         elif choice == "3":
