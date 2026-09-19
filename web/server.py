@@ -134,7 +134,10 @@ def _make_handler(manager: RuntimeManager, servers_dir: str, token: str):
         def _unauthorized(self) -> None:
             self._page(
                 "<!doctype html><meta charset='utf-8'>"
-                "<body style='font:14px system-ui;background:#ffffff;color:#1f2430;padding:24px'>"
+                "<body style='font:14px system-ui;color:#1f2430;padding:24px;"
+                "background-color:#ffffff;"
+                "background-image:linear-gradient(180deg,#f7f8ff,#ffffff 260px);"
+                "background-repeat:no-repeat'>"
                 f"<p>{t('web.auth.invalid')}</p><p style='color:#6b7480'>{t('web.auth.help')}</p>",
                 HTTPStatus.UNAUTHORIZED,
             )
