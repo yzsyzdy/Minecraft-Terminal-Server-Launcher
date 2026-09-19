@@ -1,0 +1,17 @@
+/* MSTL Wiki 自定义样式 */
+
+:root {
+  --md-primary-fg-color: #4c5bd4;
+}
+
+/* 表格在窄屏下允许横向滚动，避免列被压扁 */
+.md-typeset table:not([class]) {
+  display: block;
+  overflow-x: auto;
+}
+
+/* 首页特性表格首列不换行，读起来更整齐 */
+.md-typeset table:not([class]) th:first-child,
+.md-typeset table:not([class]) td:first-child {
+  white-space: nowrap;
+}

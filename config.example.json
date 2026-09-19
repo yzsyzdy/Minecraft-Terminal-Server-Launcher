@@ -1,7 +1,8 @@
 {
   "java_path": null,
   "interactive": true,
-  "language": "zh",
+  "language": "",
   "curseforge_api_key": "",
-  "download_threads": 16
+  "download_threads": 16,
+  "auto_start_server": ""
 }

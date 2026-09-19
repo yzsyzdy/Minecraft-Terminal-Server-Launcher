@@ -14,6 +14,10 @@
 - **多线程下载** — 服务端核心和插件下载默认使用 16 线程并发分块下载，自动检测 Range 支持并回退
 - **EULA 自动处理** — 检测到 `eula=false` 时自动询问用户，同意后修改并重启服务器
 - **控制台交互** — 支持在终端输入服务器指令（stop、say 等）
+- **服务器导出** — 按类别（世界、插件、配置、玩家数据等）打包已有服务器，便于迁移备份
+- **开机自启** — Windows 下写入注册表 `Run` 项，当前用户登录即启动
+- **更新检查** — 读取打包时写入的版本号，与 GitHub Releases 比对并提示新版本
+- **多语言界面** — 内置 中文 / English / Русский 翻译，可跟随系统语言自动切换
 - **跨平台** — 同时支持 Windows 和 Linux
 
 ### 插件管理
@@ -66,7 +70,10 @@ python start.py
 {
   "java_path": null,
   "interactive": true,
-  "curseforge_api_key": ""
+  "language": "",
+  "curseforge_api_key": "",
+  "download_threads": 16,
+  "auto_start_server": ""
 }
 ```
 
@@ -74,7 +81,12 @@ python start.py
 |---|---|
 | `java_path` | 指定 Java 路径，`null` 表示自动检测 |
 | `interactive` | 是否启用控制台交互模式 |
+| `language` | 界面语言，空字符串表示跟随系统（`zh` / `en` / `ru`） |
 | `curseforge_api_key` | CurseForge API key（可选，填入后可通过 CurseForge 搜索模组） |
+| `download_threads` | 多线程下载并发分块数，默认 16 |
+| `auto_start_server` | 主菜单默认自动启动的服务器名，留空为不自动启动 |
+
+> `config.json` 属于机器相关配置，仓库只提交 `config.example.json`；自己的配置文件不会被纳入版本控制。完整字段说明见 [配置说明](https://yzsyzdy.github.io/Minecraft-Terminal-Server-Launcher/guide/configuration/)。
 
 ### 服务器配置 `servers/<服务器名>/.server.json`
 
@@ -93,22 +105,37 @@ python start.py
 
 `java_path` 为 `null` 时自动检测；`min_mem` / `max_mem` 支持 `G` / `M` 单位。
 
+此外还有一个 `process_priority` 字段（`normal` / `below` / `low`，控制进程优先级），以及绑定内网穿透后写入的 `openfrp` 字段。这几个都可以在主菜单 `[1] 启动服务器` 之后的配置菜单里改，完整字段表见 [配置说明](https://yzsyzdy.github.io/Minecraft-Terminal-Server-Launcher/guide/configuration/)。
+
 ## 项目结构
 
 ```
-mc-server-launcher/
-├── start.py              # 启动入口
+Minecraft-Terminal-Server-Launcher/
+├── start.py              # 启动入口：更新检查 → 菜单 → 启动 → EULA → 清理
 ├── main.py               # re-export 模块（兼容旧导入）
 ├── config.py             # 全局配置读写
+├── constants.py          # 外部 API 地址与 UA 常量
 ├── clear.py              # 终端清屏工具
-├── server_manager.py     # 服务器目录管理、压缩包导入
+├── i18n.py               # 翻译查找
+├── paths.py              # 跨模式（源码 / standalone / onefile）路径定位
+├── http_utils.py         # 统一 HTTP JSON 请求
+├── server_manager.py     # 服务器目录管理、压缩包导入、按类别导出
 ├── download_msl.py       # MSL API 服务端下载 + 多线程下载引擎
 ├── java_tools.py         # Java 检测、JDK 下载、版本兼容（Win/Linux）
-├── server_launcher.py    # 服务器进程启动
-├── menu.py               # 交互菜单（服务器选择、插件/模组管理）
+├── server_launcher.py    # 服务器进程启动、进程优先级
+├── menu.py               # 交互菜单（服务器选择、插件/模组、穿透、设置）
 ├── plugin_sources.py     # 插件搜索与下载（SpigotMC、Modrinth、Hangar）
 ├── mod_sources.py        # 模组搜索与下载（Modrinth、CurseForge）
-├── config.json           # 全局配置（自动生成）
+├── startup.py            # Windows 开机自启（注册表）
+├── check_update.py       # 版本更新检查
+├── openfrp/              # 内网穿透：OpenFrp 云端隧道
+├── frp/                  # 内网穿透：本地 frpc.toml
+├── locales/              # 界面翻译（zh / en / ru / neko）
+├── docs/                 # MkDocs 文档源文件
+├── mkdocs.yml            # 文档站配置（须位于仓库根目录）
+├── .github/workflows/    # build.yml（打包发版）、docs.yml（文档站部署）
+├── config.example.json   # 全局配置模板
+├── config.json           # 全局配置（自动生成，不纳入版本控制）
 ├── java_list.json        # Java 检测缓存（自动生成）
 ├── msl_cache.json        # MSL 镜像缓存（自动生成）
 └── servers/              # 服务器实例目录（自动创建）
@@ -117,21 +144,27 @@ mc-server-launcher/
 ## 运行流程
 
 ```
-start.py
+start.py  main()
   │
   ├─ 清屏
-  ├─ 读取 config.json
+  ├─ 检查更新（有新版本则提示一行）
+  ├─ 读取 config.json，按 language / 系统语言加载翻译
   ├─ 创建 servers/ 目录
   │
-  ├─ 没有服务器 → 菜单：[1]导入  [2]下载  [0]退出
+  ├─ 配了 auto_start_server → 跳过菜单，直接选中该服务器
+  │  否则显示主菜单：
+  │    [1] 启动服务器   [2] 导入服务器压缩包   [3] 下载服务器
+  │    [4] 管理插件/模组 [5] 导出服务器        [6] 内网穿透
+  │    [7] 设置          [0] 退出
   │
-  └─ 有服务器 → 列表 + [导入] [下载] [管理插件/模组] [退出]
-                  │
-                  ▼ 选择服务器
-                  │
-                  ├─ 解析 Java（缓存 → 扫描 → 下载）
-                  ├─ Java 版本兼容检查
-                  └─ 启动服务器（交互控制台）
+  └─ 选中服务器后
+       ├─ 解析 Java（缓存 → 扫描 → 下载）
+       ├─ Java 版本兼容检查
+       ├─ 校验核心 jar
+       ├─ 需要时先拉起 frpc（内网穿透）
+       ├─ 启动服务器（交互控制台）
+       ├─ 因 eula=false 退出 → 询问 → 同意则改写并重启
+       └─ 退出后收掉 frpc 进程
 ```
 
 ## MSL 镜像源
@@ -160,20 +193,34 @@ start.py
 - **标准库**（零第三方依赖）
 - **JDK 21+**（可选，用于运行 Minecraft 服务器，启动器可自动下载）
 
-## 内网穿透 (OpenFrp)
+## 内网穿透
 
-MSTL 集成了 [OpenFrp](https://openfrp.net/) 内网穿透支持，可自动为 Minecraft 服务器创建 TCP 隧道。
+MSTL 提供两条互相独立的路线，按需选一条：
+
+- **OpenFrp 云端隧道** — 在 [OpenFrp](https://openfrp.net/) 控制台管理隧道，客户端凭 token 拉取，frpc 自动下载
+- **本地 frp** — 自己维护 `frp/frpc.toml`，在菜单里手动增删代理、启停 frpc
+
+下面说 OpenFrp 路线的用法，本地 frp 的完整说明见 [内网穿透文档](https://yzsyzdy.github.io/Minecraft-Terminal-Server-Launcher/features/tunnel/)。
 
 ### 使用方式
 
 1. 在 [OpenFrp 控制台](https://console.openfrp.net) 获取你的 **用户 token**
-2. MSTL 主菜单 → [6] OpenFrp → [1] 查看隧道列表 → 输入 token
+2. MSTL 主菜单 → [6] 内网穿透 → OpenFrp → [1] 查看隧道列表 → 输入 token
 3. 确认隧道后，回到 [3] 绑定隧道到服务器
 4. 启动服务器时 frpc 自动跟随启动
 
 ### 无需手动安装 frpc
 
 MSTL 会自动检测系统架构并下载对应的 frpc 二进制文件。
+
+## 文档
+
+完整文档（使用指南、功能详解、项目架构、FAQ）用 MkDocs Material 维护，源文件在 `docs/` 目录：
+
+- 在线站：[yzsyzdy.github.io/Minecraft-Terminal-Server-Launcher](https://yzsyzdy.github.io/Minecraft-Terminal-Server-Launcher/)
+- 本地预览：装好 `mkdocs-material`、`mkdocs-static-i18n`、`mkdocs-minify-plugin`、`mkdocs-git-revision-date-localized-plugin` 后跑 `mkdocs serve`
+
+推送到 `main` 且改动涉及 `docs/` 或 `mkdocs.yml` 时，由 `.github/workflows/docs.yml` 自动构建并部署到 GitHub Pages。
 
 ## 许可
 

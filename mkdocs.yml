@@ -1,10 +1,15 @@
 # MSTL Wiki — MkDocs Material 配置
+#
+# 注意：本文件必须位于仓库根目录。docs_dir 默认相对配置文件所在目录解析，
+# 若把它放回 docs/ 下，MkDocs 会去找 docs/docs/。
 site_name: MSTL
 site_description: Minecraft Terminal Server Launcher — 轻量级、零依赖的 Minecraft 服务端管理器
-site_url: https://yzsyzdy.github.io/mc-server-launcher/
-repo_url: https://github.com/yzsyzdy/mc-server-launcher
-repo_name: yzsyzdy/mc-server-launcher
+site_url: https://yzsyzdy.github.io/Minecraft-Terminal-Server-Launcher/
+repo_url: https://github.com/yzsyzdy/Minecraft-Terminal-Server-Launcher
+repo_name: yzsyzdy/Minecraft-Terminal-Server-Launcher
 edit_uri: edit/main/docs
+
+docs_dir: docs
 
 copyright: Copyright &copy; 2026 yzsyzdy — GNU General Public License v3.0
 
@@ -16,8 +21,6 @@ theme:
   icon:
     repo: fontawesome/brands/github
   features:
-    - navigation.instant
-    - navigation.instant.prefetch
     - navigation.tracking
     - navigation.tabs
     - navigation.sections
@@ -30,6 +33,7 @@ theme:
     - content.code.copy
     - content.code.annotate
     - content.tabs.link
+    # 注意：不要开启 navigation.instant，它与 mkdocs-static-i18n 的语言切换器不兼容
   palette:
     - media: "(prefers-color-scheme)"
       toggle:
@@ -53,7 +57,7 @@ theme:
 extra:
   social:
     - icon: fontawesome/brands/github
-      link: https://github.com/yzsyzdy/mc-server-launcher
+      link: https://github.com/yzsyzdy/Minecraft-Terminal-Server-Launcher
   consent:
     title: Cookie 声明
     description: >-
@@ -73,6 +77,10 @@ plugins:
         - en
   - i18n:
       docs_structure: folder
+      # 未翻译的页面回落到默认语言（zh），英文可以后补而不影响构建
+      fallback_to_default: true
+      # 接管 Material 自带的语言选择器
+      reconfigure_material: true
       languages:
         - locale: zh
           name: 中文
@@ -81,9 +89,26 @@ plugins:
         - locale: en
           name: English
           build: true
+          site_description: Minecraft Terminal Server Launcher — a lightweight, zero-dependency Minecraft server manager
+          nav_translations:
+            首页: Home
+            使用指南: Guide
+            快速开始: Quick start
+            服务器管理: Server management
+            配置说明: Configuration
+            功能详解: Features
+            插件管理: Plugin management
+            模组管理: Mod management
+            内网穿透: Tunneling
+            进阶: Advanced
+            项目架构: Architecture
+            从源码构建: Building from source
+            常见问题: FAQ
   - tags
   - git-revision-date-localized:
       enable_creation_date: true
+      # 仓库里存在重命名过的路径时，git follow 会给出顺序错乱的日期
+      enable_git_follow: false
   - minify:
       minify_html: true
 

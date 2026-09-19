@@ -14,6 +14,10 @@ A lightweight, zero-dependency Minecraft server manager. Manage multiple server 
 - **Multithreaded download** — Server cores and plugins are downloaded with 16 concurrent threads using chunked Range requests, with automatic fallback to single-thread
 - **EULA handling** — Detects `eula=false` on server exit, prompts the user, and auto-restarts after acceptance
 - **Interactive console** — Send server commands (stop, say, etc.) directly from the terminal
+- **Server export** — Package an existing server by category (world, plugins, config, player data, …) for migration or backup
+- **Run on startup** — Registers a `Run` key so the launcher starts on Windows logon
+- **Update check** — Reads the bundled version file and compares against the latest GitHub Release
+- **Localized UI** — Built-in 中文 / English / Русский translations, can follow the OS language
 - **Cross-platform** — Runs on both Windows and Linux
 
 ### Plugin Management
@@ -66,7 +70,10 @@ The first run automatically creates `config.json` and the `servers/` directory.
 {
   "java_path": null,
   "interactive": true,
-  "curseforge_api_key": ""
+  "language": "",
+  "curseforge_api_key": "",
+  "download_threads": 16,
+  "auto_start_server": ""
 }
 ```
 
@@ -74,7 +81,12 @@ The first run automatically creates `config.json` and the `servers/` directory.
 |---|---|
 | `java_path` | Explicit Java executable path, `null` for auto-detection |
 | `interactive` | Enable interactive console mode |
+| `language` | UI language; empty string follows the OS (`zh` / `en` / `ru`) |
 | `curseforge_api_key` | CurseForge API key (optional, enables CurseForge mod search) |
+| `download_threads` | Concurrent chunks for multithreaded download, default 16 |
+| `auto_start_server` | Server name to launch straight from startup, empty to disable |
+
+> `config.json` holds machine-specific settings, so the repository only ships `config.example.json`. Your own file is gitignored. Full field reference: [Configuration](https://yzsyzdy.github.io/Minecraft-Terminal-Server-Launcher/guide/configuration/).
 
 ### Server Config `servers/<server-name>/.server.json`
 
@@ -96,19 +108,32 @@ When `java_path` is `null`, the launcher auto-detects Java. Memory values suppor
 ## Project Structure
 
 ```
-mc-server-launcher/
-├── start.py              # Entry point
+Minecraft-Terminal-Server-Launcher/
+├── start.py              # Entry point: update check → menu → launch → EULA → cleanup
 ├── main.py               # Re-export module (backward compatible)
 ├── config.py             # Global config read/write
+├── constants.py          # External API endpoints and User-Agent
 ├── clear.py              # Terminal screen clear utility
-├── server_manager.py     # Server directory management, zip import
+├── i18n.py               # Translation lookup
+├── paths.py              # Path resolution across source / standalone / onefile
+├── http_utils.py         # Shared HTTP JSON helper
+├── server_manager.py     # Server directories, zip import, category-based export
 ├── download_msl.py       # MSL API server download + multithreaded download engine
 ├── java_tools.py         # Java detection, JDK download, version compatibility (Win/Linux)
-├── server_launcher.py    # Server process launcher
-├── menu.py               # Interactive menus (server selection, plugin/mod management)
+├── server_launcher.py    # Server process launcher, process priority
+├── menu.py               # Interactive menus (servers, plugins/mods, tunnel, settings)
 ├── plugin_sources.py     # Plugin search & download (SpigotMC, Modrinth, Hangar)
 ├── mod_sources.py        # Mod search & download (Modrinth, CurseForge)
-├── config.json           # Global config (auto-generated)
+├── startup.py            # Windows run-on-startup (registry)
+├── check_update.py       # Release update check
+├── openfrp/              # Tunneling: OpenFrp cloud tunnels
+├── frp/                  # Tunneling: local frpc.toml
+├── locales/              # UI translations (zh / en / ru / neko)
+├── docs/                 # MkDocs documentation sources
+├── mkdocs.yml            # Docs site config (must live at repo root)
+├── .github/workflows/    # build.yml (release build), docs.yml (docs deployment)
+├── config.example.json   # Global config template
+├── config.json           # Global config (auto-generated, gitignored)
 ├── java_list.json        # Java detection cache (auto-generated)
 ├── msl_cache.json        # MSL mirror cache (auto-generated)
 └── servers/              # Server instances directory (auto-created)
@@ -117,21 +142,27 @@ mc-server-launcher/
 ## Runtime Flow
 
 ```
-start.py
+start.py  main()
   │
   ├─ Clear screen
-  ├─ Load config.json
+  ├─ Check for updates (prints one line when a newer release exists)
+  ├─ Load config.json, pick language from config or OS locale
   ├─ Create servers/ directory
   │
-  ├─ No servers → Menu: [1]Import  [2]Download  [0]Exit
+  ├─ auto_start_server set → skip menu, select that server directly
+  │  otherwise show main menu:
+  │    [1] Start server     [2] Import server zip  [3] Download server
+  │    [4] Manage plugins/mods  [5] Export server  [6] Tunneling
+  │    [7] Settings         [0] Exit
   │
-  └─ Has servers → List + [Import] [Download] [Manage plugins/mods] [Exit]
-                       │
-                       ▼ Select server
-                       │
-                       ├─ Resolve Java (cache → scan → download)
-                       ├─ Java version compatibility check
-                       └─ Start server (interactive console)
+  └─ After a server is selected
+       ├─ Resolve Java (cache → scan → download)
+       ├─ Check Java version compatibility
+       ├─ Validate core jar
+       ├─ Launch frpc first when tunneling is configured
+       ├─ Start the server (interactive console)
+       ├─ Exited with eula=false → prompt → rewrite and restart on accept
+       └─ Stop frpc after the server exits
 ```
 
 ## MSL Mirror Source
@@ -159,6 +190,28 @@ When incompatible, the launcher offers automatic JDK download (17 / 21 / 25).
 - **Python 3.10+**
 - **Standard library only** (zero third-party dependencies)
 - **JDK 21+** (optional, for running Minecraft servers — the launcher can download it automatically)
+
+## Tunneling
+
+MSTL ships two independent routes, pick whichever fits:
+
+- **OpenFrp cloud tunnels** — Manage tunnels in the [OpenFrp](https://openfrp.net/) console, the client pulls them by token, frpc is downloaded automatically
+- **Local frp** — Maintain `frp/frpc.toml` yourself and add/remove proxies, start/stop frpc from the menu
+
+See the [tunneling docs](https://yzsyzdy.github.io/Minecraft-Terminal-Server-Launcher/features/tunnel/) for both walkthroughs.
+
+## Documentation
+
+Full documentation (guide, feature details, architecture, FAQ) is built with MkDocs Material from the `docs/` directory:
+
+- Online: [yzsyzdy.github.io/Minecraft-Terminal-Server-Launcher](https://yzsyzdy.github.io/Minecraft-Terminal-Server-Launcher/)
+- Locally: install `mkdocs-material`, `mkdocs-static-i18n`, `mkdocs-minify-plugin` and `mkdocs-git-revision-date-localized-plugin`, then run `mkdocs serve`
+
+Pushing to `main` with changes under `docs/` or to `mkdocs.yml` triggers `.github/workflows/docs.yml`, which builds and deploys the site to GitHub Pages.
+
+## License
+
+Released under the **GNU General Public License v3.0**. See [LICENSE](https://github.com/yzsyzdy/Minecraft-Terminal-Server-Launcher/blob/main/LICENSE).
 
 ## FAQ
 
