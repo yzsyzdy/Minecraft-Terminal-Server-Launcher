@@ -113,6 +113,8 @@ def _make_handler(manager: RuntimeManager, servers_dir: str, token: str):
                   extra_headers: Optional[list[tuple[str, str]]] = None) -> None:
             self.send_response(status)
             self.send_header("Content-Type", content_type)
+            # 面板前后端都在本机迭代，别让浏览器拿旧页面
+            self.send_header("Cache-Control", "no-store")
             self.send_header("Content-Length", str(len(body)))
             for key, value in (extra_headers or []):
                 self.send_header(key, value)
@@ -132,8 +134,8 @@ def _make_handler(manager: RuntimeManager, servers_dir: str, token: str):
         def _unauthorized(self) -> None:
             self._page(
                 "<!doctype html><meta charset='utf-8'>"
-                "<body style='font:14px system-ui;background:#11151c;color:#e6ebf2;padding:24px'>"
-                f"<p>{t('web.auth.invalid')}</p><p style='color:#8b98a9'>{t('web.auth.help')}</p>",
+                "<body style='font:14px system-ui;background:#ffffff;color:#1f2430;padding:24px'>"
+                f"<p>{t('web.auth.invalid')}</p><p style='color:#6b7480'>{t('web.auth.help')}</p>",
                 HTTPStatus.UNAUTHORIZED,
             )
 
