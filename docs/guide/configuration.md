@@ -13,7 +13,12 @@ MSTL 有两层配置：全局的 `config.json`，以及每个实例自己的 `.s
   "language": "",
   "curseforge_api_key": "",
   "download_threads": 16,
-  "auto_start_server": ""
+  "auto_start_server": "",
+  "web": {
+    "host": "127.0.0.1",
+    "port": 8765,
+    "token": ""
+  }
 }
 ```
 
@@ -25,6 +30,9 @@ MSTL 有两层配置：全局的 `config.json`，以及每个实例自己的 `.s
 | `curseforge_api_key` | string | `""` | CurseForge API key。留空则 CurseForge 模组搜索不可用 |
 | `download_threads` | int | `16` | 多线程下载的并发分块数。镜像不支持 Range 请求时会自动回退单线程 |
 | `auto_start_server` | string | `""` | 记录「设置」里指定的默认启动服务器名称，留空表示不自动启动 |
+| `web.host` | string | `"127.0.0.1"` | 网页面板监听地址，`0.0.0.0` 表示所有网卡 |
+| `web.port` | int | `8765` | 网页面板监听端口 |
+| `web.token` | string | `""` | 网页面板访问 token，留空则首次启动自动生成 |
 
 其中 `language`、`download_threads`、`auto_start_server` 三项通常不需要手改，在菜单 `[7] 设置` 里操作即可：
 
@@ -33,6 +41,8 @@ MSTL 有两层配置：全局的 `config.json`，以及每个实例自己的 `.s
 - `[3] 检查更新`：读取 `version.json` 里的当前版本，与 GitHub Releases 的最新版比较
 - `[4] 自动启动服务器`：指定主菜单默认启动哪一个
 - `[5] 开机自启`：写 Windows 注册表 `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`，非 Windows 平台不可用
+
+网页面板那三项（`web.*`）不在菜单里，直接改 `config.json`，用法与安全须知见[网页面板](../features/web-panel.md)。
 
 !!! note "关于 config.json 的版本管理"
     `config.json` 属于机器相关配置，仓库里只提交 `config.example.json` 作为模板。自己 clone 下来后 `config.json` 会按默认值生成，不会被 git 跟踪。

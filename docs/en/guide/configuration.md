@@ -13,7 +13,12 @@ It lives at the project root (next to the executable in a packaged build) and is
   "language": "",
   "curseforge_api_key": "",
   "download_threads": 16,
-  "auto_start_server": ""
+  "auto_start_server": "",
+  "web": {
+    "host": "127.0.0.1",
+    "port": 8765,
+    "token": ""
+  }
 }
 ```
 
@@ -25,6 +30,9 @@ It lives at the project root (next to the executable in a packaged build) and is
 | `curseforge_api_key` | string | `""` | CurseForge API key. Left empty, CurseForge mod search is unavailable |
 | `download_threads` | int | `16` | Number of concurrent download chunks. Falls back to a single thread when the mirror does not support Range requests |
 | `auto_start_server` | string | `""` | Name of the server that "Settings" has marked as the default to launch; empty means no auto-start |
+| `web.host` | string | `"127.0.0.1"` | Web panel bind address; `0.0.0.0` means all interfaces |
+| `web.port` | int | `8765` | Web panel bind port |
+| `web.token` | string | `""` | Web panel access token; generated on first start when empty |
 
 The `language`, `download_threads`, and `auto_start_server` fields normally do not need hand-editing; use menu `[7] Settings` instead:
 
@@ -33,6 +41,8 @@ The `language`, `download_threads`, and `auto_start_server` fields normally do n
 - `[3] Check for updates`: reads the current version from `version.json` and compares it against the latest GitHub Release
 - `[4] Auto-start server`: choose which server the main menu launches by default
 - `[5] Run at startup`: writes the Windows registry key `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`; unavailable on non-Windows platforms
+
+The three `web.*` fields are not in the menu; edit `config.json` directly. Usage and the security boundary are covered in [Web panel](../features/web-panel.md).
 
 !!! note "About config.json and version control"
     `config.json` holds machine-specific settings, so the repository ships only `config.example.json` as a template. After you clone the project, `config.json` is generated from the defaults and is not tracked by git.

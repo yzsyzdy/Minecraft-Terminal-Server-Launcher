@@ -9,5 +9,20 @@ core —— MSTL 的业务核心层。
 
 from .errors import CoreError
 from .report import NULL, NullReporter, Reporter
+from .runtime import (
+    LaunchPlan,
+    RuntimeManager,
+    ServerRuntime,
+    build_launch_plan,
+)
 
-__all__ = ["CoreError", "Reporter", "NullReporter", "NULL"]
+__all__ = [
+    "CoreError",
+    "Reporter",
+    "NullReporter",
+    "NULL",
+    "LaunchPlan",
+    "build_launch_plan",
+    "ServerRuntime",
+    "RuntimeManager",
+]

@@ -13,6 +13,11 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "curseforge_api_key": "",
     "download_threads": 16,
     "auto_start_server": "",
+    "web": {
+        "host": "127.0.0.1",
+        "port": 8765,
+        "token": "",
+    },
 }
 
 

@@ -28,6 +28,8 @@ The point of the split is the TUI and web panel still to come: a new front end d
 | `core/report.py` | A one-way event channel from core to the UI: `log` / `progress` / `warn` |
 | `core/instances.py` | Instances and jars: scanning, enable/disable, delete, import |
 | `core/transfer.py` | Archive import and export: `plan_import` / `commit_import` / `export_instance` |
+| `core/java.py` | Non-interactive Java resolution: explicit path → last choice → cache → fresh scan |
+| `core/runtime.py` | Launch plans and process supervision: bidirectional pipes, ring buffer, event broadcast |
 
 Import is deliberately split in two steps, because "which candidate core jar to pick" is not a decision core gets to make. `plan_import` only extracts and lists the candidates; the UI asks the user and then calls `commit_import` to put things in place.
 
@@ -66,6 +68,15 @@ Import is deliberately split in two steps, because "which candidate core jar to 
 | `frp/` | Local frp: `frpc.toml` parsing and generation, proxy management, frpc launching |
 
 `openfrp/` and `frp/` are two parallel implementations serving two different use cases, "cloud-managed tunnels" and "bring your own frpc config". Neither inherits from or reuses the other.
+
+### Front end
+
+| Module | Responsibility |
+|---|---|
+| `start.py` | Terminal entry point; `python start.py web` switches straight to the web panel |
+| `menu.py` | Terminal menus: prompting and printing only |
+| `web/server.py` | Web panel backend: HTTP routing, token auth, SSE pushing |
+| `webui/index.html` | Panel front end, one file, no build step |
 
 ## Startup sequence
 

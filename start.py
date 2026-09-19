@@ -198,8 +198,44 @@ def _start_server(server_cfg: dict, server_path: str,
     return exit_code
 
 
+def _dispatch_web(argv: list[str]) -> bool:
+    """`python start.py web [--host H] [--port P]` 直接进网页面板。
+
+    终端菜单是默认形态，只有显式写了 web 才切过去，不影响现有用法。
+    """
+    if not argv or argv[0].lower() not in ("web", "serve", "--web"):
+        return False
+
+    host = None
+    port = None
+    rest = argv[1:]
+    i = 0
+    while i < len(rest):
+        flag = rest[i]
+        value = rest[i + 1] if i + 1 < len(rest) else None
+        if flag in ("--host", "-H") and value:
+            host = value
+            i += 2
+            continue
+        if flag in ("--port", "-p") and value:
+            try:
+                port = int(value)
+            except ValueError:
+                print(f"  [警告] 忽略无效端口: {value}")
+            i += 2
+            continue
+        i += 1
+
+    from web.server import run_web
+    run_web(_project_dir(), host=host, port=port)
+    return True
+
+
 def main():
     """程序入口。"""
+    if _dispatch_web(sys.argv[1:]):
+        return
+
     from clear import clear_screen
     clear_screen()
     project_dir = _project_dir()

@@ -28,6 +28,8 @@
 | `core/report.py` | core 到界面的单向事件通道：`log` / `progress` / `warn` |
 | `core/instances.py` | 实例与 jar：扫描、启用/禁用、删除、导入 |
 | `core/transfer.py` | 压缩包进出：`plan_import` / `commit_import` / `export_instance` |
+| `core/java.py` | 非交互式 Java 解析：显式路径 → 上次选择 → 缓存 → 现场扫描 |
+| `core/runtime.py` | 启动计划与进程监管：PIPE 双向读写、环形缓冲、事件广播 |
 
 导入特意拆成两步，是因为「多个候选核心该选哪个」不该由 core 拍板。`plan_import` 只负责解压并列出候选，界面层问完用户再调 `commit_import` 落地。
 
@@ -66,6 +68,15 @@
 | `frp/` | 本地 frp：`frpc.toml` 解析与生成、代理增删、frpc 启动 |
 
 `openfrp/` 与 `frp/` 是两个并列实现，服务于「云端托管隧道」和「自备 frpc 配置」两种不同用法，没有互相继承或复用关系。
+
+### 界面层
+
+| 模块 | 职责 |
+|---|---|
+| `start.py` | 终端入口；`python start.py web` 直接切到网页面板 |
+| `menu.py` | 终端交互菜单：只负责提问与打印 |
+| `web/server.py` | 网页面板后端：HTTP 路由、token 鉴权、SSE 推送 |
+| `webui/index.html` | 面板前端，单文件，无构建步骤 |
 
 ## 启动时序
 

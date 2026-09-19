@@ -122,7 +122,11 @@ Minecraft-Terminal-Server-Launcher/
 │   ├── report.py         #   one-way event channel from core to the UI
 │   ├── errors.py         #   business exceptions carrying i18n keys
 │   ├── instances.py      #   instances and jar enabled state
-│   └── transfer.py       #   archive import and export
+│   ├── transfer.py       #   archive import and export
+│   ├── java.py           #   non-interactive Java resolution
+│   └── runtime.py        #   launch plans and process supervision (pipes + event stream)
+├── web/                  # Web panel backend: HTTP + SSE, standard library only
+├── webui/                # Web panel front end: one file, no build step
 ├── download_msl.py       # MSL API server download + multithreaded download engine
 ├── java_tools.py         # Java detection, JDK download, version compatibility (Win/Linux)
 ├── server_launcher.py    # Server process launcher, process priority
@@ -204,6 +208,19 @@ MSTL ships two independent routes, pick whichever fits:
 - **Local frp** — Maintain `frp/frpc.toml` yourself and add/remove proxies, start/stop frpc from the menu
 
 See the [tunneling docs](https://yzsyzdy.github.io/Minecraft-Terminal-Server-Launcher/features/tunnel/) for both walkthroughs.
+
+## Web panel
+
+Besides the terminal menu, MSTL can run as a web panel:
+
+```bash
+python start.py web                # http://127.0.0.1:8765 by default
+python start.py web --port 9000    # pick another port
+```
+
+Startup prints a URL carrying a token; opening it logs you in. The token lives in `web.token` under `config.json`. From the panel you can list instances, start and stop them, watch the console live, and send server commands. Console output is also appended to `logs/mstl-console.log` inside the instance directory.
+
+> **It listens on 127.0.0.1 only, by default.** The panel can send commands to a server console, which makes it a remote command execution button. To reach it through frp, put a reverse proxy and HTTPS in front, and think twice before changing `web.host`.
 
 ## Documentation
 

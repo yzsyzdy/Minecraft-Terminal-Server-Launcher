@@ -308,3 +308,12 @@ def start_server_interactive(
         except KeyboardInterrupt:
             pass
     return process.returncode
+
+
+# ---------------------------------------------------------------------------
+# 公开别名
+# core / web 层需要「拼 JVM 命令」和「按优先级起进程」这两个能力，
+# 但它们不走终端，所以用下面这两个名字而不是下划线开头的私有名。
+# ---------------------------------------------------------------------------
+build_jvm_command = _build_jvm_cmd
+spawn_priority_process = _start_priority_process

@@ -124,7 +124,11 @@ Minecraft-Terminal-Server-Launcher/
 │   ├── report.py         #   core 到界面的单向事件通道
 │   ├── errors.py         #   带 i18n key 的业务异常
 │   ├── instances.py      #   实例与 jar 的启用状态
-│   └── transfer.py       #   压缩包导入与导出
+│   ├── transfer.py       #   压缩包导入与导出
+│   ├── java.py           #   非交互式 Java 解析
+│   └── runtime.py        #   启动计划与进程监管（PIPE 双向 + 事件流）
+├── web/                  # 网页面板后端：HTTP + SSE，标准库
+├── webui/                # 网页面板前端：单文件，无构建步骤
 ├── download_msl.py       # MSL API 服务端下载 + 多线程下载引擎
 ├── java_tools.py         # Java 检测、JDK 下载、版本兼容（Win/Linux）
 ├── server_launcher.py    # 服务器进程启动、进程优先级
@@ -217,6 +221,19 @@ MSTL 提供两条互相独立的路线，按需选一条：
 ### 无需手动安装 frpc
 
 MSTL 会自动检测系统架构并下载对应的 frpc 二进制文件。
+
+## 网页面板
+
+除了终端菜单，MSTL 还能跑成一个网页面板：
+
+```bash
+python start.py web                # 默认 http://127.0.0.1:8765
+python start.py web --port 9000    # 换端口
+```
+
+启动后会打印一条带 token 的地址，用它打开即完成登录，token 写在 `config.json` 的 `web.token` 里。面板里能看实例列表、启动与停止、实时看控制台、敲服务端指令，控制台同时追加写入实例目录下的 `logs/mstl-console.log`。
+
+> **默认只监听 127.0.0.1。** 面板能往服务端控制台发指令，等于一枚远程命令执行按钮。要经 frp 穿到公网，请在前面加一层反向代理与 HTTPS，改 `web.host` 之前先想清楚这一点。
 
 ## 文档
 
