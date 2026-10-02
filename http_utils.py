@@ -6,6 +6,7 @@ HTTP 请求工具模块
 """
 
 import json
+import http.client
 import urllib.request
 import urllib.error
 from typing import Any, Optional
@@ -41,4 +42,10 @@ def fetch_json(url: str, headers: Optional[dict] = None,
             return json.loads(resp.read().decode("utf-8"))
     except (urllib.error.HTTPError, urllib.error.URLError,
             OSError, json.JSONDecodeError):
+        return None
+    except (http.client.HTTPException, ValueError):
+        # 拼错的 URL 是在发请求之前炸的，不属于上面任何一类：
+        #   空格等控制字符 -> http.client.InvalidURL (HTTPException)
+        #   非 ASCII 字符  -> UnicodeEncodeError (ValueError)
+        # 不接住的话会一路冒泡到界面层；这里统一降级成「请求失败」。
         return None

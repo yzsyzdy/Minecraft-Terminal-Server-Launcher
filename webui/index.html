@@ -161,6 +161,13 @@ let stream = null;
 let follow = true;
 let lastAtBottom = true;
 
+// 按实例缓存控制台输出。服务端只在 SSE 建连时重放一次历史，而连接建立时
+// 用户往往还没选中任何实例——原来这些行会因为 instance !== selected 被直接
+// 丢掉，之后选中实例只看到一片空白，要等下一行新输出才「活」过来。
+let buffers = {};
+// 每个实例已画到的事件序号，用于过滤断线重连后的历史重放
+let lastSeq = {};
+
 function fmt(tpl, values) {
   return String(tpl == null ? "" : tpl).replace(/\{(\w+)\}/g, (m, k) =>
     Object.prototype.hasOwnProperty.call(values, k) ? values[k] : m);
@@ -218,7 +225,33 @@ function connect() {
   };
 }
 
+function alreadySeen(event) {
+  // 每条事件都带实例内单调递增的 seq。EventSource 断线重连时服务端会把
+  // 历史整段重放一遍，靠它把画过的行筛掉，否则日志里会出现成片重复。
+  const name = event.instance;
+  const seq = typeof event.seq === "number" ? event.seq : null;
+  if (seq === null) return false;
+  if (lastSeq[name] !== undefined && seq <= lastSeq[name]) return true;
+  lastSeq[name] = seq;
+  return false;
+}
+
+function bufferLine(event) {
+  if (event.type !== "line") return null;
+  const cls = event.kind === "note" ? "note"
+            : event.kind === "input" ? "input"
+            : lineClass(event.text);
+  const text = event.kind === "input" ? "> " + (event.text || "") : (event.text || "");
+  const name = event.instance;
+  const buf = buffers[name] || (buffers[name] = []);
+  const entry = { cls, text };
+  buf.push(entry);
+  if (buf.length > MAX_LINES) buf.splice(0, buf.length - MAX_LINES);
+  return entry;
+}
+
 function handle(event) {
+  if (alreadySeen(event)) return;
   if (event.type === "state") {
     const item = instances.find(x => x.name === event.instance);
     if (item) {
@@ -230,15 +263,8 @@ function handle(event) {
     renderDetails();
     return;
   }
-  if (event.type === "line" && event.instance === selected) {
-    if (event.kind === "note") {
-      appendLine("note", event.text || "");
-    } else if (event.kind === "input") {
-      appendLine("input", "> " + (event.text || ""));
-    } else {
-      appendLine(lineClass(event.text), event.text || "");
-    }
-  }
+  const entry = bufferLine(event);
+  if (entry && event.instance === selected) appendLine(entry.cls, entry.text);
 }
 
 /* ---------------------------------------------------------------- 实例列表 */
@@ -367,7 +393,24 @@ function appendLine(cls, text) {
   if (follow) log.scrollTop = log.scrollHeight;
 }
 
+function renderLog() {
+  const log = $("log");
+  const entries = buffers[selected] || [];
+  const frag = document.createDocumentFragment();
+  entries.forEach(entry => {
+    const el = document.createElement("div");
+    if (entry.cls) el.className = entry.cls;
+    el.textContent = entry.text;
+    frag.appendChild(el);
+  });
+  log.innerHTML = "";
+  log.appendChild(frag);
+  log.scrollTop = log.scrollHeight;
+  $("jump").hidden = true;
+}
+
 function clearLog() {
+  buffers[selected] = [];
   $("log").innerHTML = "";
   $("jump").hidden = true;
   lastAtBottom = true;
@@ -404,10 +447,10 @@ $("log").addEventListener("scroll", () => {
 function select(name) {
   selected = name;
   try { localStorage.setItem("mstl.selected", name || ""); } catch (e) {}
-  clearLog();
+  // 历史行一直存在本地缓冲里，这里直接整段画出来，不必重连那条全局流
+  renderLog();
   render();
   renderDetails();
-  // 历史由那条全局流回放，这里按 selected 过滤，所以不用重连
 }
 
 /* ---------------------------------------------------------------- 指令 */

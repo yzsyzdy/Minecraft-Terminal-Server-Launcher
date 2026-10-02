@@ -22,6 +22,7 @@ import shutil
 import time
 import zipfile
 import tarfile
+import urllib.parse
 import urllib.request
 import urllib.error
 from typing import Any, Optional
@@ -148,7 +149,10 @@ def get_tunnels_by_token(token: str) -> Optional[list[tuple[str, list[TunnelInfo
         按节点分组的隧道列表: [(node_name, [TunnelInfo, ...]), ...]
         失败返回 None。
     """
-    url = f"{OPENFRP_API}/api?action=getallproxies&user={token}"
+    # token 要转义：里面出现 & 或 # 会把查询串截断，接口只会回一个
+    # 「无法获取隧道列表」，看日志完全猜不到是 token 里的字符导致的
+    url = (f"{OPENFRP_API}/api?action=getallproxies"
+           f"&user={urllib.parse.quote(token, safe='')}")
     result = fetch_json(url, timeout=10)
     if not result or not result.get("success"):
         return None
@@ -197,29 +201,33 @@ def get_node_list(auth_token: str) -> Optional[list[NodeInfo]]:
 
 
 def create_tunnel(auth_token: str, params: dict) -> Optional[str]:
-    """创建新隧道 (API 4)。返回服务端提示消息。"""
+    """创建新隧道 (API 4)。成功返回服务端提示消息，失败返回 None。
+
+    必须看 flag 而不是只看 msg：失败的响应同样带 msg，只判 msg 非空会把
+    「隧道数量已达上限」这类错误当成创建成功打印出来。
+    """
     url = f"{OPENFRP_API}/frp/api/newProxy"
     result = fetch_json(url, data=params, headers={"Authorization": auth_token})
-    if not result:
+    if not result or not result.get("flag"):
         return None
     return result.get("msg", "")
 
 
 def delete_tunnel(auth_token: str, proxy_id: int) -> Optional[str]:
-    """删除隧道 (API 5)。"""
+    """删除隧道 (API 5)。成功返回服务端提示消息，失败返回 None。"""
     url = f"{OPENFRP_API}/frp/api/removeProxy"
     result = fetch_json(url, data={"proxy_id": proxy_id},
                          headers={"Authorization": auth_token})
-    if not result:
+    if not result or not result.get("flag"):
         return None
     return result.get("msg", "")
 
 
 def edit_tunnel(auth_token: str, params: dict) -> Optional[str]:
-    """编辑隧道 (API 7)。"""
+    """编辑隧道 (API 7)。成功返回服务端提示消息，失败返回 None。"""
     url = f"{OPENFRP_API}/frp/api/editProxy"
     result = fetch_json(url, data=params, headers={"Authorization": auth_token})
-    if not result:
+    if not result or not result.get("flag"):
         return None
     return result.get("msg", "")
 
@@ -416,6 +424,12 @@ class FrpcManager:
             print("  [OpenFrp] " + t("app.error", msg="token or proxy_id not configured"))
             return None
 
+        # 已经在跑就别再起一个：旧句柄会被覆盖，先前的 frpc 谁也停不掉，
+        # 只能一直占着远程端口
+        if self._process is not None and self._process.poll() is None:
+            print("  [OpenFrp] frpc already running, ignoring this launch")
+            return self._process
+
         frpc_dir = os.path.join(project_dir, "openfrp")
         base_name = "frpc.exe" if platform.system().lower() == "windows" else "frpc"
         frpc_bin = os.path.join(frpc_dir, base_name)
@@ -449,7 +463,8 @@ class FrpcManager:
 
         cmd = [frpc_bin, "-u", token, "-p", str(proxy_id)]
         print(f"  [OpenFrp] Starting frpc for tunnel #{proxy_id} ...")
-        print(f"  [OpenFrp] {cmd[0]} -u {token[:6]}... -p {proxy_id}")
+        # 不回显 token 片段：控制台会被截图、也会落进日志
+        print(f"  [OpenFrp] {cmd[0]} -p {proxy_id}")
         print()
 
         try:
@@ -458,23 +473,33 @@ class FrpcManager:
                 stdout=None,
                 stderr=None,
             )
-            self._process = proc
-            time.sleep(2)
-            return proc
         except OSError as e:
             print(f"  [OpenFrp] " + t("app.error", msg=str(e)))
             return None
 
+        time.sleep(2)
+        # frpc 配置或 token 有问题时会立刻退出，这时返回进程对象等于告诉
+        # 调用方「启动成功」，而隧道其实没通
+        if proc.poll() is not None:
+            print("  [OpenFrp] " + t("app.error", msg=(
+                f"frpc exited immediately (code {proc.returncode}); "
+                "please check the tunnel binding")))
+            return None
+
+        self._process = proc
+        return proc
+
     def stop(self) -> None:
         """停止正在运行的 frpc 进程。"""
-        if self._process and self._process.poll() is None:
+        proc = self._process
+        self._process = None
+        if proc is not None and proc.poll() is None:
             print("  [OpenFrp] Stopping frpc...")
-            self._process.terminate()
+            proc.terminate()
             try:
-                self._process.wait(timeout=5)
+                proc.wait(timeout=5)
             except Exception:
-                self._process.kill()
-            self._process = None
+                proc.kill()
 
 
 # 保持向后兼容的全局函数
@@ -486,6 +511,25 @@ def launch_frpc(project_dir: str, server_cfg: dict) -> Optional[subprocess.Popen
 def stop_frpc() -> None:
     """停止正在运行的 frpc 进程（使用 FrpcManager 单例）。"""
     FrpcManager.get_instance().stop()
+
+
+def _tar_extract(tf: tarfile.TarFile, target_dir: str, member=None) -> None:
+    """按安全过滤器解压 tar 成员。
+
+    Python 3.14 起默认就是 'data'，更早的版本默认 'fully_trusted'：一个
+    恶意压缩包可以用 ../ 或绝对路径把文件写到 openfrp/ 目录外面，而下载
+    地址来自 API 返回的镜像列表。老版本没有 filter 参数，只能退回原行为。
+    """
+    try:
+        if member is None:
+            tf.extractall(target_dir, filter="data")
+        else:
+            tf.extract(member, target_dir, filter="data")
+    except TypeError:
+        if member is None:
+            tf.extractall(target_dir)
+        else:
+            tf.extract(member, target_dir)
 
 
 def _extract_frpc_if_needed(archive_path: str, project_dir: str) -> str:
@@ -549,13 +593,13 @@ def _extract_frpc_if_needed(archive_path: str, project_dir: str) -> str:
             with tarfile.open(archive_path, "r:gz") as tf:
                 for m in tf.getmembers():
                     if m.name.endswith("/frpc") or m.name == "frpc":
-                        tf.extract(m, target_dir)
+                        _tar_extract(tf, target_dir, m)
                         extracted = os.path.join(target_dir, m.name)
                         if extracted != expected:
                             shutil.move(extracted, expected)
                         _cleanup_extras(expected)
                         return expected
-                tf.extractall(target_dir)
+                _tar_extract(tf, target_dir)
     except (zipfile.BadZipFile, tarfile.TarError, OSError):
         return ""
 

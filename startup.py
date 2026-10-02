@@ -10,7 +10,7 @@
 import os
 import sys
 
-from paths import original_exe_dir
+from paths import exe_dir, is_temp_onefile_dir
 
 RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
 APP_NAME = "MSTL"
@@ -29,13 +29,21 @@ def _startup_command() -> str:
     源码模式: python.exe + start.py 的绝对路径。
     """
     if getattr(sys, "frozen", False):
-        exe_dir = original_exe_dir()
-        if exe_dir:
-            exe_name = os.path.basename(sys.executable)
-            return f'"{os.path.join(exe_dir, exe_name)}"'
+        # 这里必须用 exe_dir() 而不是 original_exe_dir()：后者会把
+        # MSTL_DATA_DIR（用户指定的数据目录）当成 exe 目录返回，拼出来的
+        # 路径下并没有 exe。注册表照样写入成功、设置页也显示「已启用」，
+        # 但 Windows 到开机时只会静默跳过一条指向不存在文件的命令。
+        real_dir = exe_dir()
+        if real_dir:
+            candidate = os.path.join(real_dir, os.path.basename(sys.executable))
+            if os.path.isfile(candidate):
+                return f'"{candidate}"'
+
         argv0 = os.path.abspath(sys.argv[0])
-        exe_dir = os.path.dirname(argv0)
-        if os.path.isdir(exe_dir) and os.access(exe_dir, os.W_OK):
+        argv0_dir = os.path.dirname(argv0)
+        if (os.path.isfile(argv0) and os.path.isdir(argv0_dir)
+                and os.access(argv0_dir, os.W_OK)
+                and not is_temp_onefile_dir(argv0_dir)):
             return f'"{argv0}"'
         return f'"{sys.executable}"'
     python = sys.executable
@@ -67,7 +75,12 @@ def set_startup_enabled(enabled: bool) -> bool:
 
 
 def is_startup_enabled() -> bool:
-    """检查当前是否已配置开机自启动。"""
+    """检查当前是否已配置开机自启动。
+
+    要和当前应该写入的命令比对，而不是只看这个值存不存在：exe 挪过位置、
+    或者数据目录换过之后，注册表里会留着一条指向旧路径的命令，只看存在性
+    会一直显示「已启用」，而开机时什么都不会发生。
+    """
     if not _is_windows():
         return False
     try:
@@ -75,9 +88,9 @@ def is_startup_enabled() -> bool:
         with winreg.OpenKey(
             winreg.HKEY_CURRENT_USER, RUN_KEY, 0, winreg.KEY_READ,
         ) as key:
-            winreg.QueryValueEx(key, APP_NAME)
-        return True
+            value, _ = winreg.QueryValueEx(key, APP_NAME)
     except FileNotFoundError:
         return False
     except OSError:
         return False
+    return str(value).strip() == _startup_command().strip()

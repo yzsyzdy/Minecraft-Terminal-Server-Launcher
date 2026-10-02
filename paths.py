@@ -28,6 +28,11 @@ def _is_temp_onefile_dir(path: str) -> bool:
     return base.startswith("onefile_") or base.startswith("onefile-")
 
 
+def is_temp_onefile_dir(path: str) -> bool:
+    """公开版本，供启动项等模块复用同一套判断。"""
+    return _is_temp_onefile_dir(path)
+
+
 def _parent_exe_path(pid: int) -> str:
     """通过进程 PID 查询其可执行文件路径（Windows + Linux）。失败返回 ''。"""
     try:
@@ -59,6 +64,35 @@ def _parent_exe_path(pid: int) -> str:
         return ""
 
 
+def exe_dir() -> str:
+    """获取用户启动的那个 exe 所在的真实目录（只看 exe，不含数据目录）。
+
+    与 original_exe_dir() 的区别：MSTL_DATA_DIR 是「数据放哪」的开关，
+    它指向的目录里并没有 exe。注册开机自启动这类要拼 exe 路径的场景必须
+    用本函数，否则会把数据目录当成 exe 目录，拼出一个根本不存在的路径——
+    注册表写进去了，Windows 到开机时也只是静默跳过。
+
+    返回空串表示不可用（非 frozen 或查不到）。
+    """
+    if not getattr(sys, "frozen", False):
+        return ""
+
+    # 1. bootstrap 设置的环境变量（若尚未被 unset）
+    for var in ("NUITKA_ORIGINAL_ARGV0", "NUITKA_ONEFILE_ARGV0"):
+        env_path = os.environ.get(var, "") or ""
+        if env_path and os.path.isfile(env_path):
+            return os.path.dirname(os.path.abspath(env_path))
+
+    # 2. 通过 bootstrap PID 反查原始 exe 路径
+    parent_pid = os.environ.get("NUITKA_ONEFILE_PARENT", "") or ""
+    if parent_pid.isdigit():
+        parent_exe = _parent_exe_path(int(parent_pid))
+        if parent_exe and os.path.isfile(parent_exe):
+            return os.path.dirname(os.path.abspath(parent_exe))
+
+    return ""
+
+
 def original_exe_dir() -> str:
     """获取用户启动 exe 所在的原始目录（onefile 模式专用）。
 
@@ -72,20 +106,7 @@ def original_exe_dir() -> str:
     if explicit:
         return os.path.abspath(explicit)
 
-    # 2. bootstrap 设置的环境变量（若尚未被 unset）
-    for var in ("NUITKA_ORIGINAL_ARGV0", "NUITKA_ONEFILE_ARGV0"):
-        env_path = os.environ.get(var, "") or ""
-        if env_path and os.path.isfile(env_path):
-            return os.path.dirname(os.path.abspath(env_path))
-
-    # 3. 通过 bootstrap PID 反查原始 exe 路径
-    parent_pid = os.environ.get("NUITKA_ONEFILE_PARENT", "") or ""
-    if parent_pid.isdigit():
-        parent_exe = _parent_exe_path(int(parent_pid))
-        if parent_exe and os.path.isfile(parent_exe):
-            return os.path.dirname(os.path.abspath(parent_exe))
-
-    return ""
+    return exe_dir()
 
 
 def app_dir() -> str:

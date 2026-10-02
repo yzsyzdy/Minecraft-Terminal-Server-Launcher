@@ -7,8 +7,8 @@ API endpoint: https://api.mslmc.cn/v4
 
 import os
 import json
+import re
 import shutil
-import time
 import threading
 import concurrent.futures
 import urllib.request
@@ -21,6 +21,34 @@ from i18n import t
 from constants import MSL_API_BASE, USER_AGENT
 
 MSL_USER_AGENT = USER_AGENT
+
+# Windows 文件名里不允许出现的字符，外加控制字符
+_UNSAFE_FILENAME_CHARS = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
+# Windows 保留设备名，撞上了就写不出文件
+_RESERVED_NAMES = {
+    "con", "prn", "aux", "nul",
+    *(f"com{i}" for i in range(1, 10)),
+    *(f"lpt{i}" for i in range(1, 10)),
+}
+
+
+def safe_filename(name: str, fallback: str = "download", max_length: int = 120) -> str:
+    """把远端提供的名字收敛成一个安全的文件名。
+
+    Modrinth / CurseForge / SpigotMC 的项目标题是远端数据，可能带 / 或 \\
+    甚至 ..，直接拼进 os.path.join 会把文件写到目标目录外面；Windows 上还有
+    一批字符根本不能出现在文件名里。
+    """
+    cleaned = _UNSAFE_FILENAME_CHARS.sub("_", str(name or ""))
+    cleaned = os.path.basename(cleaned.replace("\\", "/")).strip(" .")
+    if not cleaned or cleaned in (".", ".."):
+        return fallback
+    if cleaned.split(".")[0].lower() in _RESERVED_NAMES:
+        cleaned = "_" + cleaned
+    if len(cleaned) > max_length:
+        stem, ext = os.path.splitext(cleaned)
+        cleaned = stem[: max(1, max_length - len(ext))] + ext
+    return cleaned or fallback
 
 _CATEGORY_LABELS: dict[str, str] = {
     "pluginsCore": "download.category.pluginsCore",
@@ -124,7 +152,10 @@ def _msl_cache_fetch(cache_key: str, path: str, project_dir: str) -> Any:
         print(t("app.error", msg=f"Response parse failed: {e}")); return None
 
     if not isinstance(data, dict) or data.get("code") != 200:
-        print(t("app.error", msg=data.get("message", "Abnormal"))); return None
+        # data 不是 dict 时不能走 data.get：API 一旦返回 JSON 数组/字符串
+        # （网关错误页也能是合法 JSON），这里会抛 AttributeError 而不是给出提示
+        message = data.get("message", "Abnormal") if isinstance(data, dict) else "Unexpected API response"
+        print(t("app.error", msg=message)); return None
     result = data.get("data")
     cache[cache_key] = {"cached_at": today, "data": result}
     cache = _msl_cache_prune(cache)
@@ -146,7 +177,8 @@ def _msl_request(path: str) -> Any:
     except (json.JSONDecodeError, OSError) as e:
         print(t("app.error", msg=f"Response parse failed: {e}")); return None
     if not isinstance(data, dict) or data.get("code") != 200:
-        print(t("app.error", msg=data.get("message", "Abnormal"))); return None
+        message = data.get("message", "Abnormal") if isinstance(data, dict) else "Unexpected API response"
+        print(t("app.error", msg=message)); return None
     return data.get("data")
 
 
@@ -191,11 +223,13 @@ _DEFAULT_DOWNLOAD_THREADS = 16
 _MIN_CHUNK_SIZE = 1 * 1024 * 1024
 
 
-def _check_range_support(url: str) -> tuple[bool, int]:
+def _check_range_support(url: str, headers: Optional[dict] = None) -> tuple[bool, int]:
     """Check if server supports Range requests. Returns (supported?, file_size)."""
+    req_headers = {"User-Agent": MSL_USER_AGENT}
+    if headers:
+        req_headers.update(headers)
     try:
-        req = urllib.request.Request(url, method="HEAD",
-                                     headers={"User-Agent": MSL_USER_AGENT})
+        req = urllib.request.Request(url, method="HEAD", headers=req_headers)
         with urllib.request.urlopen(req, timeout=30) as resp:
             accept_ranges = resp.headers.get("Accept-Ranges", "")
             content_length = resp.headers.get("Content-Length")
@@ -206,15 +240,23 @@ def _check_range_support(url: str) -> tuple[bool, int]:
 
 
 def _download_chunk(url: str, start: int, end: int, target_path: str,
-                    shared: dict, lock: threading.Lock) -> bool:
+                    shared: dict, lock: threading.Lock,
+                    headers: Optional[dict] = None) -> bool:
     """Download a chunk and write to the target file at the correct offset."""
     range_header = f"bytes={start}-{end}"
-    req = urllib.request.Request(url, headers={
-        "User-Agent": MSL_USER_AGENT,
-        "Range": range_header,
-    })
+    expected = end - start + 1
+    req_headers = {"User-Agent": MSL_USER_AGENT, "Range": range_header}
+    if headers:
+        req_headers.update(headers)
+    req = urllib.request.Request(url, headers=req_headers)
     try:
         with urllib.request.urlopen(req, timeout=300) as resp:
+            # 必须确认服务器真的按 Range 回了 206。某些 CDN 会照样回 200 +
+            # 整个文件，那时每个线程都会把自己的 offset 当成文件开头，最终
+            # 拼出一个长度对得上、内容全错的文件，而且不会报任何错。
+            if getattr(resp, "status", None) != 206:
+                return False
+            written = 0
             with open(target_path, "rb+") as f:
                 f.seek(start)
                 while True:
@@ -222,9 +264,10 @@ def _download_chunk(url: str, start: int, end: int, target_path: str,
                     if not chunk:
                         break
                     f.write(chunk)
+                    written += len(chunk)
                     with lock:
                         shared["downloaded"] += len(chunk)
-        return True
+        return written == expected
     except Exception:
         return False
 
@@ -279,27 +322,31 @@ _download_with_progress = download_file_with_progress
 
 
 def multithreaded_download(url: str, target_path: str, desc: str = "",
-                           num_threads: int = _DEFAULT_DOWNLOAD_THREADS) -> bool:
+                           num_threads: int = _DEFAULT_DOWNLOAD_THREADS,
+                           headers: Optional[dict] = None) -> bool:
     """
     Multi-threaded file download.
 
     Automatically detects if the server supports Range requests.
     Falls back to single-thread if not supported or file is too small.
     On chunk failure, retries with single-thread download.
+
+    headers 会带给探测、分片和单线程回退三条路径。CurseForge 从 2026-07-16
+    起要求下载也带 x-api-key，缺了它整个下载路径都只会拿到 401。
     """
     # 检查服务器是否支持 Range 请求，同时获取文件大小
-    range_supported, file_size = _check_range_support(url)
+    range_supported, file_size = _check_range_support(url, headers)
 
     if file_size < _MIN_CHUNK_SIZE or file_size <= 0:
-        return download_file_with_progress(url, target_path, desc)
+        return download_file_with_progress(url, target_path, desc, headers)
 
     # 如果服务器明确不支持 Range 请求，直接使用单线程下载
     if not range_supported:
-        return download_file_with_progress(url, target_path, desc)
+        return download_file_with_progress(url, target_path, desc, headers)
 
     actual_threads = min(num_threads, max(1, file_size // _MIN_CHUNK_SIZE))
     if actual_threads <= 1:
-        return _download_with_progress(url, target_path, desc)
+        return download_file_with_progress(url, target_path, desc, headers)
 
     chunk_size = file_size // actual_threads
 
@@ -322,11 +369,14 @@ def multithreaded_download(url: str, target_path: str, desc: str = "",
     with concurrent.futures.ThreadPoolExecutor(max_workers=actual_threads) as executor:
         futures = [
             executor.submit(_download_chunk, url, start, end, target_path,
-                            shared, lock)
+                            shared, lock, headers)
             for start, end in chunks
         ]
 
-        while not all(f.done() for f in futures):
+        # 用 wait(timeout=...) 等「至少有一个完成」，不要 while + sleep 空转
+        pending = set(futures)
+        while pending:
+            _done, pending = concurrent.futures.wait(pending, timeout=0.15)
             with lock:
                 downloaded = shared["downloaded"]
             if file_size > 0:
@@ -339,7 +389,6 @@ def multithreaded_download(url: str, target_path: str, desc: str = "",
             else:
                 print(f"    {desc} {downloaded/1024/1024:.1f} MB...",
                       end="\r", flush=True)
-            time.sleep(0.15)
 
         failed_indices = [
             i for i, f in enumerate(futures)
@@ -351,7 +400,7 @@ def multithreaded_download(url: str, target_path: str, desc: str = "",
             except OSError:
                 pass
             print(f"\n  {t('download.retry_fallback')}")
-            return download_file_with_progress(url, target_path, desc)
+            return download_file_with_progress(url, target_path, desc, headers)
 
     final_bar = "\u2588" * bar_width
     print(f"    {desc} [{final_bar}] 100.0%  "

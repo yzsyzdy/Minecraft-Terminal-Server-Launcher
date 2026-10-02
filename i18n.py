@@ -41,13 +41,37 @@ def load_language(lang: str) -> None:
 
 def detect_os_language() -> str:
     """Detect OS language. Returns 'zh' for Chinese locales, 'en' otherwise."""
+    candidates: list[str] = []
+    for var in ("LC_ALL", "LC_MESSAGES", "LANG"):
+        value = os.environ.get(var, "")
+        if value:
+            candidates.append(value)
+
     try:
         import locale
-        lang, _ = locale.getdefaultlocale()
-        if lang and lang.startswith("zh"):
+    except ImportError:
+        locale = None
+
+    if locale is not None:
+        # getdefaultlocale() 从 3.11 起被标记废弃、并已排定移除，所以只当
+        # 兜底来源之一，getattr 拿不到时也不至于整个函数失效
+        getter = getattr(locale, "getdefaultlocale", None)
+        if getter is not None:
+            try:
+                candidates.append(getter()[0] or "")
+            except Exception:
+                pass
+        try:
+            candidates.append(locale.getlocale()[0] or "")
+        except Exception:
+            pass
+
+    for value in candidates:
+        low = value.lower()
+        # Windows 上 getlocale() 返回的是 'Chinese (Simplified)_China'，
+        # 并不以 zh 开头，所以要连 chinese 一起认
+        if low.startswith("zh") or "chinese" in low:
             return "zh"
-    except Exception:
-        pass
     return "en"
 
 

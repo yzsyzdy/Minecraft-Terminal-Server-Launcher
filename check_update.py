@@ -37,12 +37,24 @@ def _read_local_version() -> str:
 
 
 def _parse_version(v: str) -> tuple[int, ...]:
-    """将 "1.2.3" 转为 (1, 2, 3) 用于比较。"""
-    try:
-        parts = v.replace("v", "").replace("V", "").split(".")
-        return tuple(int(p) if p.isdigit() else 0 for p in parts)
-    except (ValueError, AttributeError):
-        return (0,)
+    """把 "v1.2.3" 这类版本号转成等长的数字元组用于比较。
+
+    补到固定长度是必须的：不然 (1, 0) < (1, 0, 0)，"1.0" 会被判成比
+    "1.0.0" 旧，每次检查都提示有新版本。带后缀的段（"3-beta"）取数字前缀，
+    否则整段会被当成 0，"1.2.3-beta" 反而显得比 "1.2.3" 旧。
+    """
+    nums: list[int] = []
+    for part in v.strip().lstrip("vV").split("."):
+        digits = ""
+        for ch in part:
+            if ch.isdigit():
+                digits += ch
+            else:
+                break
+        nums.append(int(digits) if digits else 0)
+    while len(nums) < 3:
+        nums.append(0)
+    return tuple(nums)
 
 
 def check_for_update() -> tuple[bool, str, str]:

@@ -107,16 +107,21 @@ class ServerRuntime:
         self._history: list[Event] = []
         self._history_limit = history
         self._reader: Optional[threading.Thread] = None
+        self._seq = 0
+        self._log_file = None
 
     # -- 只读 --------------------------------------------------------------
 
+    def _reconcile(self) -> None:
+        """进程已经没了但读线程还没翻状态时，先把状态摆正。调用方需持有锁。"""
+        if (self._state == STATE_RUNNING and self._proc is not None
+                and self._proc.poll() is not None):
+            self._state = STATE_STOPPED
+            self._exit_code = self._proc.returncode
+
     def state(self) -> str:
         with self._lock:
-            if (self._state == STATE_RUNNING and self._proc is not None
-                    and self._proc.poll() is not None):
-                # 读线程还没来得及翻状态，先兜一下
-                self._state = STATE_STOPPED
-                self._exit_code = self._proc.returncode
+            self._reconcile()
             return self._state
 
     def history(self, tail: int = 200) -> list[Event]:
@@ -125,6 +130,7 @@ class ServerRuntime:
 
     def snapshot(self) -> dict:
         with self._lock:
+            self._reconcile()
             pid = None
             if self._proc is not None and self._proc.poll() is None:
                 pid = self._proc.pid
@@ -148,8 +154,7 @@ class ServerRuntime:
         with self._lock:
             if self._proc is not None and self._proc.poll() is None:
                 raise CoreError("web.error.already_running", name=self.plan.name)
-            if self.plan.log_path:
-                os.makedirs(os.path.dirname(self.plan.log_path), exist_ok=True)
+            self._open_log()
             try:
                 self._proc = spawn_priority_process(
                     self.plan.cmd, self.plan.workdir, "normal",
@@ -230,25 +235,56 @@ class ServerRuntime:
             self._exit_code = code
         self._note("web.console.exited", code=code)
         self._emit_state()
+        self._close_log()
 
     def _push(self, event: Event) -> None:
         # 事件在落进历史前就带上实例名：这样一条全局流里能分辨哪行来自哪台服，
         # 重放历史时也不用临时补字段。
         event.setdefault("instance", self.plan.name)
         with self._lock:
+            # 每条事件配一个单调递增的序号，让客户端能认出来「这条我已经见过」。
+            # SSE 断线重连时服务端会把历史整段重放一遍，没有序号的话控制台里
+            # 会出现成片的重复行。
+            self._seq += 1
+            event.setdefault("seq", self._seq)
             self._history.append(event)
             if len(self._history) > self._history_limit:
                 del self._history[: len(self._history) - self._history_limit]
-        if event.get("kind") == "out" and self.plan.log_path:
-            self._append_log(event.get("text", ""))
+            if event.get("kind") == "out":
+                self._append_log(event.get("text", ""))
         self._emit(event)
 
-    def _append_log(self, text: str) -> None:
+    def _open_log(self) -> None:
+        """打开控制台日志文件并一直持有句柄。
+
+        以前是每写一行就 open/close 一次，一台正常跑着的服务器每秒能刷出几十
+        行日志，等于每秒几十次 open+close 系统调用。调用方需持有锁。
+        """
+        if not self.plan.log_path or self._log_file is not None:
+            return
         try:
-            with open(self.plan.log_path, "a", encoding="utf-8") as f:
-                f.write(text + "\n")
+            os.makedirs(os.path.dirname(self.plan.log_path), exist_ok=True)
+            self._log_file = open(self.plan.log_path, "a", encoding="utf-8")
         except OSError:
-            pass
+            self._log_file = None
+
+    def _close_log(self) -> None:
+        handle, self._log_file = self._log_file, None
+        if handle is not None:
+            try:
+                handle.close()
+            except OSError:
+                pass
+
+    def _append_log(self, text: str) -> None:
+        # 只有读线程会产出 kind == "out"，调用方已持锁，是单写者
+        if self._log_file is None:
+            return
+        try:
+            self._log_file.write(text + "\n")
+            self._log_file.flush()
+        except (OSError, ValueError):
+            self._close_log()
 
     def _note(self, key: str, **kwargs) -> None:
         self._push({"type": "line", "kind": "note", "key": key, "kwargs": kwargs})
@@ -320,9 +356,6 @@ class RuntimeManager:
 
     def start(self, server_cfg: dict, server_dir: str) -> ServerRuntime:
         name = self._name_of(server_cfg, server_dir)
-        existing = self._runtimes.get(name)
-        if existing is not None and existing.state() != STATE_STOPPED:
-            raise CoreError("web.error.already_running", name=name)
 
         plan = self._plan_builder(server_cfg, server_dir, self.project_dir)
         runtime = ServerRuntime(
@@ -331,8 +364,12 @@ class RuntimeManager:
             current = self._runtimes.get(name)
             if current is not None and current.state() != STATE_STOPPED:
                 raise CoreError("web.error.already_running", name=name)
+            # 真正的 start() 必须留在锁里。它一返回状态就已经是 running 了，
+            # 若放到锁外，两个并发的 /api/start 会双双看到 stopped、各自把
+            # _runtimes[name] 覆盖成自己的那份，先起来的那个 java 进程就再也
+            # 没人管得住——同一台服被拉起两次，端口和内存都要打架。
             self._runtimes[name] = runtime
-        runtime.start()
+            runtime.start()
         return runtime
 
     def start_by_name(self, servers_dir: str, name: str) -> ServerRuntime:

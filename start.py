@@ -283,9 +283,15 @@ def main():
 
     exit_code = _start_server(server_cfg, server_path, config, project_dir)
 
-    # 清理: 无论服务器如何退出，都要停掉 frpc
-    from openfrp.tunnel_manager import stop_frpc
-    stop_frpc()
+    # 清理: 无论服务器如何退出，都要停掉 frpc。
+    # 两套隧道各管一个进程：菜单里手动拉起的是原版 frp，_start_server 里按
+    # openfrp 配置拉起的是 OpenFrp 那份。原来只停后者，于是「先在隧道菜单开
+    # 原版 frp、再启动服务器」这条路径上，frpc 会一直留在后台占着远程端口。
+    from frp.tunnel_manager import stop_frpc as stop_frp_tunnel
+    from openfrp.tunnel_manager import stop_frpc as stop_openfrp_tunnel
+
+    stop_openfrp_tunnel()
+    stop_frp_tunnel()
 
     name = server_cfg.get("name", "?")
     print(t("app.done", name=name, code=exit_code))

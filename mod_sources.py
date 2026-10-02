@@ -13,6 +13,7 @@ from typing import Any, Optional
 from constants import MODRINTH_BASE, USER_AGENT
 from http_utils import fetch_json
 from i18n import t
+from download_msl import safe_filename
 
 API_TIMEOUT = 15
 
@@ -138,7 +139,9 @@ def modrinth_get_suitable_version(slug: str, mc_version: str,
             continue
 
         files = version.get("files") or []
-        for f in files:
+        # 优先取 Modrinth 标了 primary 的那个文件，否则可能下到 sources/javadoc
+        ordered = [f for f in files if f.get("primary")] or files
+        for f in ordered:
             dl_url = f.get("url")
             if dl_url:
                 vname = version.get("name") or version.get("version_number", "?")
@@ -161,9 +164,8 @@ def modrinth_download(project_id: str, target_dir: str, name: str,
         return None
     _, dl_url, ver_name = info
 
-    filename = f"{name}-{ver_name}.jar"
-    # 清理文件名中不可用于路径的字符
-    filename = "".join(c if c.isalnum() or c in "._-+" else "_" for c in filename)
+    # 项目标题是远端数据，可能含 / 或 ..，落盘前统一收敛
+    filename = safe_filename(f"{name}-{ver_name}.jar", fallback="mod.jar")
     target_path = os.path.join(target_dir, filename)
 
     if multithreaded_download(dl_url, target_path, desc=f"Mod: {name}"):
@@ -179,6 +181,9 @@ def modrinth_download(project_id: str, target_dir: str, name: str,
 
 # Minecraft 模组的 classId
 CURSE_CLASS_MOD = 6
+
+# ModsSearchSortField：6 = TotalDownloads（2 是 Popularity，不是下载量）
+CURSE_SORT_TOTAL_DOWNLOADS = 6
 
 
 def _curse_headers() -> dict:
@@ -202,9 +207,11 @@ def curseforge_search(query: str, mc_version: str = "", loader: str = "",
     params = [
         f"gameId=432",
         f"classId={CURSE_CLASS_MOD}",
-        f"searchFilter={query}",
+        # 关键词要转义：带空格会被 http.client 判成非法 URL，带中文会
+        # UnicodeEncodeError，两种情况都被 search_all_mods 吞掉变成「搜不到」
+        f"searchFilter={urllib.parse.quote(query, safe='')}",
         f"pageSize={min(limit, 50)}",
-        f"sortField=2",  # 下载量排序
+        f"sortField={CURSE_SORT_TOTAL_DOWNLOADS}",  # 6 = TotalDownloads（2 是 Popularity）
         f"sortOrder=desc",
     ]
     if mc_version:
@@ -224,20 +231,15 @@ def curseforge_search(query: str, mc_version: str = "", loader: str = "",
         mod_id = item.get("id")
         if not mod_id:
             continue
-        # 取最新文件的信息
-        latest_files = item.get("latestFiles") or []
-        download_count = None
-        for f in latest_files:
-            if f.get("isServerPack"):
-                download_count = f.get("downloadCount")
-                break
         results.append({
             "source": "CurseForge",
             "id": str(mod_id),
             "name": item.get("name", "?"),
             "author": (item.get("authors") or [{}])[0].get("name", "?") if item.get("authors") else "?",
             "description": (item.get("summary") or "")[:120],
-            "downloads": download_count or item.get("downloadCount", 0),
+            # 用模组自己的下载量。原来会去找 isServerPack 的那个文件、取它的
+            # downloadCount，等于把服务端包的下载量当成了模组的下载量。
+            "downloads": item.get("downloadCount", 0),
             "slug": item.get("slug", ""),
         })
     return results
@@ -266,18 +268,27 @@ def curseforge_get_download_url(mod_id: str, mc_version: str,
     if not files:
         return None
 
-    # 取最新的文件
+    # /mods/{id}/files 不保证返回顺序，自己按 fileDate 排一遍再取最新，
+    # 否则可能下到一个旧版本
+    files = sorted(files, key=lambda f: f.get("fileDate") or "", reverse=True)
     latest = files[0]
     filename = latest.get("fileName", "mod.jar")
     file_size = latest.get("fileLength", 0)
 
-    # 构建 CDN 下载 URL
-    # CurseForge CDN 路径格式: /files/{id前4位补零到4位}/{id}/{filename}
+    # 官方 API 在作者允许第三方分发时会直接给出 downloadUrl，优先用它
+    api_url = latest.get("downloadUrl")
+    if api_url:
+        return filename, api_url, file_size
+
+    # 否则按 ForgeCDN 的路径规则自己拼: /files/{id // 1000}/{id % 1000}/{filename}
+    # 例如文件 4593541 -> /files/4593/541/xxx.jar。
+    # 原来第二段直接写了完整 id（/files/4593/4593541/...），那个地址是不存在的，
+    # 只要 API 没给 downloadUrl，CurseForge 的模组就必然下载失败。
     file_id = latest.get("id", 0)
     if not file_id:
         return None
-    prefix = str(file_id).zfill(4)[:4]  # zfill 确保至少4位，然后取前4位
-    cdn_url = f"https://edge.forgecdn.net/files/{prefix}/{file_id}/{filename}"
+    cdn_url = (f"https://edge.forgecdn.net/files/{file_id // 1000}/"
+               f"{file_id % 1000}/{filename}")
 
     return filename, cdn_url, file_size
 
@@ -296,11 +307,14 @@ def curseforge_download(mod_id: str, target_dir: str, name: str,
         return None
     filename, dl_url, _ = info
 
-    target_path = os.path.join(target_dir, filename)
+    safe_name = safe_filename(filename, fallback="mod.jar")
+    target_path = os.path.join(target_dir, safe_name)
 
-    # CDN 下载无需 API key
-    if multithreaded_download(dl_url, target_path, desc=f"Mod: {name}"):
-        return filename
+    # CurseForge 从 2026-07-16 起要求文件下载也带上 API key（x-api-key），
+    # 只配在搜索接口上是不够的；没配 key 时这里不会附带该请求头。
+    if multithreaded_download(dl_url, target_path, desc=f"Mod: {name}",
+                              headers=_curse_headers()):
+        return safe_name
     return None
 
 

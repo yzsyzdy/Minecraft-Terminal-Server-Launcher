@@ -163,6 +163,20 @@ def _download_file(url: str, target_path: str) -> bool:
         headers={"User-Agent": USER_AGENT})
 
 
+def _make_executable(path: str) -> None:
+    """非 Windows 上要显式补可执行位。
+
+    用 open(..., "wb") 写出来的文件权限是 0644，之后 Popen 直接执行会
+    Permission denied——原版 frp 隧道在 Linux/macOS 上下载完就再也起不来。
+    """
+    if platform.system().lower() == "windows":
+        return
+    try:
+        os.chmod(path, 0o755)
+    except OSError:
+        pass
+
+
 def _extract_frpc(archive_path: str, project_dir: str) -> bool:
     """从 zip/tar.gz 中提取 frpc 二进制到 frp 目录。
 
@@ -171,16 +185,17 @@ def _extract_frpc(archive_path: str, project_dir: str) -> bool:
     """
     target_dir = _frp_dir(project_dir)
     base_name = "frpc.exe" if platform.system().lower() == "windows" else "frpc"
+    dest = os.path.join(target_dir, base_name)
 
     if archive_path.endswith(".zip"):
         try:
             with zipfile.ZipFile(archive_path) as zf:
                 for name in zf.namelist():
                     if os.path.basename(name) == base_name:
-                        with zf.open(name) as src, \
-                                open(os.path.join(target_dir, base_name), "wb") as dst:
+                        with zf.open(name) as src, open(dest, "wb") as dst:
                             dst.write(src.read())
-                        return os.path.isfile(os.path.join(target_dir, base_name))
+                        _make_executable(dest)
+                        return os.path.isfile(dest)
         except (zipfile.BadZipFile, OSError):
             return False
     else:
@@ -191,9 +206,10 @@ def _extract_frpc(archive_path: str, project_dir: str) -> bool:
                         src = tf.extractfile(member)
                         if src is None:
                             return False
-                        with open(os.path.join(target_dir, base_name), "wb") as dst:
+                        with open(dest, "wb") as dst:
                             dst.write(src.read())
-                        return os.path.isfile(os.path.join(target_dir, base_name))
+                        _make_executable(dest)
+                        return os.path.isfile(dest)
         except (tarfile.TarError, OSError):
             return False
     return False
@@ -263,58 +279,119 @@ def download_frpc(project_dir: str, version: str = "") -> Optional[str]:
 # frpc.toml 极简 TOML 解析/生成
 # ---------------------------------------------------------------------------
 
+def _parse_toml_scalar(text: str) -> Any:
+    """解析一个 TOML 值（只覆盖本项目用到的子集：字符串/整数/浮点/布尔/数组）。"""
+    text = text.strip()
+    if text.startswith("[") and text.endswith("]"):
+        inner = text[1:-1].strip()
+        return [_parse_toml_scalar(p) for p in _split_toml_array(inner)] if inner else []
+    if len(text) >= 2 and text.startswith('"') and text.endswith('"'):
+        body = text[1:-1]
+        return (body.replace("\\\\", "\\").replace('\\"', '"')
+                    .replace("\\n", "\n").replace("\\r", "\r").replace("\\t", "\t"))
+    if len(text) >= 2 and text.startswith("'") and text.endswith("'"):
+        return text[1:-1]
+    if text.lower() == "true":
+        return True
+    if text.lower() == "false":
+        return False
+    try:
+        return int(text)
+    except ValueError:
+        pass
+    try:
+        return float(text)
+    except ValueError:
+        pass
+    return text
+
+
+def _split_toml_array(inner: str) -> list[str]:
+    """按逗号切分数组内容，引号内的逗号不算分隔符。"""
+    parts: list[str] = []
+    buf: list[str] = []
+    quote = ""
+    for ch in inner:
+        if quote:
+            buf.append(ch)
+            if ch == quote:
+                quote = ""
+            continue
+        if ch in "\"'":
+            quote = ch
+            buf.append(ch)
+            continue
+        if ch == ",":
+            parts.append("".join(buf).strip())
+            buf = []
+            continue
+        buf.append(ch)
+    parts.append("".join(buf).strip())
+    return [p for p in parts if p]
+
+
+def _assign_toml(target: dict, key: str, value: Any) -> None:
+    """写入键值，支持 auth.token 这样的点号键。"""
+    if "." in key:
+        head, _, tail = key.partition(".")
+        _assign_toml(target.setdefault(head.strip(), {}), tail, value)
+    else:
+        target[key] = value
+
+
 def _parse_toml(text: str) -> dict[str, Any]:
     """解析 frpc.toml 子集。
 
     支持:
       - 顶层键值: key = value
       - 带点号键: auth.token = "xxx"  →  {"auth": {"token": "xxx"}}
+      - 表头:     [log]              →  {"log": {...}}
       - 数组表:   [[proxies]]          →  {"proxies": [{...}, ...]}
+      - 子表:     [proxies.transport]  →  挂到最后一个代理上
 
-    值类型: 字符串 / 整数 / 布尔。
+    值类型: 字符串 / 整数 / 浮点 / 布尔 / 数组。
     """
     cfg: dict[str, Any] = {}
-    current_proxy: Optional[dict] = None
     proxies: list[dict] = []
+    current_proxy: Optional[dict] = None
+    target: dict = cfg  # 当前键值该写进哪个表
 
     for raw in text.splitlines():
         line = raw.strip()
         if not line or line.startswith("#"):
             continue
         if line.startswith("[[") and line.endswith("]]"):
-            if current_proxy is not None:
-                proxies.append(current_proxy)
+            # 数组表：每遇到一次就新开一个元素
+            name = line[2:-2].strip()
             current_proxy = {}
+            if name == "proxies":
+                proxies.append(current_proxy)
+            else:
+                cfg.setdefault(name, []).append(current_proxy)
+            target = current_proxy
+            continue
+        if line.startswith("[") and line.endswith("]"):
+            name = line[1:-1].strip()
+            if name.startswith("proxies.") and current_proxy is not None:
+                # [[proxies]] 之后紧跟的 [proxies.transport] 属于最后一个代理，
+                # 不能当成顶层表，否则这些键会被抬到代理外面
+                sub = current_proxy
+                for part in name.split(".")[1:]:
+                    sub = sub.setdefault(part.strip(), {})
+                target = sub
+                continue
+            # 普通表：从这里开始键值归它，不再归上一个 [[proxies]]
+            current_proxy = None
+            sub = cfg
+            for part in name.split("."):
+                sub = sub.setdefault(part.strip(), {})
+            target = sub
             continue
         if "=" not in line:
             continue
         key, _, value = line.partition("=")
-        key = key.strip()
-        value = value.strip()
+        _assign_toml(target, key.strip(), _parse_toml_scalar(value))
 
-        # 解析值类型
-        if value.startswith('"') and value.endswith('"'):
-            parsed: Any = value[1:-1]
-        elif value.lower() == "true":
-            parsed = True
-        elif value.lower() == "false":
-            parsed = False
-        else:
-            try:
-                parsed = int(value)
-            except ValueError:
-                parsed = value
-
-        if current_proxy is not None:
-            current_proxy[key] = parsed
-        elif "." in key:
-            section, _, subkey = key.partition(".")
-            cfg.setdefault(section, {})[subkey] = parsed
-        else:
-            cfg[key] = parsed
-
-    if current_proxy is not None:
-        proxies.append(current_proxy)
     if proxies:
         cfg["proxies"] = proxies
     return cfg
@@ -326,31 +403,48 @@ def _fmt_toml_value(v: Any) -> str:
         return "true" if v else "false"
     if isinstance(v, int):
         return str(v)
-    return f'"{v}"'
+    if isinstance(v, float):
+        return repr(v)
+    if isinstance(v, (list, tuple)):
+        return "[" + ", ".join(_fmt_toml_value(item) for item in v) + "]"
+    return f'"{_escape_toml_string(str(v))}"'
+
+
+def _escape_toml_string(value: str) -> str:
+    """把字符串转义成 TOML 基本字符串的内容部分。
+
+    不转义的话，值里只要出现引号或反斜杠，写出来的就不是合法 TOML。
+    特别注意这条路径是「读一次配置原样写回」，用户根本没碰那个字段，
+    frpc 却会因为配置解析失败直接退出。
+    """
+    return (value.replace("\\", "\\\\").replace('"', '\\"')
+                 .replace("\n", "\\n").replace("\r", "\\r").replace("\t", "\\t"))
+
+
+def _write_toml_table(lines: list[str], table: dict, prefix: str = "") -> None:
+    """把一个表写出来：先写标量，再写嵌套子表（子表必须排在同层标量之后）。"""
+    scalars = [(k, v) for k, v in table.items() if not isinstance(v, dict)]
+    nested = [(k, v) for k, v in table.items() if isinstance(v, dict)]
+    for key, value in scalars:
+        lines.append(f"{key} = {_fmt_toml_value(value)}")
+    for key, sub in nested:
+        header = f"{prefix}.{key}" if prefix else key
+        lines.append("")
+        lines.append(f"[{header}]")
+        _write_toml_table(lines, sub, header)
 
 
 def _build_toml(cfg: dict[str, Any]) -> str:
     """从配置字典生成 frpc.toml 文本。"""
     lines: list[str] = []
+    _write_toml_table(lines, {k: v for k, v in cfg.items() if k != "proxies"})
 
-    # 顶层键（排除 proxies 和嵌套 section）
-    for key, value in cfg.items():
-        if key == "proxies":
-            continue
-        if isinstance(value, dict):
-            for sub, sv in value.items():
-                lines.append(f"{key}.{sub} = {_fmt_toml_value(sv)}")
-        else:
-            lines.append(f"{key} = {_fmt_toml_value(value)}")
-
-    # proxies 数组表
-    for proxy in cfg.get("proxies", []):
+    for proxy in cfg.get("proxies") or []:
         lines.append("")
         lines.append("[[proxies]]")
-        for key, value in proxy.items():
-            lines.append(f"{key} = {_fmt_toml_value(value)}")
+        _write_toml_table(lines, proxy, "proxies")
 
-    return "\n".join(lines) + "\n"
+    return "\n".join(lines).strip() + "\n"
 
 
 def load_frp_config(project_dir: str) -> dict[str, Any]:
@@ -383,6 +477,12 @@ def launch_frpc(project_dir: str) -> Optional[subprocess.Popen]:
     """启动原版 frpc（使用 frpc.toml 配置）。返回进程对象。"""
     global _frpc_process
 
+    # 已经在跑就直接返回，别再起一个：原来的句柄会被覆盖，先前那个 frpc
+    # 谁也停不掉，只能一直占着远程端口
+    if is_frpc_running():
+        print("  [frp] frpc 已在运行，忽略本次启动")
+        return _frpc_process
+
     bin_path = get_frpc_bin_path(project_dir)
     toml_path = get_frpc_toml_path(project_dir)
 
@@ -404,12 +504,19 @@ def launch_frpc(project_dir: str) -> Optional[subprocess.Popen]:
 
     try:
         proc = subprocess.Popen(cmd, stdout=None, stderr=None)
-        _frpc_process = proc
-        time.sleep(2)
-        return proc
     except OSError as e:
         print(f"  [frp] 启动失败: {e}")
         return None
+
+    time.sleep(2)
+    # 配置有错时 frpc 会立刻退出，这时返回进程对象等于告诉调用方「启动成功」，
+    # 而菜单里看状态仍是「未运行」
+    if proc.poll() is not None:
+        print(f"  [frp] frpc 启动后立即退出（退出码 {proc.returncode}），请检查 frpc.toml")
+        return None
+
+    _frpc_process = proc
+    return proc
 
 
 def stop_frpc() -> None:

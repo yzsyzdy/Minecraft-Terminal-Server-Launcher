@@ -8,6 +8,7 @@ import json
 import os
 import re
 import shutil
+import urllib.parse
 import urllib.request
 import urllib.error
 from typing import Any, Optional
@@ -15,6 +16,7 @@ from typing import Any, Optional
 from i18n import t
 from constants import SPIGET_BASE, USER_AGENT
 from http_utils import fetch_json
+from download_msl import safe_filename
 
 # ---------------------------------------------------------------------------
 # 通用结构
@@ -38,9 +40,26 @@ def _download_jar(url: str, target_path: str) -> bool:
 # ---------------------------------------------------------------------------
 
 
+def _spiget_author_label(author: Any) -> str:
+    """Spiget 搜索结果里的 author 对象只有 id、没有名字（名字要另开
+    /authors/{id} 查）。至少把 id 显示出来，比永远显示 "?" 有信息量。"""
+    if isinstance(author, dict):
+        name = author.get("name")
+        if name:
+            return str(name)
+        if author.get("id"):
+            return f"#{author['id']}"
+    return "?"
+
+
 def spiget_search(query: str, limit: int = 10) -> list[PluginResult]:
     """搜索 SpigotMC 插件。"""
-    url = f"{SPIGET_BASE}/search/resources/{query}?size={limit}&fields=id,name,tag,testedVersions,downloads"
+    # 关键词必须转义后再拼进 URL。查询里只要有空格，http.client 就会抛
+    # InvalidURL；有中文则抛 UnicodeEncodeError——多词搜索和中文搜索会直接
+    # 崩在 urllib 里，被 search_all 的 except 吞掉，表现为「一个结果都没有」。
+    safe_query = urllib.parse.quote(query, safe="")
+    url = (f"{SPIGET_BASE}/search/resources/{safe_query}"
+           f"?size={limit}&fields=id,name,tag,testedVersions,downloads,author")
     data = fetch_json(url)
     if not data or not isinstance(data, list):
         return []
@@ -54,9 +73,7 @@ def spiget_search(query: str, limit: int = 10) -> list[PluginResult]:
             "source": "SpigotMC",
             "id": str(tid),
             "name": item.get("name", "?"),
-            "author": (
-                item.get("author", {}).get("name", "?")
-                if isinstance(item.get("author"), dict) else "?"),
+            "author": _spiget_author_label(item.get("author")),
             "description": item.get("tag", ""),
             "downloads": item.get("downloads", 0),
             "tested_versions": [v for v in tested if isinstance(v, str)],
@@ -81,8 +98,10 @@ def spiget_resolve_download_url(resource_id: str) -> Optional[str]:
             "User-Agent": USER_AGENT,
             "Referer": "https://www.spigotmc.org/",
         })
-        resp = urllib.request.urlopen(req, timeout=30)
-        return resp.url  # 重定向后的真实地址
+        # 用 with 关掉响应：这里只取重定向后的地址，不读正文，
+        # 不复用连接池的话每次搜索都会漏一个 socket
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            return resp.url  # 重定向后的真实地址
     except (urllib.error.HTTPError, urllib.error.URLError, OSError):
         return None
 
@@ -97,6 +116,20 @@ def _spiget_download_external_github(external_url: str, target_dir: str,
     返回 jar 文件名，失败返回 None。
     """
     from download_msl import multithreaded_download
+
+    # 形如 .../releases/download/{tag}/{file} 就是 jar 直链，直接下即可。
+    # 原实现只认 releases/tag/，把这种直链也当成「解析不了」推给用户手动下载。
+    m = re.match(
+        r"https://github\.com/([^/]+)/([^/]+)/releases/download/([^/]+)/(.+)",
+        external_url)
+    if m:
+        raw_name = urllib.parse.unquote(m.group(4).split("?")[0])
+        filename = safe_filename(raw_name, fallback="plugin.jar")
+        target_path = os.path.join(target_dir, filename)
+        print(t("github.downloading", name=filename))
+        if multithreaded_download(external_url, target_path, desc="Download"):
+            return filename
+        return None
 
     # 尝试匹配 releases/tag/ 格式
     m = re.match(r"https://github\.com/([^/]+)/([^/]+)/releases/tag/(.+)", external_url)
@@ -145,7 +178,8 @@ def _spiget_download_external_github(external_url: str, target_dir: str,
         dl_url = selected.get("browser_download_url", "")
         if not dl_url:
             return None
-        filename = selected["name"]
+        # release 资源名同样来自远端，落盘前先收敛
+        filename = safe_filename(selected["name"], fallback="plugin.jar")
         target_path = os.path.join(target_dir, filename)
 
         print(t("github.downloading", name=filename))
@@ -194,8 +228,13 @@ MODRINTH_BASE = "https://api.modrinth.com/v2"
 
 def modrinth_search(query: str, limit: int = 10) -> list[PluginResult]:
     """搜索 Modrinth 插件。使用 facets 过滤 project_type:plugin"""
-    url = (f"{MODRINTH_BASE}/search?query={query}&limit={limit}"
-           f"&facets={{\"project_type:plugin\"}}")
+    # facets 是一段 JSON，而且必须是「数组的数组」：[["project_type:plugin"]]。
+    # 原来拼的是 {"project_type:plugin"}，那连合法 JSON 都不是，Modrinth 会
+    # 直接报错，于是插件搜索里的 Modrinth 这一路永远是空的。
+    facets = urllib.parse.quote(json.dumps([["project_type:plugin"]]), safe="")
+    safe_query = urllib.parse.quote(query, safe="")
+    url = (f"{MODRINTH_BASE}/search?query={safe_query}&limit={limit}"
+           f"&facets={facets}")
     data = fetch_json(url)
     if not data or not isinstance(data, dict):
         return []
@@ -240,7 +279,9 @@ def modrinth_get_latest_download(project_id: str) -> Optional[tuple[str, str, st
     version_name = v.get("name") or v.get("version_number", "?")
     game_versions = v.get("game_versions") or []
     files = v.get("files") or []
-    for f in files:
+    # 优先取 primary 文件，否则可能下到 sources/javadoc
+    ordered = [f for f in files if f.get("primary")] or files
+    for f in ordered:
         url = f.get("url")
         if url:
             summary = ", ".join(game_versions[:3])
@@ -259,7 +300,8 @@ HANGAR_BASE = "https://hangar.papermc.io/api/v1"
 
 def hangar_search(query: str, limit: int = 10) -> list[PluginResult]:
     """搜索 Hangar 插件。"""
-    url = f"{HANGAR_BASE}/projects?q={query}&limit={limit}&sort=-stars"
+    safe_query = urllib.parse.quote(query, safe="")
+    url = f"{HANGAR_BASE}/projects?q={safe_query}&limit={limit}&sort=-stars"
     data = fetch_json(url)
     if not data or not isinstance(data, dict):
         return []
@@ -348,12 +390,15 @@ def download_plugin(result: PluginResult, target_dir: str) -> Optional[str]:
             if is_external:
                 return _spiget_download_external(target_dir, result)
 
-            real_url = spigot_resolve_download_url(pid)
+            # 注意函数名是 spiget_ 不是 spigot_：写错的话 NameError 会被下面
+            # 的 except Exception 吞掉，表现成「所有 SpigotMC 插件都下载失败」
+            real_url = spiget_resolve_download_url(pid)
             if not real_url:
                 return None
-            filename = os.path.basename(real_url.split("?")[0])
+            filename = safe_filename(
+                os.path.basename(real_url.split("?")[0]), fallback="")
             if not filename.endswith(".jar"):
-                filename = f"{result['name']}.jar"
+                filename = safe_filename(f"{result['name']}.jar", fallback="plugin.jar")
             target_path = os.path.join(target_dir, filename)
             if _download_jar(real_url, target_path):
                 return filename
@@ -363,7 +408,8 @@ def download_plugin(result: PluginResult, target_dir: str) -> Optional[str]:
             if not info:
                 return None
             ver_name, dl_url, _ = info
-            filename = f"{result['name']}-{ver_name}.jar"
+            filename = safe_filename(f"{result['name']}-{ver_name}.jar",
+                                     fallback="plugin.jar")
             target_path = os.path.join(target_dir, filename)
             if _download_jar(dl_url, target_path):
                 return filename
@@ -375,7 +421,8 @@ def download_plugin(result: PluginResult, target_dir: str) -> Optional[str]:
             if not info:
                 return None
             ver_name, dl_url = info
-            filename = f"{result['name']}-{ver_name}.jar"
+            filename = safe_filename(f"{result['name']}-{ver_name}.jar",
+                                     fallback="plugin.jar")
             target_path = os.path.join(target_dir, filename)
             if _download_jar(dl_url, target_path):
                 return filename

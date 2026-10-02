@@ -829,7 +829,8 @@ def _frp_add_proxy(project_dir: str) -> None:
     elif ptype == "udp" and remote_port:
         proxy["remotePort"] = int(remote_port)
     elif ptype == "http":
-        proxy["customDomains"] = name
+        # frp 里 customDomains 是字符串数组，写成裸字符串 frpc 会解析失败
+        proxy["customDomains"] = [name]
 
     proxies.append(proxy)
     if save_frp_config(project_dir, cfg):
@@ -996,10 +997,10 @@ def _openfrp_create_tunnel(project_dir: str) -> None:
     print()
     print(t("openfrp.creating_tunnel", name=name))
     msg = create_tunnel(auth, params)
-    if msg:
-        print(t("openfrp.tunnel_created", msg=msg))
-    else:
+    if msg is None:
         print(t("openfrp.create_failed"))
+    else:
+        print(t("openfrp.tunnel_created", msg=msg))
     input(t("app.press_enter"))
 
 

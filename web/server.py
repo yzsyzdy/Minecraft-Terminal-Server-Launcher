@@ -18,11 +18,13 @@ HTTP 用标准库，事件推送用 SSE，前端是一张不依赖任何构建�
 
 from __future__ import annotations
 
+import hmac
 import json
 import os
 import queue
 import secrets
 from http import HTTPStatus
+from http.cookies import CookieError, SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, Optional
 from urllib.parse import parse_qs, urlparse
@@ -111,15 +113,31 @@ def _make_handler(manager: RuntimeManager, servers_dir: str, token: str):
             parsed = urlparse(self.path)
             return parsed.path, {k: v[0] for k, v in parse_qs(parsed.query).items()}
 
+        def _presented_token(self, query: dict[str, str]) -> str:
+            """按 请求头 → Cookie → query 的顺序取出客户端出示的 token。"""
+            header = self.headers.get("X-MSTL-Token")
+            if header:
+                return header
+            raw_cookie = self.headers.get("Cookie") or ""
+            if raw_cookie:
+                jar: SimpleCookie = SimpleCookie()
+                try:
+                    jar.load(raw_cookie)
+                except CookieError:
+                    jar = SimpleCookie()
+                morsel = jar.get(COOKIE_NAME)
+                if morsel is not None:
+                    return morsel.value
+            return query.get("token") or ""
+
         def _authed(self, query: dict[str, str]) -> bool:
             if not token:
                 return True
-            if self.headers.get("X-MSTL-Token") == token:
-                return True
-            cookie = self.headers.get("Cookie") or ""
-            if f"{COOKIE_NAME}={token}" in cookie:
-                return True
-            return query.get("token") == token
+            presented = self._presented_token(query)
+            # 定长比较：用 == 逐字符短路会通过响应时间泄露 token 前缀。
+            # 另外别再拿 "mstl_token=xxx" 去 in 整个 Cookie 头做子串匹配，
+            # 别的 cookie 的值里带上这一串也会被当成通过。
+            return bool(presented) and hmac.compare_digest(presented, token)
 
         def _send(self, body: bytes, status: int, content_type: str,
                   extra_headers: Optional[list[tuple[str, str]]] = None) -> None:
@@ -319,11 +337,16 @@ def run_web(project_dir: str, host: Optional[str] = None,
     cfg_host, cfg_port, token = web_settings(config)
     if not token:
         token = secrets.token_urlsafe(24)
-        config["web"] = {"host": cfg_host, "port": cfg_port, "token": token}
+        # 只覆盖需要的字段，别把 web 段里其它自定义项（比如留给反代的设置）抹掉
+        web_cfg = dict(config.get("web") or {})
+        web_cfg.update({"host": cfg_host, "port": cfg_port, "token": token})
+        config["web"] = web_cfg
         save_config(config, project_dir)
 
     bind_host = host or cfg_host
-    bind_port = port or cfg_port
+    # 用 is not None 判断：--port 0 是「随便挑一个空闲端口」，是合法请求，
+    # 写成 `port or cfg_port` 会把它当成没传
+    bind_port = cfg_port if port is None else port
     httpd = build_server(project_dir, host=bind_host, port=bind_port, token=token)
     shown_host = "127.0.0.1" if bind_host in ("0.0.0.0", "::") else bind_host
     print(t("web.cli.launched", url=f"http://{shown_host}:{httpd.server_address[1]}/?token={token}"))

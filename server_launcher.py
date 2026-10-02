@@ -139,6 +139,22 @@ def _validate_java_jar(java_path: str, jar_path: str) -> str:
     return os.path.dirname(jar_path)
 
 
+def _as_args(value) -> list[str]:
+    """把额外参数收敛成字符串列表。
+
+    配置里的 extra_jvm_args / extra_server_args 可能被手写成字符串，直接
+    cmd.extend("‑XX:+UseG1GC") 会把整个字符串拆成一个个字符，JVM 收到的
+    就是一堆单字母参数。字符串按空白切开，None / 其他类型当空处理。
+    """
+    if not value:
+        return []
+    if isinstance(value, str):
+        return value.split()
+    if isinstance(value, (list, tuple)):
+        return [str(item) for item in value]
+    return []
+
+
 def _build_jvm_cmd(
     java_path: str,
     jar_path: str,
@@ -154,13 +170,11 @@ def _build_jvm_cmd(
       java -Xmx -Xms --add-opens ... -jar jar nogui [extra]
     """
     cmd = [java_path, f"-Xmx{max_mem}", f"-Xms{min_mem}"] + _JVM_OPENS
-    if extra_jvm_args:
-        cmd.extend(extra_jvm_args)
+    cmd.extend(_as_args(extra_jvm_args))
     cmd += ["-jar", jar_path]
     if nogui:
         cmd.append("nogui")
-    if extra_server_args:
-        cmd.extend(extra_server_args)
+    cmd.extend(_as_args(extra_server_args))
     return cmd
 
 

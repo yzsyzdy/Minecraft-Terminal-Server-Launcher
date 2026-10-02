@@ -8,6 +8,7 @@
 删除/启用 jar 在 core/instances.py。
 """
 
+import copy
 import os
 import json
 import glob
@@ -30,6 +31,51 @@ DEFAULT_SERVER_CONFIG: dict[str, Any] = {
         "auto_start": False,
     },
 }
+
+
+# 这些字段必须是字符串列表。手改 .server.json 时很容易写成 null 或一个字符串，
+# 而 " ".join(None) 会直接抛 TypeError、cmd.extend("abc") 会把参数拆成单个字符，
+# 所以在这里统一收敛，后面所有消费方都可以假定类型是对的。
+_LIST_FIELDS = ("extra_jvm_args", "extra_server_args")
+
+
+def _default_server_config() -> dict[str, Any]:
+    """返回一份独立的默认配置。
+
+    不能写成 dict(DEFAULT_SERVER_CONFIG)：那是浅拷贝，extra_jvm_args /
+    extra_server_args / openfrp 会与模块级常量共用同一个对象。界面层只要
+    就地改一下 server_cfg["openfrp"]，改动就留在了默认值里，之后加载的每个
+    实例都会继承上一个实例的隧道绑定（start.py 会照着它去自动开隧道）。
+    """
+    return copy.deepcopy(DEFAULT_SERVER_CONFIG)
+
+
+def _normalize_server_config(cfg: dict[str, Any]) -> dict[str, Any]:
+    """把外部读进来的配置收敛成可信的类型。就地修改并返回同一个 dict。"""
+    for key in _LIST_FIELDS:
+        value = cfg.get(key)
+        if value is None:
+            cfg[key] = []
+        elif isinstance(value, str):
+            cfg[key] = value.split()
+        elif isinstance(value, list):
+            cfg[key] = [str(item) for item in value]
+        else:
+            cfg[key] = []
+
+    openfrp = cfg.get("openfrp")
+    if not isinstance(openfrp, dict):
+        openfrp = copy.deepcopy(DEFAULT_SERVER_CONFIG["openfrp"])
+    else:
+        openfrp = dict(openfrp)
+        try:
+            openfrp["proxy_id"] = int(openfrp.get("proxy_id") or 0)
+        except (TypeError, ValueError):
+            openfrp["proxy_id"] = 0
+        openfrp["token"] = str(openfrp.get("token") or "")
+        openfrp["auto_start"] = bool(openfrp.get("auto_start"))
+    cfg["openfrp"] = openfrp
+    return cfg
 
 
 def ensure_servers_folder(storage_dir: str) -> str:
@@ -56,11 +102,11 @@ def list_servers(servers_dir: str) -> list[dict[str, Any]]:
                 cfg = json.load(f)
             if not isinstance(cfg, dict):
                 continue
-            merged = dict(DEFAULT_SERVER_CONFIG)
+            merged = _default_server_config()
             merged.update(cfg)
             merged["_path"] = server_path
             merged["_config_path"] = config_path
-            servers.append(merged)
+            servers.append(_normalize_server_config(merged))
         except (json.JSONDecodeError, OSError):
             continue
     return servers
@@ -69,7 +115,7 @@ def list_servers(servers_dir: str) -> list[dict[str, Any]]:
 def load_server_config(server_dir: str) -> dict[str, Any]:
     """读取实例目录下的 .server.json。"""
     config_path = os.path.join(server_dir, ".server.json")
-    cfg = dict(DEFAULT_SERVER_CONFIG)
+    cfg = _default_server_config()
     if os.path.isfile(config_path):
         try:
             with open(config_path, "r", encoding="utf-8") as f:
@@ -78,15 +124,16 @@ def load_server_config(server_dir: str) -> dict[str, Any]:
                 cfg.update(loaded)
         except (json.JSONDecodeError, OSError):
             pass
-    return cfg
+    return _normalize_server_config(cfg)
 
 
 def save_server_config(config: dict[str, Any], server_dir: str) -> None:
     """把实例配置写回 .server.json。"""
-    merged = dict(DEFAULT_SERVER_CONFIG)
+    merged = _default_server_config()
     merged.update(config)
     for key in ("_path", "_config_path"):
         merged.pop(key, None)
+    _normalize_server_config(merged)
     config_path = os.path.join(server_dir, ".server.json")
     os.makedirs(server_dir, exist_ok=True)
     with open(config_path, "w", encoding="utf-8") as f:
