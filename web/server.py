@@ -594,6 +594,9 @@ def _make_handler(manager: RuntimeManager, servers_dir: str, token: str,
                     "extra_jvm_args": entry.get("extra_jvm_args") or [],
                     "extra_server_args": entry.get("extra_server_args") or [],
                     "openfrp": entry.get("openfrp") or {},
+                    # 实例设置对话框靠它回显复选框；漏掉的话框永远是空的，
+                    # 用户随手一保存就把 auto_start 悄悄关掉了
+                    "auto_start": bool(entry.get("auto_start")),
                     "workdir": path,
                     "state": "stopped",
                     "exit_code": None,
