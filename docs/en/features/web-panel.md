@@ -132,6 +132,20 @@ Access token: xxxxxxxxxxxxxxxx
 
 Open that once and the token lands in a cookie; after that `http://127.0.0.1:8765/` is enough. Verification uses a constant-time comparison and only accepts the value of the `mstl_token` cookie itself.
 
+The three ways of presenting a token (`X-MSTL-Token` header, `mstl_token` cookie, `?token=` query parameter) are **equally valid** — matching any one of them is enough. So when the browser still holds a cookie from an older token, the correct new token in the address bar still works, and it overwrites the stale cookie on the way in.
+
+After "regenerate access token" in the menu, a **running panel accepts the new token immediately** — no restart needed; the menu prints the new URL for you.
+
+### "Access token missing or invalid"
+
+Check these in order:
+
+1. **A stale cookie is in the way.** The browser may still hold a cookie from a previous token. Force-reload with `Ctrl+F5`, or clear this site's cookies, then open the full URL the menu printed.
+2. **`127.0.0.1` vs `localhost`.** The browser treats them as different sites, so cookies are not shared. Keep using whichever one you started with.
+3. **You just regenerated the token.** Use the newly printed URL; the token in the old one is dead.
+
+The 401 page lists these same three hints.
+
 ## Security boundary
 
 **The panel can send commands to a server console, rewrite files inside the instance directory, and configure an instance to execute arbitrary commands — so it hands both a command channel and the instance tree to a browser.** The daemon runs as your user, so one click can `stop` a server, change ops, edit `server.properties`, delete files, or point a generic instance at any command. Therefore:

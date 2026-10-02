@@ -72,6 +72,10 @@ WEB_STRINGS = (
     "web.state.stopping",
     "web.auth.invalid",
     "web.auth.help",
+    # 401 时要给用户排查方向，前端那份也一并下发（见 index.html 里的 401 分支）
+    "web.auth.hint_cookie",
+    "web.auth.hint_host",
+    "web.auth.hint_regenerate",
     "web.panel.clear",
     "web.panel.follow",
     "web.panel.jump_bottom",
@@ -125,6 +129,10 @@ WEB_STRINGS = (
     "web.files.folder_partial",
     # 新建实例
     "web.new.title",
+    # 新建实例时的前端校验文案：后端本来就有这两句翻译，但没下发到前端，
+    # 于是中文用户看到的是英文兜底 "name required" 和一句空提示
+    "web.error.name_required",
+    "web.error.core_selection_required",
     "web.new.name",
     "web.new.mc_version",
     "web.new.min_mem",
@@ -404,8 +412,12 @@ def _take_plan(zip_path: str):
 
 
 def _make_handler(manager: RuntimeManager, servers_dir: str, token: str,
-                  project_dir: str):
-    """把 manager、token 与目录关进闭包，产出一个请求处理器类。"""
+                  project_dir: str, token_provider: Any = None):
+    """把 manager、token 与目录关进闭包，产出一个请求处理器类。
+
+    token 是启动时那份（兜底用）；token_provider 每次请求现读配置，
+    让「重新生成 token」不必重启面板就能生效。
+    """
 
     class Handler(BaseHTTPRequestHandler):
         server_version = "MSTL"
@@ -421,11 +433,18 @@ def _make_handler(manager: RuntimeManager, servers_dir: str, token: str,
             parsed = urlparse(self.path)
             return parsed.path, {k: v[0] for k, v in parse_qs(parsed.query).items()}
 
-        def _presented_token(self, query: dict[str, str]) -> str:
-            """按 请求头 → Cookie → query 的顺序取出客户端出示的 token。"""
+        def _presented_tokens(self, query: dict[str, str]) -> list[str]:
+            """客户端出示的**全部** token：请求头、Cookie、query 三条都收。
+
+            以前是「取第一条找到的就返回」，于是浏览器里留着一个旧 token 的
+            cookie 时，地址栏里那个正确的新 token 会被直接无视掉——用户拿着
+            对 token 也永远进不来，只能自己去清 cookie。三条并列，任何一条
+            对就该放行。
+            """
+            values: list[str] = []
             header = self.headers.get("X-MSTL-Token")
             if header:
-                return header
+                values.append(header)
             raw_cookie = self.headers.get("Cookie") or ""
             if raw_cookie:
                 jar: SimpleCookie = SimpleCookie()
@@ -434,18 +453,39 @@ def _make_handler(manager: RuntimeManager, servers_dir: str, token: str,
                 except CookieError:
                     jar = SimpleCookie()
                 morsel = jar.get(COOKIE_NAME)
-                if morsel is not None:
-                    return morsel.value
-            return query.get("token") or ""
+                if morsel is not None and morsel.value:
+                    values.append(morsel.value)
+            query_token = query.get("token")
+            if query_token:
+                values.append(query_token)
+            return values
+
+        def _expected_token(self) -> str:
+            """此刻该认的 token。
+
+            现从配置里读，而不是认处理器创建时闭包进来的那个：菜单里「重新
+            生成 token」之后，正在跑的面板应该立刻认新 token，不用重启。
+            读不到（config.json 被删、写坏、web 段没了）就退回启动时那一个——
+            宁可继续要求旧 token，也不能因为读不到配置就把鉴权整个关掉。
+            """
+            if token_provider is not None:
+                try:
+                    current = str(token_provider() or "")
+                except Exception:  # noqa: BLE001
+                    current = ""
+                if current:
+                    return current
+            return token
 
         def _authed(self, query: dict[str, str]) -> bool:
-            if not token:
+            expected = self._expected_token()
+            if not expected:
                 return True
-            presented = self._presented_token(query)
             # 定长比较：用 == 逐字符短路会通过响应时间泄露 token 前缀。
             # 另外别再拿 "mstl_token=xxx" 去 in 整个 Cookie 头做子串匹配，
             # 别的 cookie 的值里带上这一串也会被当成通过。
-            return bool(presented) and hmac.compare_digest(presented, token)
+            return any(hmac.compare_digest(value, expected)
+                       for value in self._presented_tokens(query) if value)
 
         def _send(self, body: bytes, status: int, content_type: str,
                   extra_headers: Optional[list[tuple[str, str]]] = None) -> None:
@@ -470,13 +510,22 @@ def _make_handler(manager: RuntimeManager, servers_dir: str, token: str,
                        "text/html; charset=utf-8", extra_headers)
 
         def _unauthorized(self) -> None:
+            # 最常见的两种情况其实是「浏览器里还留着旧 token 的 cookie」和
+            # 「用 localhost 开的、cookie 却存在 127.0.0.1 名下」，光说一句
+            # 「token 无效」用户只能干瞪眼，把排查方向一并写出来。
+            hints = "".join(
+                f"<li>{t(key)}</li>"
+                for key in ("web.auth.hint_cookie", "web.auth.hint_host",
+                            "web.auth.hint_regenerate")
+            )
             self._page(
                 "<!doctype html><meta charset='utf-8'>"
                 "<body style='font:14px system-ui;color:#1f2430;padding:24px;"
                 "background-color:#ffffff;"
                 "background-image:linear-gradient(180deg,#f7f8ff,#ffffff 260px);"
                 "background-repeat:no-repeat'>"
-                f"<p>{t('web.auth.invalid')}</p><p style='color:#6b7480'>{t('web.auth.help')}</p>",
+                f"<p>{t('web.auth.invalid')}</p><p style='color:#6b7480'>{t('web.auth.help')}</p>"
+                f"<ul style='color:#6b7480;line-height:1.9'>{hints}</ul>",
                 HTTPStatus.UNAUTHORIZED,
             )
 
@@ -545,9 +594,12 @@ def _make_handler(manager: RuntimeManager, servers_dir: str, token: str,
                 if not self._authed(query):
                     return self._unauthorized()
                 headers = []
-                if query.get("token"):
+                expected = self._expected_token()
+                if query.get("token") and expected:
+                    # 用「此刻生效的」token 回写 cookie：地址栏带对了 token 时
+                    # 顺手把浏览器的旧 cookie 覆盖掉，下次不带 token 也能进。
                     headers.append(("Set-Cookie",
-                                    f"{COOKIE_NAME}={token}; Path=/; HttpOnly; SameSite=Lax"))
+                                    f"{COOKIE_NAME}={expected}; Path=/; HttpOnly; SameSite=Lax"))
                 try:
                     return self._page(_index_html(), extra_headers=headers)
                 except OSError:
@@ -1096,10 +1148,32 @@ class _PanelServer(ThreadingHTTPServer):
     daemon_threads = True
 
 
+def _config_token_provider(project_dir: str):
+    """返回一个「现读配置里的 token」的函数，供运行中的面板用。
+
+    单独抽出来是为了让处理器不必自己碰配置读取，也方便测试直接塞一个假的。
+
+    刻意不做缓存：面板是本机单用户的，`load_config` 一次约 0.2ms，相对于
+    这些接口本身做的事可以忽略；而缓存鉴权状态正是「token 换了却不生效」
+    这类 bug 的来源。要改成缓存的话，务必按 `config.json` 的 mtime + 大小
+    失效，别只缓存时间。
+    """
+
+    def provider() -> str:
+        return web_settings(load_config(project_dir))[2]
+
+    return provider
+
+
 def build_server(project_dir: str, *, host: str = "127.0.0.1", port: int = 8765,
                  token: str = "", manager: Optional[RuntimeManager] = None,
-                 servers_dir: Optional[str] = None) -> ThreadingHTTPServer:
-    """起一个 HTTP 服务（不进入事件循环），方便测试与嵌入。"""
+                 servers_dir: Optional[str] = None,
+                 token_provider: Any = None) -> ThreadingHTTPServer:
+    """起一个 HTTP 服务（不进入事件循环），方便测试与嵌入。
+
+    token_provider 传了的话，每个请求都会现读一次 token（重新生成 token
+    后无需重启面板）；不传就只认 token 参数——测试与嵌入方能完全掌控鉴权。
+    """
     # 业务错误文案靠 locales 翻译，不加载语言的话 t() 只会把 i18n key 原样
     # 吐出来，调用方看到的就是 "web.error.xxx"。嵌入方（测试、别的入口）
     # 通常不会自己去 load_language，所以在这里补上。
@@ -1108,7 +1182,7 @@ def build_server(project_dir: str, *, host: str = "127.0.0.1", port: int = 8765,
 
     servers_dir = servers_dir or ensure_servers_folder(project_dir)
     manager = manager or shared_manager(project_dir)
-    handler = _make_handler(manager, servers_dir, token, project_dir)
+    handler = _make_handler(manager, servers_dir, token, project_dir, token_provider)
     httpd = _PanelServer((host, port), handler)
     return httpd
 
@@ -1165,7 +1239,8 @@ def start_background(project_dir: str, host: Optional[str] = None,
     bind_port = cfg_port if port is None else port
 
     try:
-        httpd = build_server(project_dir, host=bind_host, port=bind_port, token=token)
+        httpd = build_server(project_dir, host=bind_host, port=bind_port, token=token,
+                             token_provider=_config_token_provider(project_dir))
     except OSError as e:
         print(t("web.cli.bind_failed", addr=f"{bind_host}:{bind_port}", msg=str(e)))
         return None
@@ -1202,7 +1277,8 @@ def run_web(project_dir: str, host: Optional[str] = None,
     bind_port = cfg_port if port is None else port
 
     try:
-        httpd = build_server(project_dir, host=bind_host, port=bind_port, token=token)
+        httpd = build_server(project_dir, host=bind_host, port=bind_port, token=token,
+                             token_provider=_config_token_provider(project_dir))
     except OSError as e:
         # 端口被占是最常见的一种；原来会直接抛一个 traceback 出来，
         # 从菜单里启动面板时看起来像是程序崩了

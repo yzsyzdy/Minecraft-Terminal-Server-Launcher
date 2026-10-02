@@ -1581,11 +1581,16 @@ def _web_menu(project_dir: str) -> None:
         if choice == "3":
             import secrets
             web_cfg = dict(config.get("web") or {})
-            web_cfg["token"] = secrets.token_urlsafe(24)
+            new_token = secrets.token_urlsafe(24)
+            web_cfg["token"] = new_token
             config["web"] = web_cfg
             save_config(config, project_dir)
             print()
-            print(t("web.menu.regenerated"))
+            # 换完 token 用户下一步就是「拿新地址进面板」，地址得现给。
+            # 监听 0.0.0.0 时不能把 0.0.0.0 当地址用，换成本机回环。
+            shown_host = "127.0.0.1" if host in ("0.0.0.0", "::") else host
+            print(t("web.menu.regenerated",
+                    url=f"http://{shown_host}:{port}/?token={new_token}"))
             input(t("app.press_enter"))
             continue
 

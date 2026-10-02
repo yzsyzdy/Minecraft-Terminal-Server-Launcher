@@ -685,9 +685,17 @@ async function api(path, body) {
   }
   const res = await fetch(path, options);
   if (res.status === 401) {
+    // 光说「token 无效」用户只能干瞪眼：最常见的三种原因（旧 cookie、
+    // localhost 与 127.0.0.1 不通用、刚换过 token）都列出来
+    const hints = ["web.auth.hint_cookie", "web.auth.hint_host",
+      "web.auth.hint_regenerate"]
+      .map((k) => strings[k]).filter(Boolean)
+      .map((s) => "<li>" + esc(s) + "</li>").join("");
     document.body.innerHTML =
       '<div style="padding:28px"><h3>' + esc(strings["web.auth.invalid"] || "401") +
-      '</h3><p style="color:#6b7480">' + esc(strings["web.auth.help"] || "") + "</p></div>";
+      '</h3><p style="color:#6b7480">' + esc(strings["web.auth.help"] || "") + "</p>" +
+      (hints ? '<ul style="color:#6b7480;line-height:1.9">' + hints + "</ul>" : "") +
+      "</div>";
     throw new Error("unauthorized");
   }
   return res.json();
