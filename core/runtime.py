@@ -25,6 +25,13 @@ from .errors import CoreError
 from .java import resolve_java_for_launch
 from .report import Reporter, as_reporter
 from server_launcher import build_jvm_command, spawn_priority_process
+from server_manager import (
+    KIND_GENERIC,
+    KIND_MINECRAFT,
+    LAUNCH_CMD,
+    LAUNCH_EXEC,
+    LAUNCH_POWERSHELL,
+)
 
 Event = dict
 OnEvent = Callable[[Event], None]
@@ -39,13 +46,95 @@ class LaunchPlan:
     """启动一个实例需要知道的一切。构造它不需要真的去动那个实例。"""
 
     name: str
-    java: str
-    jar: str
     workdir: str
     cmd: list[str]
+    kind: str = KIND_MINECRAFT
+    # 通用实例与 Minecraft 实例各自看得懂的字段。界面上要显示「这是个什么
+    # 东西」，所以 program 单独留一个位置，而不是把它塞进 java 里冒充。
+    program: str = ""
+    java: str = ""
+    jar: str = ""
     min_mem: str = "1G"
     max_mem: str = "4G"
     log_path: str = ""
+
+
+def _exec_args(value) -> list[str]:
+    """把 launch.args 收敛成字符串列表。"""
+    if not value:
+        return []
+    if isinstance(value, str):
+        return value.split()
+    if isinstance(value, (list, tuple)):
+        return [str(item) for item in value]
+    return []
+
+
+def _resolve_workdir(server_dir: str, raw: str) -> str:
+    """通用实例的工作目录：相对路径按实例目录算，空则就是实例目录。"""
+    raw = (raw or "").strip()
+    if not raw:
+        return server_dir
+    if os.path.isabs(raw):
+        return os.path.normpath(raw)
+    return os.path.normpath(os.path.join(server_dir, raw))
+
+
+def build_generic_plan(server_cfg: dict, server_dir: str) -> LaunchPlan:
+    """给通用实例拼启动命令。
+
+    三种方式：
+      exec        —— 直接运行可执行文件，参数一项一个，不经 shell
+      cmd         —— cmd.exe /c "<命令>"，管道、重定向、&& 都能用
+      powershell  —— powershell -NoProfile -Command "<命令>"
+
+    走 shell 的两种方式会把配置里的字符串原样交给 shell 解释，这是功能本身
+    的要求（否则「执行一段命令」就无从谈起）。它的信任边界和「用户能改
+    .server.json」「面板能发控制台指令」是同一条：能改这个配置的人本来就
+    已经能在这台机器上跑东西了。
+    """
+    fallback_name = os.path.basename(os.path.normpath(server_dir)) or "instance"
+    name = server_cfg.get("name") or fallback_name
+    launch = server_cfg.get("launch") or {}
+    mode = launch.get("mode") or LAUNCH_EXEC
+
+    workdir = _resolve_workdir(server_dir, launch.get("workdir", ""))
+    if not os.path.isdir(workdir):
+        raise CoreError("app.error_workdir_missing", path=workdir)
+
+    if mode == LAUNCH_EXEC:
+        program = (launch.get("program") or "").strip()
+        if not program:
+            raise CoreError("app.error_program_missing")
+        program_abs = program if os.path.isabs(program) else os.path.join(server_dir, program)
+        program_abs = os.path.normpath(program_abs)
+        if not os.path.isfile(program_abs):
+            raise CoreError("app.error_program_not_found", path=program_abs)
+        cmd = [program_abs] + _exec_args(launch.get("args"))
+        summary = program_abs
+    elif mode == LAUNCH_CMD:
+        command = (launch.get("command") or "").strip()
+        if not command:
+            raise CoreError("app.error_command_missing")
+        comspec = os.environ.get("COMSPEC") or "cmd.exe"
+        cmd = [comspec, "/c", command]
+        summary = command
+    else:
+        command = (launch.get("command") or "").strip()
+        if not command:
+            raise CoreError("app.error_command_missing")
+        shell = "powershell.exe" if os.name == "nt" else "pwsh"
+        cmd = [shell, "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", command]
+        summary = command
+
+    return LaunchPlan(
+        name=name,
+        workdir=workdir,
+        cmd=cmd,
+        kind=KIND_GENERIC,
+        program=summary,
+        log_path=os.path.join(server_dir, "logs", "mstl-console.log"),
+    )
 
 
 def build_launch_plan(
@@ -55,7 +144,10 @@ def build_launch_plan(
     *,
     reporter: Optional[Reporter] = None,
 ) -> LaunchPlan:
-    """解析 Java、校验核心 jar、拼出完整的 JVM 命令行。"""
+    """按实例种类分流：Minecraft 走 Java/jar，通用实例走自己的启动配置。"""
+    if (server_cfg.get("kind") or KIND_MINECRAFT) == KIND_GENERIC:
+        return build_generic_plan(server_cfg, server_dir)
+
     reporter = as_reporter(reporter)
     fallback_name = os.path.basename(os.path.normpath(server_dir)) or "server"
     name = server_cfg.get("name") or fallback_name
@@ -82,10 +174,12 @@ def build_launch_plan(
     )
     return LaunchPlan(
         name=name,
-        java=java,
-        jar=jar_abs,
         workdir=os.path.dirname(jar_abs),
         cmd=cmd,
+        kind=KIND_MINECRAFT,
+        program=java,
+        java=java,
+        jar=jar_abs,
         min_mem=min_mem,
         max_mem=max_mem,
         log_path=os.path.join(server_dir, "logs", "mstl-console.log"),
@@ -140,6 +234,8 @@ class ServerRuntime:
                 "exit_code": self._exit_code,
                 "started_at": self._started_at,
                 "pid": pid,
+                "kind": self.plan.kind,
+                "program": self.plan.program,
                 "java": self.plan.java,
                 "jar": self.plan.jar,
                 "workdir": self.plan.workdir,
@@ -402,6 +498,7 @@ class RuntimeManager:
 __all__ = [
     "LaunchPlan",
     "build_launch_plan",
+    "build_generic_plan",
     "ServerRuntime",
     "RuntimeManager",
     "STATE_RUNNING",

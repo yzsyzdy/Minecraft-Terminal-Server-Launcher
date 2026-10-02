@@ -86,11 +86,76 @@ def _project_dir() -> str:
 # 核心启动流程
 # ---------------------------------------------------------------------------
 
+def _maybe_start_frpc(server_cfg: dict, project_dir: str) -> None:
+    """按实例配置里的 openfrp 段决定要不要先拉起 frpc 隧道。
+
+    Minecraft 实例和通用实例共用这一段：隧道指向哪个本地端口是用户自己配的，
+    和实例种类无关。
+    """
+    of_cfg = server_cfg.get("openfrp", {}) or {}
+    if not of_cfg.get("auto_start"):
+        return
+    if not (of_cfg.get("token") and of_cfg.get("proxy_id")):
+        print("  [OpenFrp] 已开启自动启动，但 token 或隧道 ID 没填，跳过。")
+        return
+
+    from openfrp.tunnel_manager import launch_frpc
+
+    print()
+    if launch_frpc(project_dir, server_cfg) is None:
+        print("  [警告] frpc 启动失败，隧道可能不可用")
+    print()
+
+
+def _start_generic_instance(server_cfg: dict, server_path: str,
+                            config: dict, project_dir: str) -> int:
+    """启动一个通用实例：不解析 Java、不校验 jar，按启动配置直接跑。
+
+    退出后不重试、也不看 EULA——那套自动重启是给 Minecraft 服务端首启动写的，
+    通用实例的退出码就是它自己的退出码。
+    """
+    from core.errors import CoreError
+    from core.runtime import build_launch_plan
+    from server_launcher import start_command
+
+    try:
+        plan = build_launch_plan(server_cfg, server_path, project_dir)
+    except CoreError as e:
+        print("  " + t(e.key, **e.kwargs))
+        return 1
+
+    _maybe_start_frpc(server_cfg, project_dir)
+
+    name = server_cfg.get("name", "?")
+    proc_prio = server_cfg.get("process_priority", "normal")
+    print("━" * 50)
+    print()
+    print(t("server.info_name", name=name))
+    print(t("server.info_command", cmd=" ".join(plan.cmd)))
+    print(t("server.info_workdir", path=plan.workdir))
+    if proc_prio != "normal":
+        print(t("server.info_priority", priority=proc_prio))
+    print()
+
+    try:
+        return start_command(
+            plan.cmd, plan.workdir, proc_prio,
+            interactive=config.get("interactive", True),
+            title=name,
+        )
+    except FileNotFoundError as e:
+        print(t("app.error_file_not_found", msg=str(e)))
+        return 1
+    except KeyboardInterrupt:
+        print(t("app.cancel"))
+        return 0
+
+
 def _start_server(server_cfg: dict, server_path: str,
                   config: dict, project_dir: str) -> int:
-    """启动一个 Minecraft 服务器的完整流程。
+    """启动一个实例的完整流程。
 
-    步骤:
+    Minecraft 实例:
       1. 解析 Java 路径（自动检测/缓存/下载）
       2. 验证核心 jar 存在
       3. 按需启动 OpenFrp frpc 隧道
@@ -98,7 +163,12 @@ def _start_server(server_cfg: dict, server_path: str,
       5. 启动 MC 服务端（交互/非交互）
       6. 处理 EULA 协议（如果需要）
       7. 返回服务端退出码
+
+    通用实例只走自己的启动配置（见 _start_generic_instance）。
     """
+    if (server_cfg.get("kind") or "minecraft") == "generic":
+        return _start_generic_instance(server_cfg, server_path, config, project_dir)
+
     server_java = server_cfg.get("java_path") or config.get("java_path")
 
     try:
@@ -127,17 +197,7 @@ def _start_server(server_cfg: dict, server_path: str,
     name = server_cfg.get("name", "?")
 
     # 如果需要内网穿透，先在 MC 服务器之前启动 frpc
-    of_cfg = server_cfg.get("openfrp", {}) or {}
-    frpc_proc = None
-    if of_cfg.get("auto_start") and of_cfg.get("token") and of_cfg.get("proxy_id"):
-        from openfrp.tunnel_manager import launch_frpc
-        print()
-        frpc_proc = launch_frpc(project_dir, server_cfg)
-        if frpc_proc is None:
-            print("  [警告] frpc 启动失败，隧道可能不可用")
-        print()
-    elif of_cfg.get("auto_start"):
-        print("  [OpenFrp] auto_start enabled but token or proxy_id missing, skipping.")
+    _maybe_start_frpc(server_cfg, project_dir)
 
     # 用分隔线把 frpc 输出和服务器信息分开
     print("━" * 50)

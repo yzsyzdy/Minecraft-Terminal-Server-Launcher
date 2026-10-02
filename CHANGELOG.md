@@ -60,6 +60,36 @@ MkDocs Material 双语（中 / 英）文档站，涵盖使用指南、功能详�
 
 启动时静默比对 GitHub Releases，有新版本时打印版本号与下载地址。
 
+#### 通用实例
+
+除了 Minecraft 服务端，现在还能把**任意一个长期运行的程序或命令**当成实例来管。实例新增 `kind` 字段
+（`minecraft` / `generic`），`.server.json` 里的 `launch` 段描述通用实例怎么启动：
+
+- `exec`：直接运行一个可执行文件，参数一项一个，**不经 shell**
+- `cmd`：`cmd.exe /c "<命令>"`，管道、重定向、`&&` 都能用
+- `powershell`：`powershell -NoProfile -Command "<命令>"`
+
+`program` 与 `workdir` 都支持相对路径（按实例目录算）。通用实例享有和 Minecraft 实例一样的能力：
+启停、实时控制台、`logs/mstl-console.log`、发指令、随实例自动开隧道、导出存档。
+
+命令行与网页面板都有入口：主菜单 `[3] 新建实例` → `[2] 通用实例`；面板 `＋` → 「通用实例」标签。
+配置改动的入口是面板里的 `⚙`，或直接编辑 `.server.json`。
+
+实例的 `kind` 在创建后不可更改——切换种类等于把实例换成另一个东西，不该混在「保存设置」里悄悄发生。
+
+#### 网页面板：实例设置
+
+选中实例后点标题栏的 `⚙`：Minecraft 实例可改 MC 版本、核心 jar、内存、额外 JVM / 服务端参数、进程优先级；
+通用实例改启动方式、程序或命令、参数、工作目录；两者都可以填 OpenFrp 隧道绑定（token、隧道 ID、
+是否随实例自动开启）。
+
+#### 网页面板：frp 配置
+
+顶栏 `frp` 按钮打开隧道面板，对应 `frp/frpc.toml`：查看 frpc 运行状态与二进制是否就绪、改
+`serverAddr` / `serverPort` / `auth.token`、启动与停止 frpc、下载或更新 frpc 二进制、列出与删除隧道、
+添加 `tcp` / `udp` / `http` / `https` 隧道（带参数校验）。面板只改这几个键，`frpc.toml` 里其它内容
+读进来原样保留。管的是原版 frp；OpenFrp 云端隧道仍走命令行菜单，面板只参与实例绑定那一小步。
+
 ### 变更
 
 - **打包**：改用 Nuitka standalone 构建，并修复 onefile 模式下的路径定位
@@ -113,5 +143,7 @@ MkDocs Material 双语（中 / 英）文档站，涵盖使用指南、功能详�
   要经 frp 穿到公网，请务必在前面加一层反向代理与 HTTPS
 - 文件管理器的边界：单文件编辑上限 2 MB，单次上传上限 512 MB，
   一次只操作一个文件（没有批量选择，也不能整体上传目录）
+- 通用实例可以配置成执行任意命令，这是功能本身；它的信任边界和「面板能发控制台指令」
+  「能改 `.server.json`」是同一条——拿到面板 token 的人本来就能在这台机器上跑东西。
 
 [未发布]: https://github.com/yzsyzdy/Minecraft-Terminal-Server-Launcher/compare/v1.1.35...HEAD

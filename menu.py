@@ -65,6 +65,35 @@ def _report_error(err: CoreError) -> None:
     print("  " + t(err.key, **err.kwargs))
 
 
+def _is_generic(server_cfg: dict) -> bool:
+    """这台实例是不是通用实例（不跑 Minecraft，跑任意程序或命令）。"""
+    return (server_cfg.get("kind") or "minecraft") == "generic"
+
+
+def _mode_label(mode: str) -> str:
+    """把启动方式翻成一句人话，列表与配置菜单共用。"""
+    return {
+        "exec": t("menu.generic.mode_label_exec"),
+        "cmd": t("menu.generic.mode_label_cmd"),
+        "powershell": t("menu.generic.mode_label_powershell"),
+    }.get(mode or "exec", mode or "?")
+
+
+def _pick_priority(current: str) -> Optional[str]:
+    """进程优先级子菜单。返回选中的值；输入无效则返回 None。"""
+    print()
+    print(t("menu.config.prio_prompt"))
+    print(t("menu.config.prio_normal", n=1))
+    print(t("menu.config.prio_below", n=2))
+    print(t("menu.config.prio_low", n=3))
+    p = input("  " + t("menu.main.prompt", max=3)).strip()
+    mapping = {"1": "normal", "2": "below_normal", "3": "low"}
+    if p in mapping:
+        return mapping[p]
+    print(t("menu.config.prio_invalid"))
+    return None
+
+
 def _delete_jar(directory: str) -> None:
     """交互式删除一个 jar。"""
     if inst.list_jars(directory).total == 0:
@@ -387,6 +416,10 @@ def _show_mod_menu(server_cfg: dict, server_dir: str) -> None:
 
 def _edit_server_config(server_cfg: dict, server_dir: str) -> None:
     """Edit server advanced settings: JVM args, priority, etc."""
+    if _is_generic(server_cfg):
+        _edit_generic_config(server_cfg, server_dir)
+        return
+
     while True:
         clear_screen()
         print()
@@ -402,19 +435,11 @@ def _edit_server_config(server_cfg: dict, server_dir: str) -> None:
         if c == "0":
             return
         elif c == "1":
-            print()
-            print(t("menu.config.prio_prompt"))
-            print(t("menu.config.prio_normal", n=1))
-            print(t("menu.config.prio_below", n=2))
-            print(t("menu.config.prio_low", n=3))
-            p = input("  " + t("menu.main.prompt", max=3)).strip()
-            mapping = {"1": "normal", "2": "below_normal", "3": "low"}
-            if p in mapping:
-                server_cfg["process_priority"] = mapping[p]
+            picked = _pick_priority(server_cfg.get("process_priority", "normal"))
+            if picked is not None:
+                server_cfg["process_priority"] = picked
                 save_server_config(server_cfg, server_dir)
                 print(t("menu.config.saved"))
-            else:
-                print(t("menu.config.prio_invalid"))
         elif c == "2":
             print()
             cur = " ".join(server_cfg.get("extra_jvm_args", []))
@@ -431,6 +456,80 @@ def _edit_server_config(server_cfg: dict, server_dir: str) -> None:
             print(t("menu.config.saved"))
         else:
             print(t("app.invalid_choice_short"))
+
+
+def _edit_generic_config(server_cfg: dict, server_dir: str) -> None:
+    """通用实例的启动配置：优先级、启动方式、程序/命令、参数、工作目录。"""
+    from core.provision import update_instance
+
+    def _launch() -> dict:
+        return server_cfg.get("launch") or {}
+
+    while True:
+        clear_screen()
+        launch = _launch()
+        print()
+        print(t("menu.generic.config_title", name=server_cfg.get("name", "?")))
+        print()
+        print(t("menu.generic.cfg_priority", n=1,
+                val=server_cfg.get("process_priority", "normal")))
+        print(t("menu.generic.cfg_mode", n=2,
+                val=_mode_label(launch.get("mode") or "exec")))
+        print(t("menu.generic.cfg_program", n=3, val=launch.get("program") or "-"))
+        print(t("menu.generic.cfg_args", n=4,
+                val=" ".join(launch.get("args") or []) or "-"))
+        print(t("menu.generic.cfg_command", n=5, val=launch.get("command") or "-"))
+        print(t("menu.generic.cfg_workdir", n=6, val=launch.get("workdir") or "-"))
+        print(t("menu.plugin.back", n=0))
+        print()
+        c = input("  " + t("menu.main.prompt", max=6)).strip()
+        if c == "0":
+            return
+
+        patch: dict = {}
+        if c == "1":
+            picked = _pick_priority(server_cfg.get("process_priority", "normal"))
+            if picked is not None:
+                patch["process_priority"] = picked
+        elif c == "2":
+            print()
+            print(t("menu.generic.mode_prompt"))
+            print(t("menu.generic.mode_exec", n=1))
+            print(t("menu.generic.mode_cmd", n=2))
+            print(t("menu.generic.mode_powershell", n=3))
+            print()
+            picked = {"1": "exec", "2": "cmd", "3": "powershell"}.get(
+                input("  " + t("menu.main.prompt", max=3)).strip())
+            if picked is None:
+                print(t("app.invalid_choice_short"))
+            else:
+                patch["launch"] = {**launch, "mode": picked}
+        elif c == "3":
+            print()
+            value = input(t("menu.generic.program_prompt")).strip().strip('"')
+            patch["launch"] = {**launch, "program": value}
+        elif c == "4":
+            print()
+            cur = " ".join(launch.get("args") or [])
+            raw = input(t("menu.generic.args_prompt", cur=cur)).strip()
+            patch["launch"] = {**launch, "args": raw.split() if raw else []}
+        elif c == "5":
+            print()
+            value = input(t("menu.generic.command_prompt")).strip()
+            patch["launch"] = {**launch, "command": value}
+        elif c == "6":
+            print()
+            value = input(t("menu.generic.workdir_prompt")).strip().strip('"')
+            patch["launch"] = {**launch, "workdir": value}
+        else:
+            print(t("app.invalid_choice_short"))
+
+        if patch:
+            try:
+                server_cfg.update(update_instance(server_dir, patch))
+                print(t("menu.config.saved"))
+            except CoreError as e:
+                _report_error(e)
 
 
 def _run_management_for_server(server_cfg: dict, server_dir: str) -> None:
@@ -458,10 +557,11 @@ def _run_management_for_server(server_cfg: dict, server_dir: str) -> None:
             elif c == "0":
                 return
             print(t("app.invalid_choice_short"))
-    elif stype in ("vanilla", "proxy", "bedrock"):
+    elif stype in ("vanilla", "proxy", "bedrock", "generic"):
         msg_key = {"vanilla": "menu.hybrid.unsupported_vanilla",
                     "proxy": "menu.hybrid.unsupported_proxy",
-                    "bedrock": "menu.hybrid.unsupported_bedrock"}
+                    "bedrock": "menu.hybrid.unsupported_bedrock",
+                    "generic": "menu.hybrid.unsupported_generic"}
         print()
         print(t(msg_key[stype], name=server_cfg.get("name", "?")))
         print()
@@ -481,6 +581,10 @@ def _pick_server_for_management(servers: list[dict], servers_dir: str) -> None:
         print(t("menu.manage.title"))
         print()
         for i, s in enumerate(servers, 1):
+            if _is_generic(s):
+                print(t("menu.manage.line_generic", i=i, name=s["name"],
+                        mode=_mode_label((s.get("launch") or {}).get("mode") or "exec")))
+                continue
             ver = s.get("mc_version", "?")
             jar = s.get("jar", "?")
             print(t("menu.manage.line", i=i, name=s["name"], ver=ver, jar=jar))
@@ -1218,6 +1322,82 @@ def _prompt_zip_path() -> Optional[str]:
     return path
 
 
+def _create_generic_instance(servers_dir: str) -> None:
+    """交互式新建一台通用实例：跑一个可执行文件，或执行一段命令。"""
+    from core.provision import create_instance
+
+    clear_screen()
+    print()
+    print(t("menu.generic.create_title"))
+    print()
+    name = input(t("menu.generic.name_prompt")).strip()
+    if not name:
+        return
+
+    print()
+    print(t("menu.generic.mode_prompt"))
+    print(t("menu.generic.mode_exec", n=1))
+    print(t("menu.generic.mode_cmd", n=2))
+    print(t("menu.generic.mode_powershell", n=3))
+    print()
+    mode = {"1": "exec", "2": "cmd", "3": "powershell"}.get(
+        input("  " + t("menu.main.prompt", max=3)).strip(), "exec")
+
+    launch = {"mode": mode, "program": "", "args": [], "command": "", "workdir": ""}
+    if mode == "exec":
+        program = input(t("menu.generic.program_prompt")).strip().strip('"')
+        if not program:
+            print("  " + t("app.error_program_missing"))
+            input(t("app.press_enter"))
+            return
+        launch["program"] = program
+        raw_args = input(t("menu.generic.args_prompt", cur="")).strip()
+        launch["args"] = raw_args.split() if raw_args else []
+    else:
+        command = input(t("menu.generic.command_prompt")).strip()
+        if not command:
+            print("  " + t("app.error_command_missing"))
+            input(t("app.press_enter"))
+            return
+        launch["command"] = command
+
+    launch["workdir"] = input(t("menu.generic.workdir_prompt")).strip().strip('"')
+
+    try:
+        create_instance(servers_dir, name, kind="generic", launch=launch)
+        print(t("menu.generic.created", name=name))
+    except CoreError as e:
+        _report_error(e)
+    input(t("app.press_enter"))
+
+
+def _new_instance_menu(servers_dir: str, project_dir: str) -> None:
+    """新建实例：下载 Minecraft 核心，或者建一台通用实例。"""
+    while True:
+        clear_screen()
+        print()
+        print(t("menu.new.title"))
+        print()
+        print(t("menu.new.core", n=1))
+        print(t("menu.new.generic", n=2))
+        print(t("menu.plugin.back", n=0))
+        print()
+        choice = input("  " + t("menu.main.prompt", max=2)).strip()
+
+        if choice == "0":
+            return
+        if choice == "1":
+            from download_msl import show_download_server_menu
+            show_download_server_menu(servers_dir, project_dir)
+            input(t("app.press_enter"))
+            return
+        if choice == "2":
+            _create_generic_instance(servers_dir)
+            return
+        print(t("app.invalid_choice_short"))
+        input(t("app.press_enter"))
+
+
 def _pick_jar_interactive(jars: list[str]) -> Optional[str]:
     """候选核心 jar 多于一个时，让用户挑一个。"""
     print()
@@ -1315,9 +1495,7 @@ def show_main_menu(servers_dir: str, project_dir: str) -> Optional[dict[str, Any
             continue
 
         elif choice == "3":
-            from download_msl import show_download_server_menu
-            show_download_server_menu(servers_dir, project_dir)
-            input(t("app.press_enter"))
+            _new_instance_menu(servers_dir, project_dir)
             continue
 
         elif choice == "4":
@@ -1362,6 +1540,10 @@ def _select_server_for_launch(
         print(t("menu.select_server.title"))
         print()
         for i, s in enumerate(servers, 1):
+            if _is_generic(s):
+                print(t("menu.select_server.line_generic", i=i, name=s["name"],
+                        mode=_mode_label((s.get("launch") or {}).get("mode") or "exec")))
+                continue
             ver = s.get("mc_version", "?")
             jar = s.get("jar", "?")
             mem = f"{s.get('min_mem', '?')} / {s.get('max_mem', '?')}"

@@ -32,7 +32,14 @@ from download_msl import (
     multithreaded_download,
     safe_filename,
 )
-from server_manager import save_server_config
+from server_manager import (
+    KIND_GENERIC,
+    KIND_MINECRAFT,
+    LAUNCH_EXEC,
+    LAUNCH_MODES,
+    load_server_config,
+    save_server_config,
+)
 
 # 实例名里不能出现的字符：Windows 全量非法字符 + 控制字符
 _INVALID_NAME_CHARS = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
@@ -76,16 +83,66 @@ def instance_path(servers_dir: str, name: str) -> str:
     return path
 
 
+def normalize_launch(value) -> dict[str, Any]:
+    """把界面层传来的启动配置收敛成可信结构。
+
+    这里不校验「字段填全了没有」——先建实例、稍后再配是允许的，
+    真正启动时 build_generic_plan 才会报缺什么。
+    """
+    raw = value if isinstance(value, dict) else {}
+    mode = str(raw.get("mode") or LAUNCH_EXEC).strip().lower()
+    args = raw.get("args")
+    if isinstance(args, str):
+        args = args.split()
+    elif not isinstance(args, list):
+        args = []
+    return {
+        "mode": mode if mode in LAUNCH_MODES else LAUNCH_EXEC,
+        "program": str(raw.get("program") or "").strip(),
+        "args": [str(item) for item in args],
+        "command": str(raw.get("command") or "").strip(),
+        "workdir": str(raw.get("workdir") or "").strip(),
+    }
+
+
+# 「改配置」能动的字段白名单。
+# kind 与 name 故意不在里面：改名会让 .server.json 里的 name 与目录名对不上
+# （面板和 CLI 都是先扫目录、再比 name），切换种类等于把实例换成另一个东西，
+# 两者都不该混在「保存设置」里悄悄发生。
+_PATCH_FIELDS = (
+    "mc_version", "jar", "java_path", "min_mem", "max_mem",
+    "extra_jvm_args", "extra_server_args", "process_priority",
+    "launch", "openfrp",
+)
+
+
+def update_instance(server_dir: str, patch: dict) -> dict[str, Any]:
+    """把 patch 里认识的字段合并进 .server.json，返回合并后的完整配置。"""
+    cfg = load_server_config(server_dir)
+    for key in _PATCH_FIELDS:
+        if key in patch and patch[key] is not None:
+            cfg[key] = patch[key]
+    if "launch" in patch:
+        cfg["launch"] = normalize_launch(patch["launch"])
+    save_server_config(cfg, server_dir)
+    return load_server_config(server_dir)
+
+
 def create_instance(
     servers_dir: str,
     name: str,
     *,
+    kind: str = KIND_MINECRAFT,
     mc_version: str = "",
     min_mem: str = "1G",
     max_mem: str = "4G",
     jar_name: Optional[str] = None,
+    launch: Optional[dict] = None,
 ) -> str:
     """新建一个实例目录并写好 .server.json，返回实例目录。
+
+    kind 为 generic 时是一台「通用实例」：不碰 Java 也不碰 jar，启动时按
+    launch 里的配置去跑一个可执行文件或一段命令。
 
     实例名已被占用时抛 CoreError，不自动改名——用户是明确指定了名字的，
     悄悄变成 name_1 只会让人找不到自己的实例。
@@ -95,6 +152,10 @@ def create_instance(
     if os.path.exists(server_dir):
         raise CoreError("web.error.instance_exists", name=cleaned)
 
+    kind = str(kind or KIND_MINECRAFT).strip().lower()
+    if kind not in (KIND_MINECRAFT, KIND_GENERIC):
+        raise CoreError("web.error.bad_instance_kind", kind=kind)
+
     try:
         os.makedirs(server_dir)
     except OSError as e:
@@ -103,6 +164,7 @@ def create_instance(
     save_server_config(
         {
             "name": cleaned,
+            "kind": kind,
             "mc_version": mc_version or "",
             "jar": jar_name or "server.jar",
             "java_path": None,
@@ -111,6 +173,7 @@ def create_instance(
             "extra_jvm_args": [],
             "extra_server_args": [],
             "process_priority": "normal",
+            "launch": normalize_launch(launch),
         },
         server_dir,
     )
@@ -150,8 +213,6 @@ def install_core(server_dir: str, core_type: str, core_version: str,
 def set_instance_core(server_dir: str, jar_name: str,
                       *, mc_version: Optional[str] = None) -> None:
     """把 .server.json 里的 jar / mc_version 更新成刚装好的核心。"""
-    from server_manager import load_server_config
-
     cfg = load_server_config(server_dir)
     cfg["jar"] = jar_name
     if mc_version:
@@ -241,6 +302,8 @@ __all__ = [
     "MAX_NAME_LENGTH",
     "MAX_VERSION_CHOICES",
     "validate_instance_name",
+    "normalize_launch",
+    "update_instance",
     "instance_path",
     "create_instance",
     "install_core",

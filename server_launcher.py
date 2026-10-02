@@ -325,6 +325,57 @@ def start_server_interactive(
 
 
 # ---------------------------------------------------------------------------
+# 通用实例：直接跑一条已经拼好的命令
+# ---------------------------------------------------------------------------
+
+def start_command(
+    cmd: list[str],
+    workdir: str,
+    process_priority: str = "normal",
+    *,
+    interactive: bool = True,
+    title: str = "",
+) -> int:
+    """运行一条已经拼好的命令（通用实例用）。
+
+    与 start_minecraft_server 的区别：不解析 Java、不校验 jar、不插 JVM 参数，
+    命令原样执行。interactive=True 时子进程直接继承 stdin/stdout，等价于在
+    终端里手敲；否则用 PIPE 接管输出，只打印、不接收输入。
+
+    Returns:
+        子进程的退出码
+    """
+    if title:
+        console_title(title)
+    workdir = os.path.abspath(workdir)
+    if not os.path.isdir(workdir):
+        raise FileNotFoundError(t("app.error_workdir_missing", path=workdir))
+
+    if interactive:
+        process = _start_priority_process(cmd, workdir, process_priority)
+        with _sigint_handler(process):
+            try:
+                process.wait()
+            except KeyboardInterrupt:
+                pass
+        return process.returncode
+
+    process = _start_priority_process(
+        cmd, workdir, process_priority,
+        stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+        text=True, encoding="utf-8", bufsize=1,
+    )
+    with _sigint_handler(process):
+        try:
+            for line in process.stdout:
+                print(line, end="")
+        except KeyboardInterrupt:
+            pass
+    process.wait()
+    return process.returncode
+
+
+# ---------------------------------------------------------------------------
 # 公开别名
 # core / web 层需要「拼 JVM 命令」和「按优先级起进程」这两个能力，
 # 但它们不走终端，所以用下面这两个名字而不是下划线开头的私有名。

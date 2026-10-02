@@ -35,13 +35,20 @@ from urllib.parse import parse_qs, urlparse
 
 from config import load_config, save_config
 from core import files as fileops
+from core import frp as frpops
 from core import provision
 from core.errors import CoreError
 from core.runtime import RuntimeManager
 from core.transfer import abort_import
 from i18n import detect_os_language, load_language, t
 from paths import bundled_dir
-from server_manager import ensure_servers_folder, list_servers
+from server_manager import (
+    KIND_GENERIC,
+    KIND_MINECRAFT,
+    LAUNCH_EXEC,
+    ensure_servers_folder,
+    list_servers,
+)
 
 COOKIE_NAME = "mstl_token"
 
@@ -131,6 +138,63 @@ WEB_STRINGS = (
     "web.new.done",
     "web.new.name_placeholder",
     "web.new.optional",
+    # 通用实例
+    "web.new.tab_generic",
+    "web.new.launch_mode",
+    "web.new.launch_exec",
+    "web.new.launch_cmd",
+    "web.new.launch_powershell",
+    "web.new.program",
+    "web.new.program_hint",
+    "web.new.command",
+    "web.new.command_hint",
+    "web.new.args",
+    "web.new.args_hint",
+    "web.new.workdir",
+    "web.new.workdir_hint",
+    # 实例设置
+    "web.settings.title",
+    "web.settings.priority",
+    "web.settings.mc",
+    "web.settings.generic",
+    "web.settings.openfrp",
+    "web.settings.openfrp_hint",
+    "web.settings.token",
+    "web.settings.proxy_id",
+    "web.settings.auto_start",
+    "web.settings.save",
+    "web.settings.saved",
+    "web.settings.kind_locked",
+    # frp 面板
+    "web.frp.title",
+    "web.frp.status",
+    "web.frp.running",
+    "web.frp.stopped",
+    "web.frp.binary_ok",
+    "web.frp.binary_missing",
+    "web.frp.server_addr",
+    "web.frp.server_port",
+    "web.frp.token",
+    "web.frp.save",
+    "web.frp.saved",
+    "web.frp.start",
+    "web.frp.stop",
+    "web.frp.download",
+    "web.frp.downloading",
+    "web.frp.downloaded",
+    "web.frp.proxies",
+    "web.frp.no_proxies",
+    "web.frp.proxy_name",
+    "web.frp.proxy_type",
+    "web.frp.local_ip",
+    "web.frp.local_port",
+    "web.frp.remote_port",
+    "web.frp.domains",
+    "web.frp.add_proxy",
+    "web.frp.remove",
+    "web.frp.confirm_remove",
+    "web.frp.started",
+    "web.frp.stopped_msg",
 )
 
 
@@ -343,6 +407,8 @@ def _make_handler(manager: RuntimeManager, servers_dir: str, token: str,
                 return self._guard(lambda: self._file_download(query))
             if path == "/api/cores":
                 return self._guard(lambda: self._cores(query))
+            if path == "/api/frp":
+                return self._guard(self._frp_state)
             self._json({"ok": False, "message": "not found"}, HTTPStatus.NOT_FOUND)
 
         def do_POST(self) -> None:  # noqa: N802
@@ -388,17 +454,24 @@ def _make_handler(manager: RuntimeManager, servers_dir: str, token: str,
                 name = entry.get("name") or os.path.basename(os.path.normpath(path))
                 row = {
                     "name": name,
+                    "kind": entry.get("kind") or "minecraft",
                     "mc_version": entry.get("mc_version", ""),
                     "jar": entry.get("jar", ""),
                     "min_mem": entry.get("min_mem", ""),
                     "max_mem": entry.get("max_mem", ""),
                     "java_path": entry.get("java_path") or "",
+                    "launch": entry.get("launch") or {},
+                    "process_priority": entry.get("process_priority", "normal"),
+                    "extra_jvm_args": entry.get("extra_jvm_args") or [],
+                    "extra_server_args": entry.get("extra_server_args") or [],
+                    "openfrp": entry.get("openfrp") or {},
                     "workdir": path,
                     "state": "stopped",
                     "exit_code": None,
                     "pid": None,
                     "started_at": None,
                     "java": "",
+                    "program": "",
                     "command": [],
                 }
                 # 跑过的实例，运行时里存着更准的一份快照（真实 java、拼接后的命令、退出码）
@@ -406,7 +479,7 @@ def _make_handler(manager: RuntimeManager, servers_dir: str, token: str,
                 if runtime:
                     row.update({key: runtime[key] for key in (
                         "state", "exit_code", "pid", "started_at", "java",
-                        "workdir", "min_mem", "max_mem", "command")})
+                        "program", "workdir", "min_mem", "max_mem", "command")})
                 instances.append(row)
             self._json({
                 "ok": True,
@@ -528,6 +601,12 @@ def _make_handler(manager: RuntimeManager, servers_dir: str, token: str,
             if path == "/api/instances":
                 return self._create_instance(body)
 
+            if path == "/api/instances/settings":
+                return self._update_instance(body)
+
+            if path.startswith("/api/frp/"):
+                return self._frp_action(path, body)
+
             if path == "/api/instances/import/scan":
                 return self._import_scan(body)
 
@@ -563,8 +642,9 @@ def _make_handler(manager: RuntimeManager, servers_dir: str, token: str,
             })
 
         def _create_instance(self, body: dict) -> None:
-            """新建实例：可以顺带下载一个服务端核心。"""
+            """新建实例：Minecraft 可以顺带下载核心，通用实例只写启动配置。"""
             name = str(body.get("name") or "")
+            kind = str(body.get("kind") or KIND_MINECRAFT).strip().lower()
             core_type = str(body.get("core_type") or "")
             core_version = str(body.get("core_version") or "")
             mc_version = str(body.get("mc_version") or "")
@@ -575,27 +655,130 @@ def _make_handler(manager: RuntimeManager, servers_dir: str, token: str,
 
             server_dir = provision.create_instance(
                 servers_dir, name,
+                kind=kind,
                 mc_version=mc_version,
                 min_mem=str(body.get("min_mem") or "1G"),
                 max_mem=str(body.get("max_mem") or "4G"),
                 # 面板先建实例再把 jar 传上来，所以 jar 名要在这里就写进配置
                 jar_name=str(body.get("jar_name") or "") or None,
+                launch=body.get("launch"),
             )
 
             try:
-                if core_type and core_version:
+                if kind == KIND_GENERIC:
+                    self._require_generic_launch(body.get("launch"))
+                elif core_type and core_version:
                     jar_name = provision.install_core(
                         server_dir, core_type, core_version)
                     provision.set_instance_core(
                         server_dir, jar_name, mc_version=mc_version or None)
             except CoreError:
-                # 核心没装上就留下一个空壳实例，用户还得自己去删，不如回滚
+                # 核心没装上、或启动配置根本没填，留下一个空壳实例只会让用户
+                # 自己去删，不如回滚
                 shutil.rmtree(server_dir, ignore_errors=True)
                 raise
 
             self._json({"ok": True, "name": os.path.basename(server_dir),
                         "message": t("web.new.done",
                                      name=os.path.basename(server_dir))})
+
+        @staticmethod
+        def _require_generic_launch(launch) -> None:
+            """通用实例必须有能跑的东西，否则建出来就是个哑巴实例。"""
+            spec = provision.normalize_launch(launch)
+            if spec["mode"] == LAUNCH_EXEC:
+                if not spec["program"]:
+                    raise CoreError("app.error_program_missing")
+            elif not spec["command"]:
+                raise CoreError("app.error_command_missing")
+
+        def _update_instance(self, body: dict) -> None:
+            """改实例设置：Minecraft 的内存/参数、通用实例的启动配置都走这里。"""
+            server_dir = self._instance_dir(str(body.get("name") or ""))
+            patch: dict[str, Any] = {}
+
+            for key in ("mc_version", "jar", "min_mem", "max_mem",
+                        "process_priority"):
+                if key in body and body[key] is not None:
+                    patch[key] = str(body[key])
+            for key in ("extra_jvm_args", "extra_server_args"):
+                value = body.get(key)
+                if value is None:
+                    continue
+                patch[key] = value if isinstance(value, list) else str(value).split()
+            if isinstance(body.get("launch"), dict):
+                patch["launch"] = body["launch"]
+            if isinstance(body.get("openfrp"), dict):
+                patch["openfrp"] = body["openfrp"]
+
+            # 通用实例不能把启动配置清空，否则要等到下次启动才发现跑不起来
+            entry = next((s for s in list_servers(servers_dir)
+                          if s["_path"] == server_dir), None)
+            if (entry is not None and "launch" in patch
+                    and (entry.get("kind") or KIND_MINECRAFT) == KIND_GENERIC):
+                self._require_generic_launch(patch["launch"])
+
+            cfg = provision.update_instance(server_dir, patch)
+            self._json({"ok": True, "instance": cfg,
+                        "message": t("web.settings.saved")})
+
+        # -- frp 隧道 ------------------------------------------------------
+
+        def _frp_state(self) -> None:
+            self._json({
+                "ok": True,
+                "status": frpops.status(project_dir),
+                "settings": frpops.read_settings(project_dir),
+                "proxies": frpops.list_proxies(project_dir),
+            })
+
+        def _frp_action(self, path: str, body: dict) -> None:
+            if path == "/api/frp/settings":
+                saved = frpops.write_settings(
+                    project_dir,
+                    server_addr=body.get("serverAddr"),
+                    server_port=body.get("serverPort"),
+                    token=body.get("token"),
+                )
+                return self._json({"ok": True, "settings": saved,
+                                   "message": t("web.frp.saved")})
+
+            if path == "/api/frp/proxy":
+                frpops.add_proxy(
+                    project_dir,
+                    name=body.get("name"),
+                    proxy_type=body.get("type"),
+                    local_ip=body.get("localIP"),
+                    local_port=body.get("localPort"),
+                    remote_port=body.get("remotePort"),
+                    custom_domains=body.get("customDomains"),
+                )
+                return self._json({"ok": True,
+                                   "proxies": frpops.list_proxies(project_dir)})
+
+            if path == "/api/frp/proxy/delete":
+                frpops.remove_proxy(project_dir, body.get("index"))
+                return self._json({"ok": True,
+                                   "proxies": frpops.list_proxies(project_dir)})
+
+            if path == "/api/frp/start":
+                result = frpops.start(project_dir)
+                return self._json({"ok": True, "status": frpops.status(project_dir),
+                                   "already_running": result["already_running"],
+                                   "message": t("web.frp.started")})
+
+            if path == "/api/frp/stop":
+                frpops.stop()
+                return self._json({"ok": True, "status": frpops.status(project_dir),
+                                   "message": t("web.frp.stopped_msg")})
+
+            if path == "/api/frp/download":
+                saved_path = frpops.download(project_dir)
+                return self._json({"ok": True, "path": saved_path,
+                                   "status": frpops.status(project_dir),
+                                   "message": t("web.frp.downloaded")})
+
+            self._json({"ok": False, "message": "not found"}, HTTPStatus.NOT_FOUND)
 
         def _import_scan(self, body: dict) -> None:
             zip_path = str(body.get("zip_path") or "").strip().strip('"')

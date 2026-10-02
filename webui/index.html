@@ -149,9 +149,9 @@
          background:#fbfcfd;tab-size:4}
 
   /* ---------------------------------------------------------------- 对话框 */
-  #modal{position:fixed;inset:0;background:rgba(31,36,48,.34);z-index:20;
+  #modal,#setmodal,#frpmodal{position:fixed;inset:0;background:rgba(31,36,48,.34);z-index:20;
          display:flex;align-items:center;justify-content:center;padding:18px}
-  #dialog{background:#fff;border:1px solid var(--line);border-radius:12px;
+  .dialog{background:#fff;border:1px solid var(--line);border-radius:12px;
           box-shadow:0 18px 48px rgba(31,36,48,.24);width:min(640px,100%);
           max-height:100%;display:flex;flex-direction:column;overflow:hidden}
   .dhead{display:flex;align-items:center;gap:8px;padding:12px 16px;
@@ -190,6 +190,7 @@
   <b id="title">MSTL</b>
   <span class="dot" id="conn"></span>
   <span class="sp"></span>
+  <button id="frpbtn">frp</button>
   <button id="newinst">＋</button>
   <button id="refresh">⟳</button>
 </header>
@@ -202,6 +203,7 @@
       <span class="sp"></span>
       <button class="tab" id="tab-console"></button>
       <button class="tab" id="tab-files"></button>
+      <button id="instset">⚙</button>
       <button id="clear"></button>
       <button id="follow"></button>
     </div>
@@ -242,7 +244,7 @@
 </main>
 
 <div id="modal" hidden>
-  <div id="dialog">
+  <div class="dialog">
     <div class="dhead">
       <b id="dtitle"></b>
       <span style="flex:1"></span>
@@ -252,6 +254,7 @@
       <button class="tab on" id="ntab-core"></button>
       <button class="tab" id="ntab-jar"></button>
       <button class="tab" id="ntab-import"></button>
+      <button class="tab" id="ntab-generic"></button>
     </div>
     <div class="dbody">
       <div id="npane-core">
@@ -341,6 +344,254 @@
           <button id="ni-scan"></button>
           <button class="primary" id="ni-import"></button>
         </div>
+      </div>
+
+      <div id="npane-generic" hidden>
+        <div class="drow">
+          <div class="field">
+            <label id="l-gname"></label>
+            <input id="ni-gname" placeholder="">
+          </div>
+          <div class="field">
+            <label id="l-gmode"></label>
+            <select id="ni-gmode">
+              <option value="exec"></option>
+              <option value="cmd"></option>
+              <option value="powershell"></option>
+            </select>
+          </div>
+        </div>
+        <div id="ni-gprog">
+          <div class="drow">
+            <div class="field">
+              <label id="l-gprogram"></label>
+              <input id="ni-gprogram" placeholder="start.bat">
+            </div>
+          </div>
+          <div class="hint" id="ni-gprogram-hint"></div>
+          <div class="drow">
+            <div class="field">
+              <label id="l-gargs"></label>
+              <input id="ni-gargs" placeholder="--port 8080">
+            </div>
+          </div>
+          <div class="hint" id="ni-gargs-hint"></div>
+        </div>
+        <div id="ni-gcmd" hidden>
+          <div class="drow">
+            <div class="field">
+              <label id="l-gcommand"></label>
+              <input id="ni-gcommand" placeholder="echo hello">
+            </div>
+          </div>
+          <div class="hint" id="ni-gcommand-hint"></div>
+        </div>
+        <div class="drow">
+          <div class="field">
+            <label id="l-gworkdir"></label>
+            <input id="ni-gworkdir">
+          </div>
+        </div>
+        <div class="hint" id="ni-gworkdir-hint"></div>
+        <div class="dactions">
+          <button class="primary" id="ni-gcreate"></button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="setmodal" hidden>
+  <div class="dialog">
+    <div class="dhead">
+      <b id="settitle"></b>
+      <span style="flex:1"></span>
+      <button id="setclose">✕</button>
+    </div>
+    <div class="dbody">
+      <div class="hint" id="setkind"></div>
+      <div class="drow">
+        <div class="field">
+          <label id="l-setprio"></label>
+          <select id="setprio">
+            <option value="normal">normal</option>
+            <option value="below_normal">below_normal</option>
+            <option value="low">low</option>
+          </select>
+        </div>
+      </div>
+      <div id="set-mc">
+        <div class="drow">
+          <div class="field">
+            <label id="l-setmcver"></label>
+            <input id="setmcver">
+          </div>
+          <div class="field">
+            <label id="l-setjar"></label>
+            <input id="setjar">
+          </div>
+        </div>
+        <div class="drow">
+          <div class="field">
+            <label id="l-setminmem"></label>
+            <input id="setminmem">
+          </div>
+          <div class="field">
+            <label id="l-setmaxmem"></label>
+            <input id="setmaxmem">
+          </div>
+        </div>
+        <div class="drow">
+          <div class="field">
+            <label id="l-setjvm"></label>
+            <input id="setjvm" placeholder="-XX:+UseG1GC">
+          </div>
+        </div>
+        <div class="drow">
+          <div class="field">
+            <label id="l-setsrv"></label>
+            <input id="setsrv" placeholder="--forceUpgrade">
+          </div>
+        </div>
+      </div>
+      <div id="set-generic" hidden>
+        <div class="drow">
+          <div class="field">
+            <label id="l-setgmode"></label>
+            <select id="setgmode">
+              <option value="exec"></option>
+              <option value="cmd"></option>
+              <option value="powershell"></option>
+            </select>
+          </div>
+        </div>
+        <div id="setg-prog">
+          <div class="drow">
+            <div class="field">
+              <label id="l-setgprogram"></label>
+              <input id="setgprogram">
+            </div>
+          </div>
+          <div class="drow">
+            <div class="field">
+              <label id="l-setgargs"></label>
+              <input id="setgargs">
+            </div>
+          </div>
+        </div>
+        <div id="setg-cmd" hidden>
+          <div class="drow">
+            <div class="field">
+              <label id="l-setgcommand"></label>
+              <input id="setgcommand">
+            </div>
+          </div>
+        </div>
+        <div class="drow">
+          <div class="field">
+            <label id="l-setgworkdir"></label>
+            <input id="setgworkdir">
+          </div>
+        </div>
+      </div>
+      <div class="drow" style="margin-top:8px">
+        <b id="l-setopenfrp" style="font-size:13px"></b>
+      </div>
+      <div class="hint" id="set-openfrp-hint"></div>
+      <div class="drow">
+        <div class="field">
+          <label id="l-settoken"></label>
+          <input id="settoken" autocomplete="off">
+        </div>
+        <div class="field">
+          <label id="l-setproxyid"></label>
+          <input id="setproxyid" placeholder="0">
+        </div>
+      </div>
+      <div class="drow">
+        <label style="display:flex;gap:6px;align-items:center;font-size:13px">
+          <input type="checkbox" id="setautostart" style="min-width:auto">
+          <span id="l-setauto"></span>
+        </label>
+      </div>
+      <div class="dactions">
+        <button class="primary" id="setsave"></button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="frpmodal" hidden>
+  <div class="dialog">
+    <div class="dhead">
+      <b id="frptitle"></b>
+      <span style="flex:1"></span>
+      <button id="frpclose">✕</button>
+    </div>
+    <div class="dbody">
+      <div class="drow" style="align-items:center">
+        <span class="hint" id="frpstatus" style="margin:0"></span>
+        <span style="flex:1"></span>
+        <button id="frpstart"></button>
+        <button id="frpstop"></button>
+        <button id="frpdownload"></button>
+      </div>
+      <div class="drow" style="margin-top:10px">
+        <div class="field">
+          <label id="l-frpaddr"></label>
+          <input id="frpaddr" placeholder="frp.example.com">
+        </div>
+        <div class="field">
+          <label id="l-frpport"></label>
+          <input id="frpport" placeholder="7000">
+        </div>
+        <div class="field">
+          <label id="l-frptoken"></label>
+          <input id="frptoken" autocomplete="off">
+        </div>
+      </div>
+      <div class="dactions" style="justify-content:flex-start">
+        <button id="frpsave"></button>
+      </div>
+      <div class="drow" style="margin-top:10px">
+        <b id="l-frpproxies" style="font-size:13px"></b>
+      </div>
+      <div id="frpproxies"></div>
+      <div class="drow" style="margin-top:10px">
+        <div class="field">
+          <label id="l-frpname"></label>
+          <input id="frpname" placeholder="mc">
+        </div>
+        <div class="field">
+          <label id="l-frptype"></label>
+          <select id="frptype">
+            <option value="tcp">tcp</option>
+            <option value="udp">udp</option>
+            <option value="http">http</option>
+            <option value="https">https</option>
+          </select>
+        </div>
+      </div>
+      <div class="drow">
+        <div class="field">
+          <label id="l-frplocalip"></label>
+          <input id="frplocalip" value="127.0.0.1">
+        </div>
+        <div class="field">
+          <label id="l-frplocalport"></label>
+          <input id="frplocalport" placeholder="25565">
+        </div>
+        <div class="field" id="frp-remote-wrap">
+          <label id="l-fprremote"></label>
+          <input id="frpremoteport" placeholder="25566">
+        </div>
+        <div class="field" id="frp-domain-wrap" hidden>
+          <label id="l-frpdomains"></label>
+          <input id="frpdomains" placeholder="mc.example.com">
+        </div>
+      </div>
+      <div class="dactions" style="justify-content:flex-start">
+        <button class="primary" id="frpadd"></button>
       </div>
     </div>
   </div>
@@ -531,6 +782,67 @@ function applyStrings() {
   $("ni-name").placeholder = strings["web.new.name_placeholder"] || "";
   $("ni-jarname").placeholder = strings["web.new.name_placeholder"] || "";
   $("ni-mcver").placeholder = strings["web.new.optional"] || "";
+
+  // 通用实例
+  $("ntab-generic").textContent = strings["web.new.tab_generic"] || "Generic";
+  $("l-gname").textContent = strings["web.new.name"] || "";
+  $("l-gmode").textContent = strings["web.new.launch_mode"] || "";
+  $("ni-gmode").options[0].textContent = strings["web.new.launch_exec"] || "exec";
+  $("ni-gmode").options[1].textContent = strings["web.new.launch_cmd"] || "cmd";
+  $("ni-gmode").options[2].textContent = strings["web.new.launch_powershell"] || "powershell";
+  $("l-gprogram").textContent = strings["web.new.program"] || "";
+  $("ni-gprogram-hint").textContent = strings["web.new.program_hint"] || "";
+  $("l-gargs").textContent = strings["web.new.args"] || "";
+  $("ni-gargs-hint").textContent = strings["web.new.args_hint"] || "";
+  $("l-gcommand").textContent = strings["web.new.command"] || "";
+  $("ni-gcommand-hint").textContent = strings["web.new.command_hint"] || "";
+  $("l-gworkdir").textContent = strings["web.new.workdir"] || "";
+  $("ni-gworkdir-hint").textContent = strings["web.new.workdir_hint"] || "";
+  $("ni-gcreate").textContent = strings["web.new.create"] || "";
+  $("ni-gname").placeholder = strings["web.new.name_placeholder"] || "";
+
+  // 实例设置
+  $("instset").title = strings["web.settings.title"] || "Settings";
+  $("l-setprio").textContent = strings["web.settings.priority"] || "";
+  $("l-setmcver").textContent = strings["web.new.mc_version"] || "";
+  $("l-setjar").textContent = strings["web.settings.mc"] ? "Jar" : "Jar";
+  $("l-setminmem").textContent = strings["web.new.min_mem"] || "";
+  $("l-setmaxmem").textContent = strings["web.new.max_mem"] || "";
+  $("l-setjvm").textContent = strings["web.settings.mc"] || "";
+  $("l-setsrv").textContent = strings["web.settings.mc"] || "";
+  $("l-setgmode").textContent = strings["web.new.launch_mode"] || "";
+  $("setgmode").options[0].textContent = strings["web.new.launch_exec"] || "exec";
+  $("setgmode").options[1].textContent = strings["web.new.launch_cmd"] || "cmd";
+  $("setgmode").options[2].textContent = strings["web.new.launch_powershell"] || "powershell";
+  $("l-setgprogram").textContent = strings["web.new.program"] || "";
+  $("l-setgargs").textContent = strings["web.new.args"] || "";
+  $("l-setgcommand").textContent = strings["web.new.command"] || "";
+  $("l-setgworkdir").textContent = strings["web.new.workdir"] || "";
+  $("l-setopenfrp").textContent = strings["web.settings.openfrp"] || "";
+  $("set-openfrp-hint").textContent = strings["web.settings.openfrp_hint"] || "";
+  $("l-settoken").textContent = strings["web.settings.token"] || "";
+  $("l-setproxyid").textContent = strings["web.settings.proxy_id"] || "";
+  $("l-setauto").textContent = strings["web.settings.auto_start"] || "";
+  $("setsave").textContent = strings["web.settings.save"] || "";
+
+  // frp 面板
+  $("frpbtn").title = strings["web.frp.title"] || "frp";
+  $("frptitle").textContent = strings["web.frp.title"] || "frp";
+  $("frpstart").textContent = strings["web.frp.start"] || "";
+  $("frpstop").textContent = strings["web.frp.stop"] || "";
+  $("frpdownload").textContent = strings["web.frp.download"] || "";
+  $("l-frpaddr").textContent = strings["web.frp.server_addr"] || "";
+  $("l-frpport").textContent = strings["web.frp.server_port"] || "";
+  $("l-frptoken").textContent = strings["web.frp.token"] || "";
+  $("frpsave").textContent = strings["web.frp.save"] || "";
+  $("l-frpproxies").textContent = strings["web.frp.proxies"] || "";
+  $("l-frpname").textContent = strings["web.frp.proxy_name"] || "";
+  $("l-frptype").textContent = strings["web.frp.proxy_type"] || "";
+  $("l-frplocalip").textContent = strings["web.frp.local_ip"] || "";
+  $("l-frplocalport").textContent = strings["web.frp.local_port"] || "";
+  $("l-fprremote").textContent = strings["web.frp.remote_port"] || "";
+  $("l-frpdomains").textContent = strings["web.frp.domains"] || "";
+  $("frpadd").textContent = strings["web.frp.add_proxy"] || "";
 }
 
 function stateLabel(state) {
@@ -545,12 +857,16 @@ function render() {
   }
   instances.forEach(item => {
     const state = item.state || "stopped";
+    const generic = (item.kind || "minecraft") === "generic";
+    const sub = generic
+      ? (strings["web.new.tab_generic"] || "generic")
+      : (item.mc_version || "?") + " · " + (item.jar || "?");
     const el = document.createElement("div");
     el.className = "item" + (item.name === selected ? " sel" : "");
     el.innerHTML =
       '<div class="row"><span class="name">' + esc(item.name) + "</span>" +
       '<span class="badge ' + esc(state) + '">' + esc(stateLabel(state)) + "</span></div>" +
-      '<div class="meta">' + esc(item.mc_version || "?") + " · " + esc(item.jar || "?") + "</div>" +
+      '<div class="meta">' + esc(sub) + "</div>" +
       '<div class="row" style="margin-top:8px">' +
       '<button data-act="start"' + (state !== "stopped" ? " disabled" : "") + ">" +
       esc(strings["web.panel.start"] || "Start") + "</button>" +
@@ -577,6 +893,7 @@ function render() {
   $("cur").textContent = cur ? cur.name : "";
   $("curstate").textContent = cur ? stateLabel(st) : "";
   $("curstate").className = "badge " + st;
+  $("instset").disabled = !cur;
 }
 
 /* ---------------------------------------------------------------- 详情条 */
@@ -588,7 +905,9 @@ function renderDetails() {
   if (!item) return;
 
   const chips = [];
-  if (item.min_mem || item.max_mem) {
+  const generic = (item.kind || "minecraft") === "generic";
+  // 通用实例没有内存与 Java 的概念，别摆一排空占位
+  if (!generic && (item.min_mem || item.max_mem)) {
     chips.push({ text: fmt(strings["web.detail.memory"], { min: item.min_mem || "?", max: item.max_mem || "?" }) });
   }
   if (item.state === "running" && item.pid) {
@@ -596,7 +915,17 @@ function renderDetails() {
   } else if (item.exit_code !== null && item.exit_code !== undefined) {
     chips.push({ text: fmt(strings["web.detail.exit_code"], { code: item.exit_code }) });
   }
-  if (item.java) {
+  if (generic) {
+    const launch = item.launch || {};
+    const modeLabel = { exec: strings["web.new.launch_exec"],
+                        cmd: strings["web.new.launch_cmd"],
+                        powershell: strings["web.new.launch_powershell"] }[launch.mode || "exec"]
+                      || (launch.mode || "exec");
+    chips.push({ text: strings["web.new.tab_generic"] + ": " + modeLabel });
+    const target = (launch.mode || "exec") === "exec"
+      ? (launch.program || "") : (launch.command || "");
+    if (target) chips.push({ text: target, title: target });
+  } else if (item.java) {
     chips.push({ text: "Java " + baseName(item.java), title: item.java });
   }
   if (item.workdir) {
@@ -1035,7 +1364,8 @@ let coresLoaded = false;
 let importPlan = null;
 
 function newTab(name) {
-  [["core", "npane-core"], ["jar", "npane-jar"], ["import", "npane-import"]]
+  [["core", "npane-core"], ["jar", "npane-jar"],
+   ["import", "npane-import"], ["generic", "npane-generic"]]
     .forEach(([key, id]) => {
       $(id).hidden = key !== name;
       $("ntab-" + key).className = "tab" + (key === name ? " on" : "");
@@ -1050,6 +1380,13 @@ function openNewInstance() {
   $("ni-zip").value = "";
   $("ni-jarfile").value = "";
   $("ni-importjar").innerHTML = "";
+  $("ni-gname").value = "";
+  $("ni-gprogram").value = "";
+  $("ni-gargs").value = "";
+  $("ni-gcommand").value = "";
+  $("ni-gworkdir").value = "";
+  $("ni-gmode").value = "exec";
+  genericModeToggle();
   importPlan = null;
   newTab("core");
   if (!coresLoaded) {
@@ -1238,6 +1575,322 @@ async function commitImport() {
   }
 }
 
+/* ------------------------------------------------------------ 通用实例创建 */
+
+function genericModeToggle() {
+  const mode = $("ni-gmode").value;
+  const isExec = mode === "exec";
+  $("ni-gprog").hidden = !isExec;
+  $("ni-gcmd").hidden = isExec;
+}
+
+async function createGeneric() {
+  const name = $("ni-gname").value.trim();
+  if (!needName(name)) return;
+  const mode = $("ni-gmode").value;
+  const launch = {
+    mode: mode,
+    program: $("ni-gprogram").value.trim(),
+    args: $("ni-gargs").value.trim().split(/\s+/).filter(Boolean),
+    command: $("ni-gcommand").value.trim(),
+    workdir: $("ni-gworkdir").value.trim()
+  };
+  if (mode === "exec" && !launch.program) {
+    fail(new Error(strings["web.new.program"] || "program required"));
+    return;
+  }
+  if (mode !== "exec" && !launch.command) {
+    fail(new Error(strings["web.new.command"] || "command required"));
+    return;
+  }
+  toast(strings["web.new.creating"] || "");
+  try {
+    const data = await apiOk("/api/instances", { name: name, kind: "generic", launch: launch });
+    await afterCreate(data);
+  } catch (err) {
+    fail(err);
+  }
+}
+
+/* -------------------------------------------------------------- 实例设置 */
+
+function setModeToggle() {
+  const isExec = $("setgmode").value === "exec";
+  $("setg-prog").hidden = !isExec;
+  $("setg-cmd").hidden = isExec;
+}
+
+function openSettings() {
+  const item = instances.find(x => x.name === selected);
+  if (!item) return;
+  const generic = (item.kind || "minecraft") === "generic";
+
+  $("settitle").textContent = strings["web.settings.title"] || "Settings";
+  $("setkind").textContent = item.name + " · " +
+    (generic ? (strings["web.new.tab_generic"] || "generic")
+             : "Minecraft") + " — " +
+    (strings["web.settings.kind_locked"] || "");
+  $("setprio").value = item.process_priority || "normal";
+  $("set-mc").hidden = generic;
+  $("set-generic").hidden = !generic;
+
+  if (generic) {
+    const launch = item.launch || {};
+    $("setgmode").value = launch.mode || "exec";
+    $("setgprogram").value = launch.program || "";
+    $("setgargs").value = (launch.args || []).join(" ");
+    $("setgcommand").value = launch.command || "";
+    $("setgworkdir").value = launch.workdir || "";
+    setModeToggle();
+  } else {
+    $("setmcver").value = item.mc_version || "";
+    $("setjar").value = item.jar || "";
+    $("setminmem").value = item.min_mem || "1G";
+    $("setmaxmem").value = item.max_mem || "4G";
+    $("setjvm").value = (item.extra_jvm_args || []).join(" ");
+    $("setsrv").value = (item.extra_server_args || []).join(" ");
+  }
+
+  const of = item.openfrp || {};
+  $("settoken").value = of.token || "";
+  $("setproxyid").value = String(of.proxy_id || 0);
+  $("setautostart").checked = !!of.auto_start;
+
+  $("setmodal").hidden = false;
+}
+
+function closeSettings() {
+  $("setmodal").hidden = true;
+}
+
+async function saveSettings() {
+  if (!selected) return;
+  const item = instances.find(x => x.name === selected);
+  if (!item) return;
+  const generic = (item.kind || "minecraft") === "generic";
+
+  const body = {
+    name: selected,
+    process_priority: $("setprio").value,
+    openfrp: {
+      token: $("settoken").value.trim(),
+      proxy_id: parseInt($("setproxyid").value, 10) || 0,
+      auto_start: $("setautostart").checked
+    }
+  };
+  if (generic) {
+    body.launch = {
+      mode: $("setgmode").value,
+      program: $("setgprogram").value.trim(),
+      args: $("setgargs").value.trim().split(/\s+/).filter(Boolean),
+      command: $("setgcommand").value.trim(),
+      workdir: $("setgworkdir").value.trim()
+    };
+    if ($("setgmode").value === "exec" && !body.launch.program) {
+      fail(new Error(strings["web.new.program"] || "program required"));
+      return;
+    }
+    if ($("setgmode").value !== "exec" && !body.launch.command) {
+      fail(new Error(strings["web.new.command"] || "command required"));
+      return;
+    }
+  } else {
+    body.mc_version = $("setmcver").value.trim();
+    body.jar = $("setjar").value.trim() || "server.jar";
+    body.min_mem = $("setminmem").value.trim() || "1G";
+    body.max_mem = $("setmaxmem").value.trim() || "4G";
+    body.extra_jvm_args = $("setjvm").value.trim().split(/\s+/).filter(Boolean);
+    body.extra_server_args = $("setsrv").value.trim().split(/\s+/).filter(Boolean);
+  }
+
+  try {
+    const data = await apiOk("/api/instances/settings", body);
+    toast(data.message || strings["web.settings.saved"] || "");
+    closeSettings();
+    await refresh();
+  } catch (err) {
+    fail(err);
+  }
+}
+
+/* ---------------------------------------------------------------- frp 面板 */
+
+function frpToggleTypeFields() {
+  const ptype = $("frptype").value;
+  const needsPort = ptype === "tcp" || ptype === "udp";
+  $("frp-remote-wrap").hidden = !needsPort;
+  $("frp-domain-wrap").hidden = needsPort;
+}
+
+function renderFrp(data) {
+  const status = data.status || {};
+  const settings = data.settings || {};
+  const runText = status.running ? (strings["web.frp.running"] || "running")
+                                 : (strings["web.frp.stopped"] || "stopped");
+  const binText = status.binary ? (strings["web.frp.binary_ok"] || "ready")
+                                : (strings["web.frp.binary_missing"] || "missing");
+  $("frpstatus").textContent = (strings["web.frp.status"] || "Status") +
+    ": " + runText + " · " + binText;
+  $("frpstart").disabled = !!status.running;
+  $("frpstop").disabled = !status.running;
+
+  // 正在输入时不要用服务端值把输入框冲掉
+  if (document.activeElement !== $("frpaddr")) $("frpaddr").value = settings.serverAddr || "";
+  if (document.activeElement !== $("frpport")) $("frpport").value = String(settings.serverPort || 7000);
+  if (document.activeElement !== $("frptoken")) $("frptoken").value = settings.token || "";
+
+  const box = $("frpproxies");
+  box.innerHTML = "";
+  const proxies = data.proxies || [];
+  if (!proxies.length) {
+    const empty = document.createElement("div");
+    empty.className = "hint";
+    empty.textContent = strings["web.frp.no_proxies"] || "";
+    box.appendChild(empty);
+    return;
+  }
+  const table = document.createElement("table");
+  table.className = "flist";
+  const head = document.createElement("thead");
+  const hr = document.createElement("tr");
+  [strings["web.frp.proxy_name"], strings["web.frp.proxy_type"],
+   strings["web.frp.local_ip"], strings["web.frp.local_port"],
+   strings["web.frp.remote_port"], ""].forEach((label) => {
+    const th = document.createElement("th");
+    th.textContent = label || "";
+    hr.appendChild(th);
+  });
+  head.appendChild(hr);
+  table.appendChild(head);
+  const tbody = document.createElement("tbody");
+  proxies.forEach((p) => {
+    const tr = document.createElement("tr");
+    const cells = [
+      p.name, p.type, p.localIP, String(p.localPort || ""),
+      p.remotePort ? String(p.remotePort) : (p.customDomains || []).join(", ")
+    ];
+    cells.forEach((text) => {
+      const td = document.createElement("td");
+      td.textContent = text;
+      tr.appendChild(td);
+    });
+    const opsTd = document.createElement("td");
+    const ops = document.createElement("div");
+    ops.className = "fops";
+    ops.appendChild(opButton("✕", strings["web.frp.remove"],
+      () => frpRemoveProxy(p.index, p.name)));
+    opsTd.appendChild(ops);
+    tr.appendChild(opsTd);
+    tbody.appendChild(tr);
+  });
+  table.appendChild(tbody);
+  box.appendChild(table);
+}
+
+async function loadFrp() {
+  try {
+    renderFrp(await apiOk("/api/frp"));
+  } catch (err) {
+    fail(err);
+  }
+}
+
+function openFrp() {
+  $("frpmodal").hidden = false;
+  frpToggleTypeFields();
+  loadFrp();
+}
+
+function closeFrp() {
+  $("frpmodal").hidden = true;
+}
+
+async function frpSave() {
+  try {
+    const data = await apiOk("/api/frp/settings", {
+      serverAddr: $("frpaddr").value.trim(),
+      serverPort: parseInt($("frpport").value, 10) || 7000,
+      token: $("frptoken").value.trim()
+    });
+    toast(data.message || "");
+    loadFrp();
+  } catch (err) {
+    fail(err);
+  }
+}
+
+async function frpStart() {
+  try {
+    const data = await apiOk("/api/frp/start", {});
+    toast(data.message || "");
+    renderFrp({ status: data.status, settings: {}, proxies: [] });
+    loadFrp();
+  } catch (err) {
+    fail(err);
+  }
+}
+
+async function frpStop() {
+  try {
+    const data = await apiOk("/api/frp/stop", {});
+    toast(data.message || "");
+    loadFrp();
+  } catch (err) {
+    fail(err);
+  }
+}
+
+async function frpDownload() {
+  toast(strings["web.frp.downloading"] || "");
+  try {
+    const data = await apiOk("/api/frp/download", {});
+    toast(data.message || "");
+    loadFrp();
+  } catch (err) {
+    fail(err);
+  }
+}
+
+async function frpAddProxy() {
+  const ptype = $("frptype").value;
+  const body = {
+    name: $("frpname").value.trim(),
+    type: ptype,
+    localIP: $("frplocalip").value.trim() || "127.0.0.1",
+    localPort: parseInt($("frplocalport").value, 10) || 0
+  };
+  if (ptype === "tcp" || ptype === "udp") {
+    body.remotePort = parseInt($("frpremoteport").value, 10) || 0;
+  } else {
+    body.customDomains = $("frpdomains").value.trim();
+  }
+  try {
+    const data = await apiOk("/api/frp/proxy", body);
+    $("frpname").value = "";
+    $("frplocalport").value = "";
+    $("frpremoteport").value = "";
+    $("frpdomains").value = "";
+    renderFrp({ status: { running: !$("frpstop").disabled, binary: true },
+                settings: {}, proxies: data.proxies || [] });
+    loadFrp();
+  } catch (err) {
+    fail(err);
+  }
+}
+
+async function frpRemoveProxy(index, name) {
+  const ask = fmt(strings["web.frp.confirm_remove"] || "Remove {name}?", { name: name });
+  if (!window.confirm(ask)) return;
+  try {
+    const data = await apiOk("/api/frp/proxy/delete", { index: index });
+    renderFrp({ status: { running: !$("frpstop").disabled, binary: true },
+                settings: {}, proxies: data.proxies || [] });
+    loadFrp();
+  } catch (err) {
+    fail(err);
+  }
+}
+
 /* ---------------------------------------------------------------- 绑定 */
 
 $("send").onclick = () => sendCommand(null);
@@ -1269,20 +1922,45 @@ $("dclose").onclick = closeNewInstance;
 $("ntab-core").onclick = () => newTab("core");
 $("ntab-jar").onclick = () => newTab("jar");
 $("ntab-import").onclick = () => newTab("import");
+$("ntab-generic").onclick = () => newTab("generic");
 $("ni-core").onchange = loadCoreVersions;
 $("ni-create").onclick = createWithCore;
 $("ni-blank").onclick = createBlank;
 $("ni-jar-create").onclick = createWithJar;
 $("ni-scan").onclick = scanArchive;
 $("ni-import").onclick = commitImport;
+$("ni-gmode").onchange = genericModeToggle;
+$("ni-gcreate").onclick = createGeneric;
 
-// 点遮罩空白处关掉对话框；Esc 关掉对话框 / 编辑器
+$("instset").onclick = openSettings;
+$("setclose").onclick = closeSettings;
+$("setgmode").onchange = setModeToggle;
+$("setsave").onclick = saveSettings;
+
+$("frpbtn").onclick = openFrp;
+$("frpclose").onclick = closeFrp;
+$("frpsave").onclick = frpSave;
+$("frpstart").onclick = frpStart;
+$("frpstop").onclick = frpStop;
+$("frpdownload").onclick = frpDownload;
+$("frptype").onchange = frpToggleTypeFields;
+$("frpadd").onclick = frpAddProxy;
+
+// 点遮罩空白处关掉对话框；Esc 关掉最上层那个
 $("modal").addEventListener("click", (ev) => {
   if (ev.target === $("modal")) closeNewInstance();
+});
+$("setmodal").addEventListener("click", (ev) => {
+  if (ev.target === $("setmodal")) closeSettings();
+});
+$("frpmodal").addEventListener("click", (ev) => {
+  if (ev.target === $("frpmodal")) closeFrp();
 });
 document.addEventListener("keydown", (ev) => {
   if (ev.key !== "Escape") return;
   if (!$("editor").hidden) closeEditor();
+  else if (!$("frpmodal").hidden) closeFrp();
+  else if (!$("setmodal").hidden) closeSettings();
   else if (!$("modal").hidden) closeNewInstance();
 });
 

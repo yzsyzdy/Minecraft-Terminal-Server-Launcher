@@ -14,9 +14,31 @@ import json
 import glob
 from typing import Any
 
+# 实例种类。minecraft 走原来的「解析 Java → 拼 JVM 命令」，generic 只认下面
+# 那份启动配置，不碰 Java 也不碰 jar。缺省按 minecraft 处理，旧 .server.json
+# 不需要改。
+KIND_MINECRAFT = "minecraft"
+KIND_GENERIC = "generic"
+INSTANCE_KINDS = (KIND_MINECRAFT, KIND_GENERIC)
+
+# 通用实例的启动方式
+LAUNCH_EXEC = "exec"          # 直接运行一个可执行文件 + 参数
+LAUNCH_CMD = "cmd"            # 交给 cmd.exe /c
+LAUNCH_POWERSHELL = "powershell"  # 交给 powershell -Command
+LAUNCH_MODES = (LAUNCH_EXEC, LAUNCH_CMD, LAUNCH_POWERSHELL)
+
+DEFAULT_GENERIC_LAUNCH: dict[str, Any] = {
+    "mode": LAUNCH_EXEC,
+    "program": "",   # mode=exec：可执行文件路径，相对路径按实例目录算
+    "args": [],      # mode=exec：参数，一项一个，不做再切分
+    "command": "",   # mode=cmd / powershell：要执行的命令原文
+    "workdir": "",   # 工作目录，相对实例目录；留空即实例目录
+}
+
 
 DEFAULT_SERVER_CONFIG: dict[str, Any] = {
     "name": "",
+    "kind": KIND_MINECRAFT,
     "mc_version": "",
     "jar": "server.jar",
     "java_path": None,
@@ -25,6 +47,7 @@ DEFAULT_SERVER_CONFIG: dict[str, Any] = {
     "extra_jvm_args": [],
     "extra_server_args": [],
     "process_priority": "normal",
+    "launch": copy.deepcopy(DEFAULT_GENERIC_LAUNCH),
     "openfrp": {
         "token": "",
         "proxy_id": 0,
@@ -62,6 +85,28 @@ def _normalize_server_config(cfg: dict[str, Any]) -> dict[str, Any]:
             cfg[key] = [str(item) for item in value]
         else:
             cfg[key] = []
+
+    kind = str(cfg.get("kind") or KIND_MINECRAFT).strip().lower()
+    cfg["kind"] = kind if kind in INSTANCE_KINDS else KIND_MINECRAFT
+
+    launch = cfg.get("launch")
+    if not isinstance(launch, dict):
+        launch = {}
+    mode = str(launch.get("mode") or LAUNCH_EXEC).strip().lower()
+    args = launch.get("args")
+    if isinstance(args, str):
+        # 手改 JSON 时容易把参数写成一行字符串；这里按空白切开，
+        # 但不像 extra_jvm_args 那样静默拆字符——args 本来就该是列表
+        args = args.split()
+    elif not isinstance(args, list):
+        args = []
+    cfg["launch"] = {
+        "mode": mode if mode in LAUNCH_MODES else LAUNCH_EXEC,
+        "program": str(launch.get("program") or ""),
+        "args": [str(item) for item in args],
+        "command": str(launch.get("command") or ""),
+        "workdir": str(launch.get("workdir") or ""),
+    }
 
     openfrp = cfg.get("openfrp")
     if not isinstance(openfrp, dict):
@@ -167,8 +212,12 @@ _JAR_HINTS: dict[str, str] = {
 def classify_server_type(server_cfg: dict, server_dir: str) -> str:
     """识别服务端类型。返回其中之一：
 
-    "plugin", "mod", "hybrid", "vanilla", "proxy", "bedrock", "unknown"
+    "plugin", "mod", "hybrid", "vanilla", "proxy", "bedrock", "generic", "unknown"
     """
+    # 通用实例不看名字也不看 jar：它根本不是 Minecraft 服务端
+    if (server_cfg.get("kind") or KIND_MINECRAFT) == KIND_GENERIC:
+        return "generic"
+
     name = (server_cfg.get("name") or "").lower()
     jar = (server_cfg.get("jar") or "").lower()
 

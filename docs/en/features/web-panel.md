@@ -15,9 +15,11 @@ The panel revolves around one loop — see instances → start → watch the con
 - **Send commands**: whatever you type in the box goes straight to the server process, equivalent to the interactive console in the terminal. There are also one-click `list` / `save-all` / `help` chips, while `say` just fills in the prefix
 - **Console controls**: clear, toggle auto-scroll, colour `WARN` and `ERROR` separately, and pause following automatically when you scroll up
 - **File manager**: browse an instance's tree and edit text files such as `server.properties` in place; create files and folders, rename, delete, upload, download
-- **New instance**: download a server core from the MSL mirror, use a local jar, or import an existing server zip archive
+- **New instance**: download a server core from the MSL mirror, use a local jar, import an existing server zip archive, or create a **generic instance**
+- **Instance settings**: memory, extra JVM arguments, process priority, a generic instance's launch spec, and the OpenFrp tunnel binding
+- **frp tunneling**: edit `frpc.toml`, add and remove tunnels, start and stop frpc, download or update the frpc binary — all from the panel
 
-The console and the file manager are two tabs of the right-hand pane; switching tabs does not drop the SSE connection.
+The console and the file manager are two tabs of the right-hand pane; switching tabs does not drop the SSE connection. Instance settings (`⚙`) and frp (`frp` in the top bar) are separate dialogs.
 
 ## File manager
 
@@ -45,7 +47,44 @@ The `＋` in the top bar opens a dialog with one tab per approach:
 
 **Import archive** — give a zip path **on the machine running the panel** (not an upload from the browser), press *Scan archive* to list the candidate core jars inside, pick one, then press *Import*. Scanning and committing are two separate steps, mirroring `plan_import` / `commit_import` in `core/`; asking the user when there is more than one candidate is the interface layer's job.
 
+**Generic instance** — see the next section. It does not run Minecraft; it runs a program or command of your choosing.
+
 Instance name rules: non-empty, at most 64 characters, no `\ / : * ? " < > |`, and not a Windows reserved device name (`con`, `nul`, …). A duplicate name is an error rather than a silent rename to `name_1` — you chose the name, and renaming it would only make your instance harder to find.
+
+## Generic instances
+
+Besides Minecraft servers, MSTL can manage **any long-running program or command** as an instance: same start/stop, same live console, same log file, same ability to send it input, same optional tunnel. The only difference is that starting it does no Java resolution and no jar check. The terminal menu has the same entry point (`[3] New instance`).
+
+An instance's `kind` is either `minecraft` (the default, the original Java + jar path) or `generic`. The `launch` block in `.server.json` describes how a generic instance starts:
+
+| Launch mode | Behaviour |
+|---|---|
+| `exec` | Runs `program` (an executable) directly with the arguments from the `args` array, **without a shell** — so `&&` and pipes are *not* interpreted |
+| `cmd` | `cmd.exe /c "<command>"` — the whole string goes to cmd, so pipes, redirection and `&&` work |
+| `powershell` | `powershell -NoProfile -ExecutionPolicy Bypass -Command "<command>"` (`pwsh` elsewhere) |
+
+`program` accepts both relative paths (resolved inside the instance directory) and absolute ones. `workdir` is the working directory, also relative to the instance directory when not absolute; leaving it empty means the instance directory itself.
+
+Some real uses: dropping in your own Python or batch service script; running a custom command line such as `java -jar xxx.jar` through `cmd`; running a probe or scheduled task through `powershell`.
+
+**Mind the trust boundary.** In `cmd` / `powershell` mode the configured string is handed to the shell verbatim — that is the feature, not an oversight. Its trust boundary is the same one as "the panel can send console commands" and "the panel can edit `.server.json`": anyone who can change this config could already run things on this machine.
+
+There are two ways to change the launch spec: select the instance and press `⚙` in the pane header, or edit `.server.json` directly through the file manager (changes take effect on the next start). An instance's `kind` cannot be changed after creation — switching kinds would turn it into a different thing, and that should not happen silently inside "save settings".
+
+## frp tunneling
+
+The `frp` button in the top bar opens the tunnel panel, backed by `frp/frpc.toml`:
+
+- **Status**: whether frpc is running and whether the binary has been downloaded
+- **Connection settings**: `serverAddr` / `serverPort` / `auth.token`, written back to `frpc.toml` on save
+- **Start / stop**: the same process the terminal menu drives
+- **Download / update frpc**: fetch the binary from the mirror or GitHub Releases
+- **Tunnel list**: name, type, local address and port, remote port or domains, each removable
+- **Add tunnel**: `tcp` / `udp` need a remote port, `http` / `https` need domains (comma separated)
+
+The panel only touches those keys; everything else already in `frpc.toml` is read and written back untouched. It shares the same read/write implementation as the terminal menu.
+
+> The panel manages **vanilla frp**. OpenFrp's cloud tunnels use a different API, and the panel only covers the small "bind it to an instance" step: fill in the user token and tunnel id under instance settings, and decide whether to raise the tunnel with the instance.
 
 ## Signing in
 
@@ -60,12 +99,12 @@ Open that once and the token lands in a cookie; after that `http://127.0.0.1:876
 
 ## Security boundary
 
-**The panel can send commands to a server console and rewrite files inside the instance directory, so it hands both a command channel and the instance tree to a browser.** The daemon runs as your user, so one click can `stop` a server, change ops, edit `server.properties`, or delete files. Therefore:
+**The panel can send commands to a server console, rewrite files inside the instance directory, and configure an instance to execute arbitrary commands — so it hands both a command channel and the instance tree to a browser.** The daemon runs as your user, so one click can `stop` a server, change ops, edit `server.properties`, delete files, or point a generic instance at any command. Therefore:
 
 - It listens on `127.0.0.1` only, unreachable from outside the machine
 - Every `/api` route requires the token
 - To reach it through frp, put a reverse proxy and HTTPS in front. Do not leave the panel bare, and think twice before changing `web.host`
-- Holding the token means holding read/write access to the instance directory; there is no switch that turns the file manager off
+- Holding the token means holding read/write access to the instance directory and this command channel; there is no switch that turns the file manager or generic instances off
 
 ## Configuration
 
@@ -101,10 +140,18 @@ The entire contract between the front end and the back end:
 | `POST` | `/api/file/delete` | `{"name": "...", "path": "..."}` |
 | `POST` | `/api/file/upload` | `?name=&path=`; the request body *is* the file, read to exactly `Content-Length` |
 | `GET` | `/api/cores` | Server core list; add `?type=<core>` for that core's versions |
-| `POST` | `/api/instances` | `{"name", "mc_version", "min_mem", "max_mem", "core_type"?, "core_version"?, "jar_name"?}` |
+| `POST` | `/api/instances` | `{"name", "kind"?, "mc_version", "min_mem", "max_mem", "core_type"?, "core_version"?, "jar_name"?, "launch"?}` |
+| `POST` | `/api/instances/settings` | Update an instance: `{"name", "min_mem"?, "extra_jvm_args"?, "launch"?, "openfrp"?, ...}`; `kind` and `name` are not changeable |
 | `POST` | `/api/instances/import/scan` | `{"zip_path": "..."}` — returns the candidate cores |
 | `POST` | `/api/instances/import/commit` | `{"zip_path": "...", "jar": "...", "name": "..."}` |
 | `POST` | `/api/instances/import/abort` | `{"zip_path": "..."}` — discards the extracted temp folder |
+| `GET` | `/api/frp` | frpc status + connection settings + tunnel list |
+| `POST` | `/api/frp/settings` | `{"serverAddr", "serverPort", "token"}` |
+| `POST` | `/api/frp/proxy` | Add a tunnel: `{"name", "type", "localIP", "localPort", "remotePort"?\|"customDomains"?}` |
+| `POST` | `/api/frp/proxy/delete` | `{"index": 0}` |
+| `POST` | `/api/frp/start` | Start frpc |
+| `POST` | `/api/frp/stop` | Stop frpc |
+| `POST` | `/api/frp/download` | Download / update the frpc binary |
 
 Conventions:
 
@@ -114,6 +161,6 @@ Conventions:
 
 ## Known limits
 
-This is the closed loop plus two everyday panels, not a full operations panel. Not yet done: plugin and mod management, tunnel management, and restoring "which servers were running" after a restart. The file manager keeps deliberate limits too: one file at a time (no multi-select or bulk delete), no whole-folder upload (browsers cannot provide folder contents), no disk-usage column, and no archive extraction.
+This is the closed loop plus a few everyday panels, not a full operations panel. Not yet done: plugin and mod management, restoring "which servers were running" after a restart, and managing OpenFrp cloud tunnels from the panel (creating and deleting those still goes through the terminal menu). The file manager keeps deliberate limits too: one file at a time (no multi-select or bulk delete), no whole-folder upload (browsers cannot provide folder contents), no disk-usage column, and no archive extraction.
 
 Each of those would plug into the same `core/` surface.

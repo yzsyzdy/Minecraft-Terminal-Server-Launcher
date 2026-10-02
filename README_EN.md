@@ -124,6 +124,7 @@ Minecraft-Terminal-Server-Launcher/
 │   ├── instances.py      #   instances and jar enabled state
 │   ├── files.py          #   file read/write inside an instance (paths locked to it)
 │   ├── provision.py      #   creating instances: folder, core, archive import
+│   ├── frp.py            #   frpc.toml read/write plus frpc start/stop
 │   ├── transfer.py       #   archive import and export
 │   ├── java.py           #   non-interactive Java resolution
 │   └── runtime.py        #   launch plans and process supervision (pipes + event stream)
@@ -222,9 +223,13 @@ python start.py web --port 9000    # pick another port
 
 Startup prints a URL carrying a token; opening it logs you in. The token lives in `web.token` under `config.json`. From the panel you can list instances, start and stop them, watch the console live, and send server commands. Console output is also appended to `logs/mstl-console.log` inside the instance directory.
 
-The right-hand pane has two tabs, **Console** and **Files**. The file manager browses an instance's tree and edits text files such as `server.properties` in place, and can create, rename, delete, upload and download; every path stays inside the selected instance folder. The `＋` in the top bar creates a new instance: download a server core from the MSL mirror, use a local jar, or import an existing zip archive.
+The right-hand pane has two tabs, **Console** and **Files**. The file manager browses an instance's tree and edits text files such as `server.properties` in place, and can create, rename, delete, upload and download; every path stays inside the selected instance folder. The `＋` in the top bar creates a new instance: download a server core from the MSL mirror, use a local jar, import an existing zip archive, or create a **generic instance**.
 
-> **It listens on 127.0.0.1 only, by default.** The panel can send commands to a server console *and* rewrite files inside the instance directory, so it hands both a command channel and the instance tree to a browser. To reach it through frp, put a reverse proxy and HTTPS in front, and think twice before changing `web.host`.
+A **generic instance** runs something of your own instead of Minecraft: an executable (`exec`, no shell involved) or a command handed to `cmd` / `powershell`. It still gets start/stop, a live console, a log file, the ability to receive input, and an optional tunnel — it just skips Java resolution and the jar check. The terminal menu has the same entry point (`[3] New instance`). Select an instance and press `⚙` to edit it, or edit `.server.json` through the file manager.
+
+The `frp` button in the top bar configures vanilla frp from the panel: connection settings in `frpc.toml`, adding and removing tunnels, starting and stopping frpc, and downloading or updating the frpc binary.
+
+> **It listens on 127.0.0.1 only, by default.** The panel can send commands to a server console, rewrite files inside the instance directory, *and* configure an instance to execute arbitrary commands, so it hands both a command channel and the instance tree to a browser. To reach it through frp, put a reverse proxy and HTTPS in front, and think twice before changing `web.host`.
 
 ## Documentation
 

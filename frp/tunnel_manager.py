@@ -215,21 +215,27 @@ def _extract_frpc(archive_path: str, project_dir: str) -> bool:
     return False
 
 
-def download_frpc(project_dir: str, version: str = "") -> Optional[str]:
+def download_frpc(project_dir: str, version: str = "",
+                  quiet: bool = False) -> Optional[str]:
     """下载并解压原版 frpc。
 
     Args:
         project_dir: 项目目录
         version: 指定版本；为空时自动获取最新版
+        quiet: 不往 stdout 说话，供网页面板这类没有终端的调用方使用
 
     Returns:
         解压后的 frpc 二进制路径；失败返回 None
     """
+    def say(message: str = "") -> None:
+        if not quiet:
+            print(message)
+
     if not version:
-        print("  [frp] 正在获取最新版本...")
+        say("  [frp] 正在获取最新版本...")
         version = get_latest_frp_version()
         if not version:
-            print("  [frp] 获取版本失败（网络问题?）")
+            say("  [frp] 获取版本失败（网络问题?）")
             return None
 
     urls = get_frpc_download_urls(version)
@@ -241,23 +247,23 @@ def download_frpc(project_dir: str, version: str = "") -> Optional[str]:
 
     # 逐个尝试镜像源，一个失败就清理残片换下一个
     for i, url in enumerate(urls, 1):
-        print()
-        print(f"  [frp] 正在下载 frpc v{version} ...")
-        print(f"  [frp] 源 {i}/{len(urls)}: {url}")
+        say()
+        say(f"  [frp] 正在下载 frpc v{version} ...")
+        say(f"  [frp] 源 {i}/{len(urls)}: {url}")
         if _download_file(url, archive_path):
             break
-        print("  [frp] 该源下载失败，尝试下一个...")
+        say("  [frp] 该源下载失败，尝试下一个...")
         try:
             os.remove(archive_path)
         except OSError:
             pass
     else:
-        print("  [frp] 所有源均下载失败")
+        say("  [frp] 所有源均下载失败")
         return None
 
-    print("  [frp] 正在解压...")
+    say("  [frp] 正在解压...")
     if not _extract_frpc(archive_path, project_dir):
-        print("  [frp] 解压失败")
+        say("  [frp] 解压失败")
         try:
             os.remove(archive_path)
         except OSError:
@@ -271,7 +277,7 @@ def download_frpc(project_dir: str, version: str = "") -> Optional[str]:
         pass
 
     bin_path = get_frpc_bin_path(project_dir)
-    print(f"  [frp] frpc 就绪: {bin_path}")
+    say(f"  [frp] frpc 就绪: {bin_path}")
     return bin_path
 
 
@@ -473,57 +479,65 @@ def save_frp_config(project_dir: str, cfg: dict[str, Any]) -> bool:
 # 进程管理
 # ---------------------------------------------------------------------------
 
-def launch_frpc(project_dir: str) -> Optional[subprocess.Popen]:
-    """启动原版 frpc（使用 frpc.toml 配置）。返回进程对象。"""
+def launch_frpc(project_dir: str, quiet: bool = False) -> Optional[subprocess.Popen]:
+    """启动原版 frpc（使用 frpc.toml 配置）。返回进程对象。
+
+    quiet 供网页面板这类没有终端的调用方使用。
+    """
     global _frpc_process
+
+    def say(message: str = "") -> None:
+        if not quiet:
+            print(message)
 
     # 已经在跑就直接返回，别再起一个：原来的句柄会被覆盖，先前那个 frpc
     # 谁也停不掉，只能一直占着远程端口
     if is_frpc_running():
-        print("  [frp] frpc 已在运行，忽略本次启动")
+        say("  [frp] frpc 已在运行，忽略本次启动")
         return _frpc_process
 
     bin_path = get_frpc_bin_path(project_dir)
     toml_path = get_frpc_toml_path(project_dir)
 
     if not os.path.isfile(bin_path):
-        print("  [frp] 未找到 frpc，正在下载...")
-        new_bin = download_frpc(project_dir)
+        say("  [frp] 未找到 frpc，正在下载...")
+        new_bin = download_frpc(project_dir, quiet=quiet)
         if not new_bin or not os.path.isfile(new_bin):
-            print("  [frp] frpc 获取失败")
+            say("  [frp] frpc 获取失败")
             return None
 
     if not os.path.isfile(toml_path):
-        print("  [frp] 未找到 frpc.toml 配置")
+        say("  [frp] 未找到 frpc.toml 配置")
         return None
 
     cmd = [bin_path, "-c", toml_path]
-    print(f"  [frp] 启动 frpc ...")
-    print(f"  [frp] {' '.join(cmd)}")
-    print()
+    say("  [frp] 启动 frpc ...")
+    say(f"  [frp] {' '.join(cmd)}")
+    say()
 
     try:
         proc = subprocess.Popen(cmd, stdout=None, stderr=None)
     except OSError as e:
-        print(f"  [frp] 启动失败: {e}")
+        say(f"  [frp] 启动失败: {e}")
         return None
 
     time.sleep(2)
     # 配置有错时 frpc 会立刻退出，这时返回进程对象等于告诉调用方「启动成功」，
     # 而菜单里看状态仍是「未运行」
     if proc.poll() is not None:
-        print(f"  [frp] frpc 启动后立即退出（退出码 {proc.returncode}），请检查 frpc.toml")
+        say(f"  [frp] frpc 启动后立即退出（退出码 {proc.returncode}），请检查 frpc.toml")
         return None
 
     _frpc_process = proc
     return proc
 
 
-def stop_frpc() -> None:
+def stop_frpc(quiet: bool = False) -> None:
     """停止正在运行的 frpc 进程。"""
     global _frpc_process
     if _frpc_process and _frpc_process.poll() is None:
-        print("  [frp] 停止 frpc ...")
+        if not quiet:
+            print("  [frp] 停止 frpc ...")
         _frpc_process.terminate()
         try:
             _frpc_process.wait(timeout=5)
