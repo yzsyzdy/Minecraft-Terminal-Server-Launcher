@@ -13,23 +13,31 @@ auth.token 与 [[proxies]]。其余内容读进来会原样保留，写回去不
 from __future__ import annotations
 
 import os
+import tempfile
 from typing import Any, Optional
 
 from .errors import CoreError
 from frp.tunnel_manager import (
     download_frpc,
+    expected_asset_name,
     get_frpc_bin_path,
     get_frpc_toml_path,
     get_latest_frp_version,
+    install_frpc_from_file,
     is_frpc_running,
     launch_frpc,
     load_frp_config,
+    releases_url,
     save_frp_config,
     stop_frpc,
 )
 
 DEFAULT_SERVER_PORT = 7000
 MAX_PORT = 65535
+
+# 手动上传 frpc 时的大小上限。frp 完整包约 15~20 MB，这里给足余量，
+# 同时挡住「传了个几百 MB 的东西过来」。
+MAX_FRPC_UPLOAD_BYTES = 200 * 1024 * 1024
 
 # 面板上能选的隧道类型。tcp / udp 要 remotePort，http / https 要域名。
 PROXY_TYPES = ("tcp", "udp", "http", "https")
@@ -210,12 +218,70 @@ def latest_version() -> str:
     return get_latest_frp_version() or ""
 
 
+def manual_info() -> dict[str, str]:
+    """下载不通时给用户的兜底信息：去哪下、下哪个文件、装出来叫什么。
+
+    故意不联网——需要它的场合往往正是网络有问题的时候。
+    """
+    return {
+        "url": releases_url(),
+        "asset": expected_asset_name(),
+        "binName": "frpc.exe" if os.name == "nt" else "frpc",
+    }
+
+
 def download(project_dir: str) -> str:
-    """下载（或重新下载）frpc 二进制，返回路径。"""
+    """下载（或重新下载）frpc 二进制，返回路径。
+
+    失败时把 GitHub 发布页地址一并带进错误里：面板会把 message 弹给用户，
+    里面直接有可以点的地址，不用再让人自己去搜。
+    """
     path = download_frpc(project_dir, quiet=True)
     if not path or not os.path.isfile(path):
-        raise CoreError("web.error.frpc_download_failed")
+        raise CoreError("web.error.frpc_download_failed",
+                        url=releases_url(), asset=expected_asset_name())
     return path
+
+
+def install_from_stream(project_dir: str, stream, content_length: int,
+                        max_bytes: int = MAX_FRPC_UPLOAD_BYTES) -> str:
+    """把用户手动下载的 frpc 包/二进制装好，返回可执行文件路径。
+
+    压缩包与裸二进制都认（按内容判断，不看文件名）。上传流按
+    Content-Length 精确读取：这是 HTTP 长连接上的请求体，读到 EOF 会一直
+    阻塞在下一个字节上。先落到临时文件，装完就删。
+    """
+    if content_length <= 0:
+        raise CoreError("web.error.upload_empty")
+    if content_length > max_bytes:
+        raise CoreError("web.error.upload_too_large",
+                        max=round(max_bytes / 1024 / 1024))
+
+    fd, tmp_path = tempfile.mkstemp(prefix="mstl-frpc-")
+    os.close(fd)
+    try:
+        remaining = content_length
+        with open(tmp_path, "wb") as f:
+            while remaining > 0:
+                chunk = stream.read(min(64 * 1024, remaining))
+                if not chunk:
+                    break
+                remaining -= len(chunk)
+                f.write(chunk)
+        if remaining != 0:
+            raise CoreError("web.error.upload_incomplete")
+        installed = install_frpc_from_file(tmp_path, project_dir)
+    finally:
+        try:
+            os.remove(tmp_path)
+        except OSError:
+            pass
+
+    if not installed:
+        raise CoreError("web.error.frpc_install_failed",
+                        asset=expected_asset_name(),
+                        name=os.path.basename(get_frpc_bin_path(project_dir)))
+    return installed
 
 
 def start(project_dir: str) -> dict[str, Any]:
@@ -238,6 +304,7 @@ def stop() -> None:
 
 __all__ = [
     "DEFAULT_SERVER_PORT",
+    "MAX_FRPC_UPLOAD_BYTES",
     "PROXY_TYPES",
     "read_settings",
     "write_settings",
@@ -246,7 +313,9 @@ __all__ = [
     "remove_proxy",
     "status",
     "latest_version",
+    "manual_info",
     "download",
+    "install_from_stream",
     "start",
     "stop",
 ]

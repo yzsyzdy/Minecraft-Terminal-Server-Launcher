@@ -26,10 +26,12 @@ MSTL 提供两条互相独立的路线，按需选一条即可。
 
 菜单里能做的事：
 
-- `下载 frpc`：从 frp 官方 release 取对应平台的压缩包并解压
+- `下载 frpc`：从 frp 官方 release 取对应平台的压缩包并解压。下载不通时会直接打印发布页地址与该下的文件名，并允许你填入**本地已下好**的压缩包或二进制路径，由 MSTL 解出 `frpc` 放到位
 - `编辑配置`：读写 `frp/frpc.toml`，包含 `serverAddr`、`serverPort`、`auth.token` 以及各条 proxy
 - `代理列表` / `新增代理` / `删除代理`：维护 `[[proxies]]` 段落，指定 `localPort` 与 `remotePort`
 - `启动 frpc` / `停止 frpc`：手动拉起或结束进程
+
+OpenFrp 那条路线同理：官方 CDN 全挂时会打印 OpenFrp 的发布页地址，你手动下好压缩包丢进 `openfrp/` 即可，启动时会自动解压。
 
 `frpc.toml` 里通常含 `auth.token`，所以它和 frpc 二进制一起被 `.gitignore` 排除，只跟踪 `frp/*.py` 的源码。
 

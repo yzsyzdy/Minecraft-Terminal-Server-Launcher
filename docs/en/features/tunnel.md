@@ -26,10 +26,12 @@ For when you already have your own frp server (self-hosted, or an `frpc.toml` te
 
 Things the menu lets you do:
 
-- `Download frpc`: fetch and unzip the archive for the current platform from frp's official releases
+- `Download frpc`: fetch and unzip the archive for the current platform from frp's official releases. If the download will not go through, it prints the releases page and the exact asset name, then lets you point it at an archive (or binary) you already downloaded so MSTL can unpack `frpc` into place
 - `Edit config`: read and write `frp/frpc.toml`, covering `serverAddr`, `serverPort`, `auth.token`, and each proxy
 - `Proxy list` / `Add proxy` / `Delete proxy`: maintain the `[[proxies]]` sections, specifying `localPort` and `remotePort`
 - `Start frpc` / `Stop frpc`: bring the process up or take it down by hand
+
+The OpenFrp route works the same way: if the official CDNs are all down it prints OpenFrp's releases page, and you can drop the archive you downloaded into `openfrp/` — it is unpacked on the next start.
 
 `frpc.toml` normally contains `auth.token`, so it and the frpc binary are excluded by `.gitignore`; only the `frp/*.py` source is tracked.
 

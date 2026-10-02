@@ -491,7 +491,7 @@
     "web.error.frp_remote_port_required": "tcp / udp 隧道必须填远程端口",
     "web.error.frp_domain_required": "http / https 隧道必须填域名",
     "web.error.frp_bad_proxy_index": "隧道不存在",
-    "web.error.frpc_download_failed": "下载 frpc 失败，请检查网络",
+    "web.error.frpc_download_failed": "下载 frpc 失败，请检查网络。也可以从 {url} 手动下载后上传。",
     "web.error.frp_start_failed": "frpc 启动失败，请检查 frpc.toml",
     "web.new.tab_generic": "通用实例",
     "web.new.launch_mode": "启动方式",
@@ -574,5 +574,21 @@
     "web.menu.external_hint": "  注意：监听所有网卡时，请确认前面有反向代理与 HTTPS。",
     "web.cli.bind_failed": "  面板启动失败: 无法监听 {addr}（{msg}）。端口可能已被占用，可在菜单 [8] 里换一个。",
     "web.cli.stop_hint": "  按 Ctrl+C 停止面板。",
-    "web.cli.external_warning": "  [警告] 面板正在监听所有网卡，请确认前面有反代与 HTTPS。"
+    "web.cli.external_warning": "  [警告] 面板正在监听所有网卡，请确认前面有反代与 HTTPS。",
+
+    "frp.manual_title": "  下载不通？可以手动装：",
+    "frp.manual_url": "  发布页:   {url}",
+    "frp.manual_asset": "  需要下载: {asset}（解压后取里面的 {name}）",
+    "frp.manual_where": "  或把解压出来的 frpc 放到: {path}",
+    "frp.manual_ask": "  已经下好了？填入文件或压缩包路径（直接回车跳过）：",
+    "frp.manual_install_ok": "  已安装: {path}",
+    "frp.manual_install_failed": "  没能从这个文件里提取出 frpc，请确认下的是 frp 官方发布包。",
+    "openfrp.manual_extract_hint": "  把下载到的压缩包原样放到: {path}（下次启动会自动解压）",
+    "web.frp.manual": "下载不通？手动安装",
+    "web.frp.manual_hint": "从 GitHub 下载 {asset}，解压后把里面的 {bin} 上传上来（整个压缩包也可以）。",
+    "web.frp.releases": "打开 GitHub 发布页",
+    "web.frp.upload": "上传 frpc",
+    "web.frp.uploading": "正在上传……",
+    "web.frp.upload_done": "frpc 已安装",
+    "web.error.frpc_install_failed": "这个文件里没有找到 {name}，请确认下的是 frp 官方发布包（{asset}）"
 }

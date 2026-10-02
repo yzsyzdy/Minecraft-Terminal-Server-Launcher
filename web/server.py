@@ -195,6 +195,12 @@ WEB_STRINGS = (
     "web.frp.confirm_remove",
     "web.frp.started",
     "web.frp.stopped_msg",
+    "web.frp.manual",
+    "web.frp.manual_hint",
+    "web.frp.releases",
+    "web.frp.upload",
+    "web.frp.uploading",
+    "web.frp.upload_done",
 )
 
 
@@ -227,6 +233,22 @@ def _index_html() -> str:
         return f.read()
 
 
+class _BodyStream:
+    """包一层请求体，顺便记下到底读走了多少字节。
+
+    上传是交给 core 去读的，读完多少处理器并不知道；而 _drain 只能补读
+    「还没读过的」那部分——多读一次就会卡在下一个请求上（长连接不会关）。
+    """
+
+    def __init__(self, handler) -> None:
+        self._handler = handler
+
+    def read(self, size: int = -1) -> bytes:
+        data = self._handler.rfile.read(size)
+        self._handler._body_read += len(data)
+        return data
+
+
 # 导入分「解压出计划 → 选核心 → 落地」两步，中间要把解压结果留在磁盘上。
 # plan_import 用的临时目录是固定的 .import_temp，所以同一时刻只有最新那一份
 # 计划是有效的：新的一次解压会把上一份覆盖掉。这里也只保留最新的一份，并且
@@ -253,6 +275,7 @@ def _make_handler(manager: RuntimeManager, servers_dir: str, token: str,
     class Handler(BaseHTTPRequestHandler):
         server_version = "MSTL"
         protocol_version = "HTTP/1.1"
+        _body_read = 0
 
         # -- 基础设施 ------------------------------------------------------
 
@@ -329,7 +352,7 @@ def _make_handler(manager: RuntimeManager, servers_dir: str, token: str,
                 return {}
             if length <= 0:
                 return {}
-            raw = self.rfile.read(length)
+            raw = _BodyStream(self).read(length)
             try:
                 parsed = json.loads(raw.decode("utf-8"))
             except (json.JSONDecodeError, UnicodeDecodeError):
@@ -345,10 +368,11 @@ def _make_handler(manager: RuntimeManager, servers_dir: str, token: str,
         def _drain(self, length: int) -> None:
             """把还没读的请求体读掉。
 
-            HTTP/1.1 上是长连接：请求体没读完就回响应，下一个请求会从
-            残留的字节开始解析，整条连接就错位了。
+            HTTP/1.1 上是长连接：请求体没读完就回响应，下一个请求会从残留
+            的字节开始解析，整条连接就错位了。只补读「还没读过的」那部分，
+            否则会阻塞在下一个请求上——上传到一半失败时就是这样。
             """
-            remaining = max(0, length)
+            remaining = max(0, length - self._body_read)
             while remaining > 0:
                 chunk = self.rfile.read(min(65536, remaining))
                 if not chunk:
@@ -418,6 +442,8 @@ def _make_handler(manager: RuntimeManager, servers_dir: str, token: str,
             # 上传走原始请求体，不能按 JSON 解析
             if path == "/api/file/upload":
                 return self._guard(lambda: self._file_upload(query))
+            if path == "/api/frp/upload":
+                return self._guard(lambda: self._frp_upload(query))
             body = self._body()
             name = str(body.get("name") or "")
             try:
@@ -564,7 +590,7 @@ def _make_handler(manager: RuntimeManager, servers_dir: str, token: str,
                 return
             try:
                 written = fileops.save_upload(
-                    root, rel, self.rfile, length, MAX_UPLOAD_BYTES)
+                    root, rel, _BodyStream(self), length, MAX_UPLOAD_BYTES)
             except CoreError as err:
                 fail(err)
                 return
@@ -730,7 +756,23 @@ def _make_handler(manager: RuntimeManager, servers_dir: str, token: str,
                 "status": frpops.status(project_dir),
                 "settings": frpops.read_settings(project_dir),
                 "proxies": frpops.list_proxies(project_dir),
+                # 下载不通时的兜底：去哪下、下哪个文件。不联网，随时可给。
+                "manual": frpops.manual_info(),
+                "upload_max": frpops.MAX_FRPC_UPLOAD_BYTES,
             })
+
+        def _frp_upload(self, query: dict[str, str]) -> None:
+            """接收用户从 GitHub 手动下载的 frpc 包（或裸二进制）并装好。"""
+            length = self._content_length()
+            try:
+                installed = frpops.install_from_stream(
+                    project_dir, _BodyStream(self), length)
+            except CoreError as err:
+                self._drain(length)
+                return self._core_error(err)
+            self._json({"ok": True, "path": installed,
+                        "status": frpops.status(project_dir),
+                        "message": t("web.frp.upload_done")})
 
         def _frp_action(self, path: str, body: dict) -> None:
             if path == "/api/frp/settings":

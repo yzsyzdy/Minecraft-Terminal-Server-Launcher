@@ -549,7 +549,7 @@
     "web.error.frp_remote_port_required": "tcp / udp tunnels need a remote port",
     "web.error.frp_domain_required": "http / https tunnels need a domain",
     "web.error.frp_bad_proxy_index": "No such tunnel",
-    "web.error.frpc_download_failed": "Could not download frpc; check your network",
+    "web.error.frpc_download_failed": "Could not download frpc; check your network. You can also download it by hand from {url} and upload it.",
     "web.error.frp_start_failed": "frpc failed to start; check frpc.toml",
     "web.new.tab_generic": "Generic",
     "web.new.launch_mode": "Launch mode",
@@ -632,5 +632,21 @@
     "web.menu.external_hint": "  Note: when listening on every interface, make sure a reverse proxy and HTTPS sit in front.",
     "web.cli.bind_failed": "  Could not start the panel: cannot bind {addr} ({msg}). The port may be in use; pick another under menu [8].",
     "web.cli.stop_hint": "  Press Ctrl+C to stop the panel.",
-    "web.cli.external_warning": "  [warning] the panel is listening on every interface; make sure a reverse proxy and HTTPS sit in front."
+    "web.cli.external_warning": "  [warning] the panel is listening on every interface; make sure a reverse proxy and HTTPS sit in front.",
+
+    "frp.manual_title": "  Download not working? Install it by hand:",
+    "frp.manual_url": "  Releases:  {url}",
+    "frp.manual_asset": "  Get:       {asset} (it contains {name} after unpacking)",
+    "frp.manual_where": "  Or drop the unpacked frpc at: {path}",
+    "frp.manual_ask": "  Already downloaded it? Enter the file or archive path (Enter to skip): ",
+    "frp.manual_install_ok": "  Installed: {path}",
+    "frp.manual_install_failed": "  Could not find frpc inside that file; make sure it is the official frp release archive.",
+    "openfrp.manual_extract_hint": "  Drop the downloaded archive as-is at: {path} (it is unpacked on the next start)",
+    "web.frp.manual": "Download not working? Install by hand",
+    "web.frp.manual_hint": "Download {asset} from GitHub, then upload the {bin} inside it (the whole archive works too).",
+    "web.frp.releases": "Open the GitHub releases page",
+    "web.frp.upload": "Upload frpc",
+    "web.frp.uploading": "Uploading…",
+    "web.frp.upload_done": "frpc installed",
+    "web.error.frpc_install_failed": "No {name} inside that file; make sure it is the official frp release archive ({asset})"
 }

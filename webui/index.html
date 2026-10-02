@@ -536,6 +536,17 @@
         <button id="frpstop"></button>
         <button id="frpdownload"></button>
       </div>
+      <div class="drow" style="align-items:center;margin-top:8px">
+        <div class="field" style="flex:3">
+          <label id="l-frpmanual"></label>
+          <div class="hint" id="frp-manual-hint" style="margin:0"></div>
+        </div>
+        <div style="display:flex;gap:6px;align-items:flex-end">
+          <button id="frpreleases"></button>
+          <button id="frpupload"></button>
+        </div>
+      </div>
+      <input type="file" id="frpfile" hidden>
       <div class="drow" style="margin-top:10px">
         <div class="field">
           <label id="l-frpaddr"></label>
@@ -843,6 +854,10 @@ function applyStrings() {
   $("l-fprremote").textContent = strings["web.frp.remote_port"] || "";
   $("l-frpdomains").textContent = strings["web.frp.domains"] || "";
   $("frpadd").textContent = strings["web.frp.add_proxy"] || "";
+  $("l-frpmanual").textContent = strings["web.frp.manual"] || "";
+  $("frpreleases").textContent = strings["web.frp.releases"] || "";
+  $("frpupload").textContent = strings["web.frp.upload"] || "";
+  renderFrpManual();
 }
 
 function stateLabel(state) {
@@ -1722,9 +1737,22 @@ function frpToggleTypeFields() {
   $("frp-domain-wrap").hidden = needsPort;
 }
 
+let frpManual = { url: "", asset: "", binName: "frpc" };
+
+function renderFrpManual() {
+  const hint = fmt(strings["web.frp.manual_hint"] || "{asset}",
+                   { asset: frpManual.asset || "", bin: frpManual.binName || "" });
+  $("frp-manual-hint").textContent = hint;
+  $("frpreleases").disabled = !frpManual.url;
+}
+
 function renderFrp(data) {
   const status = data.status || {};
   const settings = data.settings || {};
+  if (data.manual) {
+    frpManual = data.manual;
+    renderFrpManual();
+  }
   const runText = status.running ? (strings["web.frp.running"] || "running")
                                  : (strings["web.frp.stopped"] || "stopped");
   const binText = status.binary ? (strings["web.frp.binary_ok"] || "ready")
@@ -1845,10 +1873,31 @@ async function frpDownload() {
   try {
     const data = await apiOk("/api/frp/download", {});
     toast(data.message || "");
-    loadFrp();
+  } catch (err) {
+    // 下载不通时告诉用户去哪手动拿，并把上传入口亮出来
+    fail(err);
+    renderFrpManual();
+  }
+  loadFrp();
+}
+
+async function frpUpload(file) {
+  if (!file) return;
+  toast(strings["web.frp.uploading"] || "");
+  try {
+    // 直接把 File 当请求体发；压缩包和裸二进制都收
+    const res = await fetch("/api/frp/upload", {
+      method: "POST",
+      headers: { "Content-Type": "application/octet-stream" },
+      body: file
+    });
+    const data = await res.json();
+    if (!data.ok) throw new Error(data.message || "upload failed");
+    toast(data.message || "");
   } catch (err) {
     fail(err);
   }
+  loadFrp();
 }
 
 async function frpAddProxy() {
@@ -1945,6 +1994,15 @@ $("frpstop").onclick = frpStop;
 $("frpdownload").onclick = frpDownload;
 $("frptype").onchange = frpToggleTypeFields;
 $("frpadd").onclick = frpAddProxy;
+$("frpreleases").onclick = () => {
+  if (frpManual.url) window.open(frpManual.url, "_blank", "noopener");
+};
+$("frpupload").onclick = () => $("frpfile").click();
+$("frpfile").onchange = (ev) => {
+  const file = ev.target.files && ev.target.files[0];
+  ev.target.value = "";
+  frpUpload(file);
+};
 
 // 点遮罩空白处关掉对话框；Esc 关掉最上层那个
 $("modal").addEventListener("click", (ev) => {

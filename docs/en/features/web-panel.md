@@ -84,11 +84,13 @@ The `frp` button in the top bar opens the tunnel panel, backed by `frp/frpc.toml
 - **Status**: whether frpc is running and whether the binary has been downloaded
 - **Connection settings**: `serverAddr` / `serverPort` / `auth.token`, written back to `frpc.toml` on save
 - **Start / stop**: the same process the terminal menu drives
-- **Download / update frpc**: fetch the binary from the mirror or GitHub Releases
+- **Download / update frpc**: fetch the binary from the mirror or GitHub Releases. **If the download will not go through you are not stuck**: the panel shows the GitHub releases page and an *Upload frpc* button — download the archive yourself (or the unpacked `frpc` / `frpc.exe`) and hand it over; archives are unpacked automatically
 - **Tunnel list**: name, type, local address and port, remote port or domains, each removable
 - **Add tunnel**: `tcp` / `udp` need a remote port, `http` / `https` need domains (comma separated)
 
 The panel only touches those keys; everything else already in `frpc.toml` is read and written back untouched. It shares the same read/write implementation as the terminal menu.
+
+The upload fallback sniffs the **content**, not the filename (browsers rename things): a zip / tar.gz gets unpacked, a bare binary is taken as-is. It does check that what comes out **looks like an executable for this platform** — grabbing the wrong platform's archive (say a linux tarball on Windows) is refused on the spot and the half-written file is removed, rather than installing an `frpc.exe` that dies with a format error on first run.
 
 > The panel manages **vanilla frp**. OpenFrp's cloud tunnels use a different API, and the panel only covers the small "bind it to an instance" step: fill in the user token and tunnel id under instance settings, and decide whether to raise the tunnel with the instance.
 

@@ -25,6 +25,7 @@
 import os
 import platform
 import re
+import shutil
 import subprocess
 import time
 import zipfile
@@ -177,17 +178,38 @@ def _make_executable(path: str) -> None:
         pass
 
 
-def _extract_frpc(archive_path: str, project_dir: str) -> bool:
+def _accept_extracted(path: str) -> bool:
+    """确认解出来的东西确实像本平台的可执行文件，不像就删掉。
+
+    用户有可能拿错平台的包（Windows 上下了 linux 的 tar.gz），那样装出来的
+    frpc.exe 一跑就报格式错误，还不如当场拒掉、让他重新下一个。
+    """
+    if os.path.isfile(path) and _looks_like_executable(path):
+        return True
+    try:
+        os.remove(path)
+    except OSError:
+        pass
+    return False
+
+
+def _extract_frpc(archive_path: str, project_dir: str, kind: str = "") -> bool:
     """从 zip/tar.gz 中提取 frpc 二进制到 frp 目录。
 
     frp 官方包内包含 frpc.exe / frps.exe / frpc.toml 等文件，
     我们只需要 frpc 二进制。找不到则返回 False。
+
+    kind 为空时按文件名后缀判断；用户手动上传的临时文件往往没有可用的后缀，
+    所以允许调用方按内容嗅探出类型后显式传进来。
     """
     target_dir = _frp_dir(project_dir)
     base_name = "frpc.exe" if platform.system().lower() == "windows" else "frpc"
     dest = os.path.join(target_dir, base_name)
 
-    if archive_path.endswith(".zip"):
+    if not kind:
+        kind = "zip" if archive_path.endswith(".zip") else "tar"
+
+    if kind == "zip":
         try:
             with zipfile.ZipFile(archive_path) as zf:
                 for name in zf.namelist():
@@ -195,7 +217,7 @@ def _extract_frpc(archive_path: str, project_dir: str) -> bool:
                         with zf.open(name) as src, open(dest, "wb") as dst:
                             dst.write(src.read())
                         _make_executable(dest)
-                        return os.path.isfile(dest)
+                        return _accept_extracted(dest)
         except (zipfile.BadZipFile, OSError):
             return False
     else:
@@ -209,10 +231,110 @@ def _extract_frpc(archive_path: str, project_dir: str) -> bool:
                         with open(dest, "wb") as dst:
                             dst.write(src.read())
                         _make_executable(dest)
-                        return os.path.isfile(dest)
+                        return _accept_extracted(dest)
         except (tarfile.TarError, OSError):
             return False
     return False
+
+
+# ---------------------------------------------------------------------------
+# 手动安装：下载失败时让用户自己去 GitHub 拿
+# ---------------------------------------------------------------------------
+
+def releases_url(version: str = "") -> str:
+    """原版 frp 的 GitHub 发布页。给了版本就指到那一个 tag。"""
+    tag = ""
+    if version:
+        tag = f"/tag/v{str(version).lstrip('v')}"
+    return f"https://github.com/{FRP_REPO}/releases{tag}"
+
+
+def expected_asset_name(version: str = "") -> str:
+    """用户该下哪个文件，例如 frp_0.61.0_windows_amd64.zip。
+
+    不知道版本时用 <版本> 占位——手动下载的前提往往就是网络有问题，
+    这时候再去问 GitHub 要版本号只会又卡一次。
+    """
+    os_name, arch, ext = _os_arch()
+    ver = str(version).lstrip("v") if version else "<版本>"
+    return f"frp_{ver}_{os_name}_{arch}{ext}"
+
+
+def _archive_kind(path: str) -> str:
+    """按内容判断是不是压缩包，返回 'zip' / 'tar' / ''（当二进制）。
+
+    不看后缀：用户从浏览器存下来的文件名五花八门，临时文件更是没有后缀。
+    """
+    try:
+        with open(path, "rb") as f:
+            head = f.read(4)
+    except OSError:
+        return ""
+    if head[:4] == b"PK\x03\x04":
+        return "zip"
+    if head[:2] == b"\x1f\x8b":
+        return "tar"
+    return ""
+
+
+def _looks_like_executable(path: str) -> bool:
+    """粗判一个文件是不是本平台的可执行文件。
+
+    不瞅这一眼的话，用户传错文件（比如传了个 txt）也会被当成 frpc 装好，
+    面板随后显示「已就绪」，要等真正启动时才发现跑不起来。
+    """
+    try:
+        with open(path, "rb") as f:
+            head = f.read(4)
+    except OSError:
+        return False
+    system = platform.system().lower()
+    if system == "windows":
+        return head[:2] == b"MZ"
+    if system == "darwin":
+        return head[:4] in (b"\xcf\xfa\xed\xfe", b"\xce\xfa\xed\xfe",
+                            b"\xfe\xed\xfa\xce", b"\xfe\xed\xfa\xcf",
+                            b"\xca\xfe\xba\xbe")
+    return head[:4] == b"\x7fELF"
+
+
+def install_frpc_from_file(src_path: str, project_dir: str) -> Optional[str]:
+    """把用户手动下载的文件装成 frpc，返回可执行文件路径。
+
+    两种东西都认：
+      - frp 官方发布的压缩包（zip / tar.gz）：解出里面的 frpc 二进制
+      - 直接的 frpc 二进制：原样复制过去
+
+    类型按内容判断，不看文件名——浏览器存下来的名字常常被改过。
+    失败返回 None。
+    """
+    src = os.path.abspath(src_path)
+    if not os.path.isfile(src):
+        return None
+
+    target_dir = _frp_dir(project_dir)
+    try:
+        os.makedirs(target_dir, exist_ok=True)
+    except OSError:
+        return None
+    bin_path = get_frpc_bin_path(project_dir)
+
+    kind = _archive_kind(src)
+    if kind:
+        if _extract_frpc(src, project_dir, kind=kind):
+            return bin_path if os.path.isfile(bin_path) else None
+        return None
+
+    # 当成二进制收下，但要像是个可执行文件：内容能不能跑由用户负责，
+    # 「这是不是可执行文件」我们还是看一眼
+    if not _looks_like_executable(src):
+        return None
+    try:
+        shutil.copy2(src, bin_path)
+    except OSError:
+        return None
+    _make_executable(bin_path)
+    return bin_path if os.path.isfile(bin_path) else None
 
 
 def download_frpc(project_dir: str, version: str = "",

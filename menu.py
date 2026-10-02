@@ -734,7 +734,32 @@ from frp.tunnel_manager import (
     load_frp_config, save_frp_config, launch_frpc, stop_frpc,
     is_frpc_running, download_frpc as frp_download_frpc,
     get_frpc_bin_path, get_frpc_toml_path, get_latest_frp_version,
+    releases_url as frp_releases_url, expected_asset_name as frp_expected_asset,
+    install_frpc_from_file as frp_install_from_file,
 )
+
+
+def _manual_frpc_install(project_dir: str, url: str, asset: str,
+                         bin_path: str) -> None:
+    """下载不通时的兜底：给出发布页地址，并允许从本地文件装。
+
+    终端里没有「上传」这个概念，所以能做的就是把「去哪下、下哪个、放哪里」
+    讲清楚，再让用户把已经下好的文件路径填进来，我们替他把 frpc 解出来。
+    """
+    print()
+    print(t("frp.manual_title"))
+    print(t("frp.manual_url", url=url))
+    print(t("frp.manual_asset", asset=asset, name=os.path.basename(bin_path)))
+    print(t("frp.manual_where", path=bin_path))
+    print()
+    answer = input(t("frp.manual_ask")).strip().strip('"')
+    if not answer:
+        return
+    installed = frp_install_from_file(answer, project_dir)
+    if installed:
+        print(t("frp.manual_install_ok", path=installed))
+    else:
+        print(t("frp.manual_install_failed"))
 
 
 def _tunnel_menu(servers: list[dict], servers_dir: str, project_dir: str) -> None:
@@ -854,6 +879,8 @@ def _frp_download(project_dir: str) -> None:
         print(t("frp.frpc_downloaded", path=path))
     else:
         print(t("frp.frpc_download_failed"))
+        _manual_frpc_install(project_dir, frp_releases_url(latest),
+                             frp_expected_asset(latest), bin_path)
     input(t("app.press_enter"))
 
 
@@ -1024,6 +1051,14 @@ def _openfrp_download_frpc(project_dir: str) -> None:
         print(t("openfrp.frpc_downloaded", path=path))
     else:
         print(t("openfrp.frpc_download_failed"))
+        # OpenFrp 的 frpc 不在原版 frp 的仓库里，地址也给出来，别让人自己找
+        from openfrp.tunnel_manager import (OPENFRP_RELEASES_URL,
+                                            expected_asset_name as openfrp_asset)
+        print()
+        print(t("frp.manual_title"))
+        print(t("frp.manual_url", url=OPENFRP_RELEASES_URL))
+        print(t("frp.manual_asset", asset=openfrp_asset(), name="frpc.exe"))
+        print(t("openfrp.manual_extract_hint", path=existing))
     input(t("app.press_enter"))
 
 

@@ -340,6 +340,16 @@ def get_frpc_local_path(project_dir: str) -> str:
     return os.path.join(project_dir, "openfrp", file_name)
 
 
+# OpenFrp 的 frpc 发布在它自己的 GitHub 仓库里，官方 CDN 全挂时可以手动去下
+OPENFRP_RELEASES_URL = "https://github.com/OpenFrp/frpc-release/releases"
+
+
+def expected_asset_name() -> str:
+    """用户该从 GitHub 下哪个文件，例如 frpc_windows_amd64.zip。"""
+    _, _, file_name = _os_arch()
+    return file_name
+
+
 def _download_frpc_file(url: str, target_path: str) -> bool:
     """下载单个 frpc 文件（使用公共下载函数 + frpc 专用校验）。
 

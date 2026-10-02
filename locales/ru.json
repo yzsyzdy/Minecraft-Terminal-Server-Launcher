@@ -549,7 +549,7 @@
     "web.error.frp_remote_port_required": "Для tcp / udp нужен удалённый порт",
     "web.error.frp_domain_required": "Для http / https нужен домен",
     "web.error.frp_bad_proxy_index": "Туннель не найден",
-    "web.error.frpc_download_failed": "Не удалось скачать frpc; проверьте сеть",
+    "web.error.frpc_download_failed": "Не удалось скачать frpc; проверьте сеть. Можно скачать вручную с {url} и загрузить.",
     "web.error.frp_start_failed": "frpc не запустился; проверьте frpc.toml",
     "web.new.tab_generic": "Универсальный",
     "web.new.launch_mode": "Способ запуска",
@@ -632,5 +632,21 @@
     "web.menu.external_hint": "  Внимание: при прослушивании всех интерфейсов убедитесь, что впереди стоит обратный прокси и HTTPS.",
     "web.cli.bind_failed": "  Не удалось запустить панель: не удаётся занять {addr} ({msg}). Порт может быть занят — смените его в меню [8].",
     "web.cli.stop_hint": "  Нажмите Ctrl+C, чтобы остановить панель.",
-    "web.cli.external_warning": "  [внимание] панель слушает все интерфейсы; убедитесь, что впереди стоит обратный прокси и HTTPS."
+    "web.cli.external_warning": "  [внимание] панель слушает все интерфейсы; убедитесь, что впереди стоит обратный прокси и HTTPS.",
+
+    "frp.manual_title": "  Скачивание не работает? Установите вручную:",
+    "frp.manual_url": "  Релизы:    {url}",
+    "frp.manual_asset": "  Нужен файл: {asset} (внутри — {name})",
+    "frp.manual_where": "  Либо положите распакованный frpc в: {path}",
+    "frp.manual_ask": "  Уже скачали? Укажите путь к файлу или архиву (Enter — пропустить): ",
+    "frp.manual_install_ok": "  Установлено: {path}",
+    "frp.manual_install_failed": "  В этом файле не найден frpc; убедитесь, что это официальный архив релиза frp.",
+    "openfrp.manual_extract_hint": "  Положите скачанный архив как есть в: {path} (он распакуется при следующем запуске)",
+    "web.frp.manual": "Не скачивается? Установите вручную",
+    "web.frp.manual_hint": "Скачайте {asset} с GitHub и загрузите {bin} из него (можно и весь архив целиком).",
+    "web.frp.releases": "Открыть страницу релизов",
+    "web.frp.upload": "Загрузить frpc",
+    "web.frp.uploading": "Загрузка…",
+    "web.frp.upload_done": "frpc установлен",
+    "web.error.frpc_install_failed": "В этом файле нет {name}; убедитесь, что это официальный архив релиза frp ({asset})"
 }
