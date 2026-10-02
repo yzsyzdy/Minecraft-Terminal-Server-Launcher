@@ -600,5 +600,19 @@
     "web.menu.autostart_saved": "  面板随软件启动已设为 {val}。",
     "web.cli.auto_launched": "网页面板已在后台启动: {url}",
     "web.settings.auto_start_instance": "随软件启动而启动",
-    "web.settings.auto_start_instance_hint": "软件启动时在后台把这台实例拉起来；它照常写控制台日志，网页面板里能看能管。关掉本程序时会一并停止。"
+    "web.settings.auto_start_instance_hint": "软件启动时在后台把这台实例拉起来；它照常写控制台日志，网页面板里能看能管。关掉本程序时会一并停止。",
+
+    "web.files.upload_folder": "上传文件夹",
+    "web.files.uploading_folder": "正在上传 {done}/{total}",
+    "web.files.folder_done": "已上传 {count} 个文件",
+    "web.files.folder_partial": "上传完成：成功 {done} 个，失败 {failed} 个",
+    "web.files.extract": "解压到当前目录",
+    "web.files.extracting": "正在解压 {name}…",
+    "web.files.extract_done": "已解压 {count} 个文件到 {dest}（跳过 {skipped} 个已存在的）",
+    "web.files.extract_confirm": "把 {name} 解压到它所在的目录？已存在的文件会被跳过，不会覆盖。",
+    "web.error.not_an_archive": "{name} 不是认识的压缩包（只支持 zip 与 tar 系）",
+    "web.error.bad_archive": "解压 {name} 失败：{msg}",
+    "web.error.extract_too_many": "压缩包里条目太多了（超过 {max} 个）",
+    "web.error.extract_too_large": "解压后体积超过上限（{max} GB）",
+    "web.cli.missing_assets": "  [警告] 缺少随包资源: {files}（打包时漏了 include-data-dir？）"
 }

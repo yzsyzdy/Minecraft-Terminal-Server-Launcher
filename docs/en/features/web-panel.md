@@ -35,16 +35,40 @@ The console and the file manager are two tabs of the right-hand pane; switching 
 Select an instance and switch to the **Files** tab:
 
 - Click a folder to enter it; click a text file (`server.properties`, `ops.json`, the various `.yml` files) to open the editor; click anything else to download it
-- Each row has four actions: download, edit, rename, delete. Deleting a folder removes everything inside it
-- The toolbar goes up a level, jumps to the instance root, refreshes, creates a file or folder, and uploads
+- Each row carries action buttons: download, edit, rename, delete; archives get an extra **Extract**
+- The toolbar goes up a level, jumps to the instance root, refreshes, creates a file or folder, uploads a file, and **uploads a folder**
+
+### Uploading a folder
+
+The toolbar's *Upload folder* uses the browser's directory picker. The whole directory comes up with its
+relative paths intact: pick `world` and you get `world/level.dat`, `world/region/…`. Missing intermediate
+directories are created as needed (the browser does not promise an order — `world/level.dat` may well
+arrive before `world/`). The progress bar shows `Uploading 12/340`.
+
+One browser limitation: **empty directories cannot be uploaded** — the directory picker simply never
+reports them, so they are not created.
+
+### Extracting archives
+
+An archive row has an *Extract* button (`⇲`). After a confirmation it unpacks **in place** (into the
+archive's own directory). zip and the tar family (`.tar` / `.tar.gz` / `.tgz`) are supported, detected by
+**content** rather than by extension — browsers rename things.
+
+- **Nothing is overwritten by default**: existing files are skipped. Extraction usually means topping up
+  an instance that already exists, and silently clobbering `server.properties` is far worse than
+  refusing. The result reports how many were skipped
+- Extracted entries obey the same path rules: `..`, absolute paths and drive letters in member names
+  are refused, and symlinks / hard links inside the archive are skipped outright (a link pointing
+  outside the instance would sidestep the sandbox)
+- Two more gates stop zip bombs: at most 200,000 members, and at most 4 GiB unpacked
 
 Limits on paths and sizes:
 
 - Every path is locked inside the selected instance. A relative path containing `..` or a drive letter is rejected, and a symlink or junction pointing outside the instance is rejected after being resolved. A leading `/` means "from the instance root", not an absolute filesystem path
 - A single file can be edited up to **2 MB**. Anything larger, anything binary (containing a NUL byte), or anything that is not UTF-8 text is refused — download it instead
-- A single upload is capped at **512 MB** and is streamed to disk rather than held in memory
+- A single upload is capped at **512 MB** and is streamed to disk rather than held in memory; folder uploads go file by file, each under the same cap
 - Writes go through "temp file + atomic replace", so a failure halfway cannot truncate the original
-- The instance root itself cannot be deleted
+- The instance root itself cannot be deleted; deleting a folder removes everything inside it
 
 ## New instance
 
@@ -153,6 +177,7 @@ The entire contract between the front end and the back end:
 | `POST` | `/api/file/mkdir` | `{"name": "...", "path": "..."}` |
 | `POST` | `/api/file/rename` | `{"name": "...", "path": "...", "new_name": "..."}` |
 | `POST` | `/api/file/delete` | `{"name": "...", "path": "..."}` |
+| `POST` | `/api/file/extract` | `{"name": "...", "path": "...", "dest"?, "overwrite"?}` — unpack an archive in place |
 | `POST` | `/api/file/upload` | `?name=&path=`; the request body *is* the file, read to exactly `Content-Length` |
 | `GET` | `/api/cores` | Server core list; add `?type=<core>` for that core's versions |
 | `POST` | `/api/instances` | `{"name", "kind"?, "mc_version", "min_mem", "max_mem", "core_type"?, "core_version"?, "jar_name"?, "launch"?}` |
@@ -177,6 +202,8 @@ Conventions:
 
 ## Known limits
 
-This is the closed loop plus a few everyday panels, not a full operations panel. Not yet done: plugin and mod management, restoring "which servers were running" after a restart, and managing OpenFrp cloud tunnels from the panel (creating and deleting those still goes through the terminal menu). The file manager keeps deliberate limits too: one file at a time (no multi-select or bulk delete), no whole-folder upload (browsers cannot provide folder contents), no disk-usage column, and no archive extraction.
+This is the closed loop plus a few everyday panels, not a full operations panel. Not yet done: plugin and mod management, restoring "which servers were running" after a restart, and managing OpenFrp cloud tunnels from the panel (creating and deleting those still goes through the terminal menu).
+
+The file manager keeps deliberate limits too: one file at a time (no multi-select or bulk delete), **empty folders cannot be uploaded** (the directory picker never reports them), extraction covers zip and tar only (7z / rar would need an external tool), there is no disk-usage column and no resumable transfers.
 
 Each of those would plug into the same `core/` surface.

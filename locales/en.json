@@ -658,5 +658,19 @@
     "web.menu.autostart_saved": "  Panel start-with-app is now {val}.",
     "web.cli.auto_launched": "Web panel started in the background: {url}",
     "web.settings.auto_start_instance": "Start with the app",
-    "web.settings.auto_start_instance_hint": "Raises this instance in the background when the app starts; it still writes its console log and is manageable from the web panel. It is stopped when this program exits."
+    "web.settings.auto_start_instance_hint": "Raises this instance in the background when the app starts; it still writes its console log and is manageable from the web panel. It is stopped when this program exits.",
+
+    "web.files.upload_folder": "Upload folder",
+    "web.files.uploading_folder": "Uploading {done}/{total}",
+    "web.files.folder_done": "Uploaded {count} files",
+    "web.files.folder_partial": "Upload finished: {done} ok, {failed} failed",
+    "web.files.extract": "Extract into this folder",
+    "web.files.extracting": "Extracting {name}…",
+    "web.files.extract_done": "Extracted {count} files into {dest} (skipped {skipped} existing)",
+    "web.files.extract_confirm": "Extract {name} into its own folder? Existing files are skipped, not overwritten.",
+    "web.error.not_an_archive": "{name} is not a recognised archive (zip and tar only)",
+    "web.error.bad_archive": "Could not extract {name}: {msg}",
+    "web.error.extract_too_many": "Too many entries in the archive (over {max})",
+    "web.error.extract_too_large": "Unpacked size exceeds the {max} GB limit",
+    "web.cli.missing_assets": "  [warning] missing bundled asset(s): {files} (did the build skip include-data-dir?)"
 }

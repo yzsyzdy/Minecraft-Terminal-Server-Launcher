@@ -10,6 +10,7 @@ python -m nuitka --standalone ^
   --file-description="Minecraft Terminal Server Launcher" ^
   --copyright="MSTL" ^
   --include-data-dir=locales=locales ^
+  --include-data-dir=webui=webui ^
   --output-filename=MSTL.exe ^
   start.py
 

@@ -270,13 +270,16 @@ def delete_entry(root: str, rel: str) -> None:
 
 
 def save_upload(root: str, rel: str, stream, content_length: int,
-                max_bytes: int) -> int:
+                max_bytes: int, create_dirs: bool = False) -> int:
     """把上传流写入目标路径，返回字节数。
 
     必须按 Content-Length 精确读取，不能读到 EOF 为止：这是 HTTP 长连接上
     的请求体，读完 body 之后 socket 并不会关闭，多读一次就会永远阻塞在
     下一个字节上。边读边写，不把整个文件读进内存——上传的可能是几十 MB 的
     服务端 jar。
+
+    create_dirs=True 时把缺失的父目录一并建出来。上传整个文件夹要靠它：
+    浏览器给出的顺序不保证，world/level.dat 完全可能先于 world/ 到达。
     """
     clean = normalize_rel(rel)
     if not clean:
@@ -290,7 +293,12 @@ def save_upload(root: str, rel: str, stream, content_length: int,
     target = resolve(root, clean)
     parent = os.path.dirname(target)
     if not os.path.isdir(parent):
-        raise CoreError("web.error.no_such_dir", path=relative(root, parent))
+        if not create_dirs:
+            raise CoreError("web.error.no_such_dir", path=relative(root, parent))
+        try:
+            os.makedirs(parent, exist_ok=True)
+        except OSError as e:
+            raise CoreError("web.error.mkdir_failed", msg=str(e)) from e
     if os.path.isdir(target):
         raise CoreError("web.error.is_a_directory", path=clean)
 

@@ -51,8 +51,35 @@ jobs:
             --file-version=$version `
             --copyright="MSTL" `
             --include-data-dir=locales=locales `
+            --include-data-dir=webui=webui `
             --output-filename=MSTL.exe `
             start.py
+
+      - name: Verify bundled assets
+        shell: powershell
+        run: |
+          # 运行时要读的资源必须真的在 dist 里：漏一个，打包版的对应功能就是坏的
+          # （webui 曾经就漏过，结果面板一打开就是 index.html missing）
+          $dist = "build\MSTL\start.dist"
+          $required = @(
+            "webui\index.html",
+            "locales\zh.json",
+            "locales\en.json"
+          )
+          $missing = @()
+          foreach ($rel in $required) {
+            $p = Join-Path $dist $rel
+            if (Test-Path $p) {
+              Write-Host "  ok   $rel"
+            } else {
+              Write-Host "  MISSING $rel"
+              $missing += $rel
+            }
+          }
+          if ($missing.Count -gt 0) {
+            Write-Error "打包产物缺少运行所需资源: $($missing -join ', ')"
+            exit 1
+          }
 
       - name: List build output
         run: Get-ChildItem -Path build\MSTL\start.dist | Select-Object FullName, Length

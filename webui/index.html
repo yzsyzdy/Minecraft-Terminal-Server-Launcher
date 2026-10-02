@@ -233,9 +233,11 @@
         <button id="fnewfile"></button>
         <button id="fnewdir"></button>
         <button id="fupload"></button>
+        <button id="fuploaddir"></button>
         <button id="frefresh">⟳</button>
       </div>
       <input type="file" id="fupload-input" hidden>
+      <input type="file" id="fupload-dir-input" webkitdirectory directory multiple hidden>
       <div id="flist"></div>
       <div id="editor" hidden>
         <div id="ebar">
@@ -793,6 +795,7 @@ function applyStrings() {
   $("fnewfile").textContent = strings["web.files.new_file"] || "New file";
   $("fnewdir").textContent = strings["web.files.new_dir"] || "New folder";
   $("fupload").textContent = strings["web.files.upload"] || "Upload";
+  $("fuploaddir").textContent = strings["web.files.upload_folder"] || "Upload folder";
   $("frefresh").title = strings["web.files.refresh"] || "Refresh";
   $("esave").textContent = strings["web.files.save"] || "Save";
   $("ecancel").textContent = strings["web.files.cancel"] || "Cancel";
@@ -1309,6 +1312,9 @@ function buildFileRow(entry, isUp) {
   if (!isUp) {
     if (!entry.dir) {
       ops.appendChild(opButton("⭳", strings["web.files.download"], () => downloadFile(entry)));
+      if (entry.archive) {
+        ops.appendChild(opButton("⇲", strings["web.files.extract"], () => extractEntry(entry)));
+      }
       if (entry.editable) {
         ops.appendChild(opButton("✎", strings["web.files.edit"], () => openEditor(entry.path)));
       }
@@ -1444,6 +1450,69 @@ async function uploadFile(file) {
     loadFiles();
   } catch (err) {
     fail(err);
+  }
+}
+
+/* 上传整个文件夹：目录选择器会把每个文件带上 webkitRelativePath，
+   照它建目录即可。空目录浏览器不会报，所以建不出来（会在文档里写明）。 */
+async function uploadFolder(fileList) {
+  if (!fileList || !fileList.length || !selected) return;
+  const items = [];
+  for (let i = 0; i < fileList.length; i += 1) {
+    const file = fileList[i];
+    const rel = String(file.webkitRelativePath || file.name).replace(/\\/g, "/");
+    items.push({ file: file, rel: rel });
+  }
+  const total = items.length;
+  let done = 0;
+  let failed = 0;
+  const progressLabel = (n) => fmt(strings["web.files.uploading_folder"] || "{done}/{total}",
+                                   { done: n, total: total });
+
+  showJob({ label: progressLabel(0), ratio: 0 });
+  for (let i = 0; i < items.length; i += 1) {
+    const item = items[i];
+    const path = joinPath(filesPath, item.rel);
+    try {
+      await uploadWithProgress(
+        "/api/file/upload?name=" + encodeURIComponent(selected) +
+        "&path=" + encodeURIComponent(path), item.file,
+        (ratio) => showJob({ label: progressLabel(done), ratio: (done + ratio) / total }));
+      done += 1;
+    } catch (err) {
+      failed += 1;
+    }
+    showJob({ label: progressLabel(done), ratio: done / total });
+  }
+  showJob({ label: progressLabel(done), ratio: 1, done: true });
+
+  if (failed) {
+    toast(fmt(strings["web.files.folder_partial"] || "{done} ok, {failed} failed",
+              { done: done, failed: failed }), true);
+  } else {
+    toast(fmt(strings["web.files.folder_done"] || "{count} files", { count: done }));
+  }
+  loadFiles();
+}
+
+/* 在线解压：解到压缩包自己所在的目录，已存在的文件跳过不覆盖 */
+async function extractEntry(entry) {
+  if (!selected) return;
+  const ask = fmt(strings["web.files.extract_confirm"] || "Extract {name}?",
+                  { name: entry.name });
+  if (!window.confirm(ask)) return;
+  const label = fmt(strings["web.files.extracting"] || "{name}", { name: entry.name });
+  showJob({ label: label, ratio: 0 });
+  try {
+    // 解压是同步 POST，进度条的收尾由服务端的 job 事件负责；这里只兜底
+    const data = await apiOk("/api/file/extract",
+                             { name: selected, path: entry.path });
+    toast(data.message || "");
+    loadFiles();
+  } catch (err) {
+    fail(err);
+  } finally {
+    showJob({ label: label, ratio: 1, done: true });
   }
 }
 
@@ -2033,6 +2102,12 @@ $("fupload-input").onchange = (ev) => {
   const file = ev.target.files && ev.target.files[0];
   ev.target.value = "";
   uploadFile(file);
+};
+$("fuploaddir").onclick = () => $("fupload-dir-input").click();
+$("fupload-dir-input").onchange = (ev) => {
+  const list = Array.prototype.slice.call(ev.target.files || []);
+  ev.target.value = "";
+  uploadFolder(list);
 };
 $("esave").onclick = saveEditor;
 $("ecancel").onclick = closeEditor;

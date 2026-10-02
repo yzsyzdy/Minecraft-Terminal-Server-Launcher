@@ -35,6 +35,7 @@ from typing import Any, Optional
 from urllib.parse import parse_qs, urlparse
 
 from config import load_config, save_config
+from core import archive as archives
 from core import files as fileops
 from core import frp as frpops
 from core import provision
@@ -114,6 +115,14 @@ WEB_STRINGS = (
     "web.files.too_big_to_edit",
     "web.files.dir",
     "web.files.file",
+    "web.files.extract",
+    "web.files.extracting",
+    "web.files.extract_done",
+    "web.files.extract_confirm",
+    "web.files.upload_folder",
+    "web.files.uploading_folder",
+    "web.files.folder_done",
+    "web.files.folder_partial",
     # 新建实例
     "web.new.title",
     "web.new.name",
@@ -198,6 +207,7 @@ WEB_STRINGS = (
     "web.frp.confirm_remove",
     "web.frp.started",
     "web.frp.stopped_msg",
+    "web.cli.missing_assets",
     "web.frp.manual",
     "web.frp.manual_hint",
     "web.frp.releases",
@@ -334,6 +344,28 @@ def _index_html() -> str:
     path = os.path.join(bundled_dir(), "webui", "index.html")
     with open(path, "r", encoding="utf-8") as f:
         return f.read()
+
+
+# 运行时要读的随包资源。打包脚本漏了 include-data-dir 时，界面上的表现是
+# 「面板打不开」或「界面全是 i18n key」，很难联想到打包；启动时先点名说清楚。
+_BUNDLED_ASSETS = (
+    os.path.join("webui", "index.html"),
+    os.path.join("locales", "zh.json"),
+    os.path.join("locales", "en.json"),
+)
+
+
+def missing_assets() -> list[str]:
+    """返回缺失的随包资源（相对路径）。源码模式下应当永远是空的。"""
+    base = bundled_dir()
+    return [rel for rel in _BUNDLED_ASSETS
+            if not os.path.isfile(os.path.join(base, rel))]
+
+
+def _warn_missing_assets() -> None:
+    missing = missing_assets()
+    if missing:
+        print(t("web.cli.missing_assets", files=", ".join(missing)))
 
 
 class _BodyStream:
@@ -631,6 +663,9 @@ def _make_handler(manager: RuntimeManager, servers_dir: str, token: str,
                 "size": e.size,
                 "mtime": e.mtime,
                 "editable": e.editable,
+                # 界面按这个决定要不要显示「解压」按钮；真正解压时服务端
+                # 仍按内容再判断一次
+                "archive": (not e.is_dir) and archives.is_archive_name(e.name),
             } for e in fileops.list_dir(root, rel)]
             current = fileops.normalize_rel(rel)
             parent = ""
@@ -696,7 +731,9 @@ def _make_handler(manager: RuntimeManager, servers_dir: str, token: str,
                 return
             try:
                 written = fileops.save_upload(
-                    root, rel, _BodyStream(self), length, MAX_UPLOAD_BYTES)
+                    root, rel, _BodyStream(self), length, MAX_UPLOAD_BYTES,
+                    # 上传文件夹时 world/level.dat 可能先于 world/ 到达
+                    create_dirs=True)
             except CoreError as err:
                 fail(err)
                 return
@@ -729,6 +766,30 @@ def _make_handler(manager: RuntimeManager, servers_dir: str, token: str,
                 root = self._instance_dir(name)
                 fileops.delete_entry(root, str(body.get("path") or ""))
                 return self._json({"ok": True})
+
+            if path == "/api/file/extract":
+                root = self._instance_dir(name)
+                src_rel = str(body.get("path") or "")
+                dest_rel = body.get("dest")
+                label = t("web.files.extracting", name=os.path.basename(src_rel))
+                try:
+                    result = archives.extract(
+                        root, src_rel,
+                        dest_rel if isinstance(dest_rel, str) else None,
+                        overwrite=bool(body.get("overwrite")))
+                finally:
+                    finish_job(label)
+                return self._json({
+                    "ok": True,
+                    "dest": result.dest,
+                    "extracted": result.extracted,
+                    "skipped": result.skipped,
+                    "refused": result.refused,
+                    "message": t("web.files.extract_done",
+                                 count=result.extracted,
+                                 dest=result.dest or "/",
+                                 skipped=result.skipped),
+                })
 
             if path == "/api/instances":
                 return self._create_instance(body)
@@ -1112,6 +1173,7 @@ def start_background(project_dir: str, host: Optional[str] = None,
     threading.Thread(target=httpd.serve_forever, name="mstl-web", daemon=True).start()
     atexit.register(_stop_background)
 
+    _warn_missing_assets()
     shown_host = "127.0.0.1" if bind_host in ("0.0.0.0", "::") else bind_host
     print(t("web.cli.auto_launched",
             url=f"http://{shown_host}:{httpd.server_address[1]}/?token={token}"))
@@ -1149,6 +1211,7 @@ def run_web(project_dir: str, host: Optional[str] = None,
         return False
 
     shown_host = "127.0.0.1" if bind_host in ("0.0.0.0", "::") else bind_host
+    _warn_missing_assets()
     print(t("web.cli.launched", url=f"http://{shown_host}:{httpd.server_address[1]}/?token={token}"))
     print(t("web.cli.token", token=token))
     print(t("web.cli.stop_hint"))

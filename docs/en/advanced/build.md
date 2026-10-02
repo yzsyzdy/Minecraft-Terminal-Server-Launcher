@@ -24,6 +24,7 @@ python -m nuitka --standalone ^
   --file-description="Minecraft Terminal Server Launcher" ^
   --copyright="MSTL" ^
   --include-data-dir=locales=locales ^
+  --include-data-dir=webui=webui ^
   --output-filename=MSTL.exe ^
   start.py
 ```
@@ -38,9 +39,22 @@ Each flag, one by one:
 | `--windows-console-mode=force` | Forces the console window to stay. MSTL is a terminal program; this one is not optional |
 | `--windows-icon-from-ico=icon.png` | Sets the executable icon |
 | `--include-data-dir=locales=locales` | Packages the `locales/` directory into the output. **The runtime directory name has to be `locales`**; get it wrong and the whole UI shows raw keys |
+| `--include-data-dir=webui=webui` | Packages `webui/`. **Omit it and the web panel is dead**: it opens to `webui/index.html missing` |
 | `--output-dir=build` | Writes the output to `build/` |
 
 The artifact lands at `build/start.dist/MSTL.exe`. The entire `start.dist/` directory has to be distributed together; the executable alone is not enough.
+
+### Bundled assets the exe reads at runtime
+
+These are hard-coded paths into the bundle. **Miss one and that feature is broken:**
+
+| Asset | Read by | If missing |
+|---|---|---|
+| `locales/*.json` | `i18n` | The whole UI renders as raw i18n keys |
+| `webui/index.html` | `web/server.py` | The web panel will not open (HTTP 500) |
+| `version.json` | `check_update.py` | The update check silently skips (written by CI after packaging; absent in source mode anyway) |
+
+CI's `build.yml` has a `Verify bundled assets` step that checks the first two and fails the build if either is missing. In source mode or a hand-rolled build, starting the panel also runs the same self-check and prints `[warning] missing bundled asset(s): …`, so you find out before the browser does.
 
 ## Version numbers
 

@@ -658,5 +658,19 @@
     "web.menu.autostart_saved": "  Автозапуск панели: {val}.",
     "web.cli.auto_launched": "Веб-панель запущена в фоне: {url}",
     "web.settings.auto_start_instance": "Запускать вместе с программой",
-    "web.settings.auto_start_instance_hint": "Поднимает этот инстанс в фоне при старте программы; он по-прежнему пишет лог консоли и управляется из веб-панели. При выходе из программы останавливается."
+    "web.settings.auto_start_instance_hint": "Поднимает этот инстанс в фоне при старте программы; он по-прежнему пишет лог консоли и управляется из веб-панели. При выходе из программы останавливается.",
+
+    "web.files.upload_folder": "Загрузить папку",
+    "web.files.uploading_folder": "Загрузка {done}/{total}",
+    "web.files.folder_done": "Загружено файлов: {count}",
+    "web.files.folder_partial": "Загрузка завершена: {done} успешно, {failed} с ошибкой",
+    "web.files.extract": "Распаковать в эту папку",
+    "web.files.extracting": "Распаковка {name}…",
+    "web.files.extract_done": "Распаковано файлов: {count} в {dest} (пропущено {skipped})",
+    "web.files.extract_confirm": "Распаковать {name} в его папку? Существующие файлы пропускаются, не перезаписываются.",
+    "web.error.not_an_archive": "{name} — не распознанный архив (только zip и tar)",
+    "web.error.bad_archive": "Не удалось распаковать {name}: {msg}",
+    "web.error.extract_too_many": "Слишком много записей в архиве (больше {max})",
+    "web.error.extract_too_large": "Размер после распаковки превышает лимит {max} ГБ",
+    "web.cli.missing_assets": "  [внимание] нет встроенных ресурсов: {files} (сборка пропустила include-data-dir?)"
 }

@@ -24,6 +24,7 @@ python -m nuitka --standalone ^
   --file-description="Minecraft Terminal Server Launcher" ^
   --copyright="MSTL" ^
   --include-data-dir=locales=locales ^
+  --include-data-dir=webui=webui ^
   --output-filename=MSTL.exe ^
   start.py
 ```
@@ -38,9 +39,24 @@ python -m nuitka --standalone ^
 | `--windows-console-mode=force` | 强制保留控制台窗口。MSTL 是终端程序，这条不能省 |
 | `--windows-icon-from-ico=icon.png` | 设置 exe 图标 |
 | `--include-data-dir=locales=locales` | 把 `locales/` 目录打进产物，**运行时目录名必须是 `locales`**，写错会导致界面全是 key |
+| `--include-data-dir=webui=webui` | 把 `webui/` 打进产物。**漏了它网页面板就废了**：一打开就是 `webui/index.html missing` |
 | `--output-dir=build` | 输出到 `build/` |
 
 产物在 `build/start.dist/MSTL.exe`。整个 `start.dist/` 目录需要一起分发，不能只给 exe。
+
+### 运行时资源清单
+
+exe 里硬编码要读这些随包资源，**打包时缺一个，对应功能就是坏的**：
+
+| 资源 | 谁在读 | 缺了会怎样 |
+|---|---|---|
+| `locales/*.json` | `i18n` | 界面全部显示成 i18n key |
+| `webui/index.html` | `web/server.py` | 网页面板打不开（HTTP 500） |
+| `version.json` | `check_update.py` | 更新检查静默跳过（CI 打包后写入，源码模式下本就没有） |
+
+CI 的 `build.yml` 里有一道 `Verify bundled assets` 步骤专门检查前两项，缺了直接让构建失败。
+源码模式或手工打包时，启动面板也会自查一遍并打印 `[警告] 缺少随包资源: …`，
+不必等到浏览器里报错才发现。
 
 ## 版本号
 
