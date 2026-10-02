@@ -122,6 +122,8 @@ Minecraft-Terminal-Server-Launcher/
 │   ├── report.py         #   one-way event channel from core to the UI
 │   ├── errors.py         #   business exceptions carrying i18n keys
 │   ├── instances.py      #   instances and jar enabled state
+│   ├── files.py          #   file read/write inside an instance (paths locked to it)
+│   ├── provision.py      #   creating instances: folder, core, archive import
 │   ├── transfer.py       #   archive import and export
 │   ├── java.py           #   non-interactive Java resolution
 │   └── runtime.py        #   launch plans and process supervision (pipes + event stream)
@@ -220,7 +222,9 @@ python start.py web --port 9000    # pick another port
 
 Startup prints a URL carrying a token; opening it logs you in. The token lives in `web.token` under `config.json`. From the panel you can list instances, start and stop them, watch the console live, and send server commands. Console output is also appended to `logs/mstl-console.log` inside the instance directory.
 
-> **It listens on 127.0.0.1 only, by default.** The panel can send commands to a server console, which makes it a remote command execution button. To reach it through frp, put a reverse proxy and HTTPS in front, and think twice before changing `web.host`.
+The right-hand pane has two tabs, **Console** and **Files**. The file manager browses an instance's tree and edits text files such as `server.properties` in place, and can create, rename, delete, upload and download; every path stays inside the selected instance folder. The `＋` in the top bar creates a new instance: download a server core from the MSL mirror, use a local jar, or import an existing zip archive.
+
+> **It listens on 127.0.0.1 only, by default.** The panel can send commands to a server console *and* rewrite files inside the instance directory, so it hands both a command channel and the instance tree to a browser. To reach it through frp, put a reverse proxy and HTTPS in front, and think twice before changing `web.host`.
 
 ## Documentation
 

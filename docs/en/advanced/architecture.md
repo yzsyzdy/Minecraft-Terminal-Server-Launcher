@@ -27,11 +27,13 @@ The point of the split is the TUI and web panel still to come: a new front end d
 | `core/errors.py` | `CoreError`, a business exception carrying an i18n key for the UI to translate |
 | `core/report.py` | A one-way event channel from core to the UI: `log` / `progress` / `warn` |
 | `core/instances.py` | Instances and jars: scanning, enable/disable, delete, import |
+| `core/files.py` | Reading and writing files inside an instance: listing, text read/write, create/rename/delete, landing uploads — every path locked to the instance folder |
+| `core/provision.py` | Creating instances: make the folder, install a core from MSL, scan and import an archive |
 | `core/transfer.py` | Archive import and export: `plan_import` / `commit_import` / `export_instance` |
 | `core/java.py` | Non-interactive Java resolution: explicit path → last choice → cache → fresh scan |
 | `core/runtime.py` | Launch plans and process supervision: bidirectional pipes, ring buffer, event broadcast |
 
-Import is deliberately split in two steps, because "which candidate core jar to pick" is not a decision core gets to make. `plan_import` only extracts and lists the candidates; the UI asks the user and then calls `commit_import` to put things in place.
+Import is deliberately split in two steps, because "which candidate core jar to pick" is not a decision core gets to make. `plan_import` only extracts and lists the candidates; the UI asks the user and then calls `commit_import` to put things in place. `scan_archive` / `import_archive` in `core/provision.py` are a thin web-panel-facing wrapper over that same path.
 
 ### Entry point and configuration
 

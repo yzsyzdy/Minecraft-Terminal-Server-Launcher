@@ -273,7 +273,8 @@ def _download_chunk(url: str, start: int, end: int, target_path: str,
 
 
 def download_file_with_progress(url: str, target_path: str, desc: str = "",
-                                headers: Optional[dict] = None) -> bool:
+                                headers: Optional[dict] = None,
+                                quiet: bool = False) -> bool:
     """单线程文件下载（带进度条）。
 
     Args:
@@ -281,6 +282,7 @@ def download_file_with_progress(url: str, target_path: str, desc: str = "",
         target_path: 本地保存路径
         desc: 进度条描述文字
         headers: 自定义请求头（可选）
+        quiet: 不往 stdout 画进度，供不需要终端的调用方使用
 
     Returns:
         成功返回 True，失败返回 False
@@ -303,6 +305,8 @@ def download_file_with_progress(url: str, target_path: str, desc: str = "",
                         break
                     f.write(chunk)
                     downloaded += len(chunk)
+                    if quiet:
+                        continue
                     if total and total > 0:
                         pct = downloaded / total
                         filled = int(bar_width * pct)
@@ -310,10 +314,12 @@ def download_file_with_progress(url: str, target_path: str, desc: str = "",
                         print(f"    {desc} [{bar}] {pct * 100:5.1f}%", end="\r", flush=True)
                     else:
                         print(f"    {desc} {downloaded/1024/1024:.1f} MB...", end="\r", flush=True)
-        print()
+        if not quiet:
+            print()
         return True
     except (urllib.error.HTTPError, urllib.error.URLError, OSError) as e:
-        print(f"\n  {t('app.error', msg=f'Download failed: {e}')}")
+        if not quiet:
+            print(f"\n  {t('app.error', msg=f'Download failed: {e}')}")
         return False
 
 
@@ -323,7 +329,8 @@ _download_with_progress = download_file_with_progress
 
 def multithreaded_download(url: str, target_path: str, desc: str = "",
                            num_threads: int = _DEFAULT_DOWNLOAD_THREADS,
-                           headers: Optional[dict] = None) -> bool:
+                           headers: Optional[dict] = None,
+                           quiet: bool = False) -> bool:
     """
     Multi-threaded file download.
 
@@ -333,20 +340,25 @@ def multithreaded_download(url: str, target_path: str, desc: str = "",
 
     headers 会带给探测、分片和单线程回退三条路径。CurseForge 从 2026-07-16
     起要求下载也带 x-api-key，缺了它整个下载路径都只会拿到 401。
+    quiet 供网页面板这类没有终端的调用方使用。
     """
+    def say(message: str, end: str = "\n") -> None:
+        if not quiet:
+            print(message, end=end, flush=True)
+
     # 检查服务器是否支持 Range 请求，同时获取文件大小
     range_supported, file_size = _check_range_support(url, headers)
 
     if file_size < _MIN_CHUNK_SIZE or file_size <= 0:
-        return download_file_with_progress(url, target_path, desc, headers)
+        return download_file_with_progress(url, target_path, desc, headers, quiet)
 
     # 如果服务器明确不支持 Range 请求，直接使用单线程下载
     if not range_supported:
-        return download_file_with_progress(url, target_path, desc, headers)
+        return download_file_with_progress(url, target_path, desc, headers, quiet)
 
     actual_threads = min(num_threads, max(1, file_size // _MIN_CHUNK_SIZE))
     if actual_threads <= 1:
-        return download_file_with_progress(url, target_path, desc, headers)
+        return download_file_with_progress(url, target_path, desc, headers, quiet)
 
     chunk_size = file_size // actual_threads
 
@@ -364,7 +376,7 @@ def multithreaded_download(url: str, target_path: str, desc: str = "",
     lock = threading.Lock()
     bar_width = 30
 
-    print(f"    {desc} ({actual_threads} threads)...")
+    say(f"    {desc} ({actual_threads} threads)...")
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=actual_threads) as executor:
         futures = [
@@ -377,6 +389,8 @@ def multithreaded_download(url: str, target_path: str, desc: str = "",
         pending = set(futures)
         while pending:
             _done, pending = concurrent.futures.wait(pending, timeout=0.15)
+            if quiet:
+                continue
             with lock:
                 downloaded = shared["downloaded"]
             if file_size > 0:
@@ -399,12 +413,12 @@ def multithreaded_download(url: str, target_path: str, desc: str = "",
                 os.remove(target_path)
             except OSError:
                 pass
-            print(f"\n  {t('download.retry_fallback')}")
-            return download_file_with_progress(url, target_path, desc, headers)
+            say(f"\n  {t('download.retry_fallback')}")
+            return download_file_with_progress(url, target_path, desc, headers, quiet)
 
     final_bar = "\u2588" * bar_width
-    print(f"    {desc} [{final_bar}] 100.0%  "
-          f"({file_size/1024/1024:.1f}/{file_size/1024/1024:.1f} MB)")
+    say(f"    {desc} [{final_bar}] 100.0%  "
+        f"({file_size/1024/1024:.1f}/{file_size/1024/1024:.1f} MB)")
     return True
 
 

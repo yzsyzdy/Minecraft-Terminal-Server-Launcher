@@ -27,11 +27,13 @@
 | `core/errors.py` | 带 i18n key 的业务异常 `CoreError`，界面层负责翻译呈现 |
 | `core/report.py` | core 到界面的单向事件通道：`log` / `progress` / `warn` |
 | `core/instances.py` | 实例与 jar：扫描、启用/禁用、删除、导入 |
+| `core/files.py` | 实例内文件读写：目录列举、文本读写、新建/改名/删除、上传落地，路径一律锁在实例目录内 |
+| `core/provision.py` | 新建实例：建目录、从 MSL 装核心、扫描并导入存档 |
 | `core/transfer.py` | 压缩包进出：`plan_import` / `commit_import` / `export_instance` |
 | `core/java.py` | 非交互式 Java 解析：显式路径 → 上次选择 → 缓存 → 现场扫描 |
 | `core/runtime.py` | 启动计划与进程监管：PIPE 双向读写、环形缓冲、事件广播 |
 
-导入特意拆成两步，是因为「多个候选核心该选哪个」不该由 core 拍板。`plan_import` 只负责解压并列出候选，界面层问完用户再调 `commit_import` 落地。
+导入特意拆成两步，是因为「多个候选核心该选哪个」不该由 core 拍板。`plan_import` 只负责解压并列出候选，界面层问完用户再调 `commit_import` 落地。`core/provision.py` 的 `scan_archive` / `import_archive` 就是这条路径上面向网页面板的一层薄封装。
 
 ### 入口与配置
 

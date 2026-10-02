@@ -14,6 +14,9 @@
     --ok:#1a7f37; --warn:#9a6700; --err:#cf222e;
   }
   *{box-sizing:border-box}
+  /* 作者样式优先于浏览器默认样式，所以下面那些 display:flex 会把 UA 的
+     [hidden]{display:none} 顶掉——被隐藏的面板反而一直看得见。这条兜住它。 */
+  [hidden]{display:none !important}
   body{margin:0;color:var(--fg);
        background-color:#ffffff;
        background-image:linear-gradient(180deg,var(--tint) 0,#ffffff 260px);
@@ -108,6 +111,73 @@
   #cmd::placeholder{color:var(--dim)}
   #cmd:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px rgba(76,91,212,.12)}
 
+  /* ---------------------------------------------------------- 标签与文件管理器 */
+  .tab{font-size:12px;padding:3px 12px;border-radius:99px;color:var(--dim)}
+  .tab.on{color:var(--accent);border-color:var(--accent);background:var(--sel)}
+
+  #files{flex:1;display:flex;flex-direction:column;min-height:0;background:#fff}
+  #fbar{display:flex;align-items:center;gap:8px;padding:8px 14px;
+        border-bottom:1px solid var(--line);flex-wrap:wrap;
+        background:linear-gradient(180deg,#fff,#fbfcff)}
+  #fpath{font:12.5px ui-monospace,Consolas,monospace;color:var(--dim);
+         overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:44ch}
+  #flist{flex:1;overflow:auto}
+  #flist table{width:100%;border-collapse:collapse;font-size:13px}
+  #flist th{position:sticky;top:0;z-index:1;text-align:left;font-weight:600;
+            color:var(--dim);font-size:12px;padding:7px 12px;
+            background:linear-gradient(180deg,#ffffff,#fbfcff);
+            border-bottom:1px solid var(--line)}
+  #flist td{padding:6px 12px;border-bottom:1px solid #f1f3f6;vertical-align:middle}
+  #flist tr:hover td{background:var(--hover)}
+  #flist .fname{display:flex;align-items:center;gap:7px;cursor:pointer;min-width:0}
+  #flist .fname span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  #flist .fico{flex:0 0 auto;width:16px;text-align:center}
+  #flist .fdir{font-weight:600}
+  #flist .fmeta{color:var(--dim);font-size:12px;white-space:nowrap}
+  #flist .fops{display:flex;gap:5px;justify-content:flex-end}
+  #flist .fops button{padding:2px 9px;font-size:12px}
+  .fempty{color:var(--dim);padding:18px 14px}
+
+  #editor{position:absolute;inset:0;display:flex;flex-direction:column;
+          background:#fff;z-index:5}
+  #ebar{display:flex;align-items:center;gap:8px;padding:9px 14px;
+        border-bottom:1px solid var(--line)}
+  #epath{font:12.5px ui-monospace,Consolas,monospace;color:var(--dim);
+         overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  #etext{flex:1;border:0;outline:none;resize:none;padding:12px 15px;
+         font:12.5px/1.65 ui-monospace,Consolas,monospace;color:#24292f;
+         background:#fbfcfd;tab-size:4}
+
+  /* ---------------------------------------------------------------- 对话框 */
+  #modal{position:fixed;inset:0;background:rgba(31,36,48,.34);z-index:20;
+         display:flex;align-items:center;justify-content:center;padding:18px}
+  #dialog{background:#fff;border:1px solid var(--line);border-radius:12px;
+          box-shadow:0 18px 48px rgba(31,36,48,.24);width:min(640px,100%);
+          max-height:100%;display:flex;flex-direction:column;overflow:hidden}
+  .dhead{display:flex;align-items:center;gap:8px;padding:12px 16px;
+         border-bottom:1px solid var(--line);
+         background:linear-gradient(180deg,#ffffff,#fbfcff)}
+  .dhead b{font-size:15px}
+  .dtabs{display:flex;gap:6px;padding:12px 16px 0;flex-wrap:wrap}
+  .dbody{padding:14px 16px 16px;overflow:auto}
+  .drow{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px}
+  .field{display:flex;flex-direction:column;gap:4px;flex:1;min-width:150px}
+  .field label{font-size:12px;color:var(--dim)}
+  .field input,.field select{padding:7px 9px;border-radius:6px;
+        border:1px solid var(--line);background:#fff;color:var(--fg);
+        font:13px system-ui;min-width:0}
+  .field input:focus,.field select:focus{outline:none;border-color:var(--accent);
+        box-shadow:0 0 0 3px rgba(76,91,212,.12)}
+  .hint{font-size:12px;color:var(--dim);line-height:1.6;margin-bottom:10px}
+  .dactions{display:flex;gap:8px;justify-content:flex-end;
+            padding-top:6px;flex-wrap:wrap}
+
+  #toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);
+         background:#1f2430;color:#fff;padding:9px 15px;border-radius:8px;
+         font-size:13px;box-shadow:0 8px 22px rgba(31,36,48,.28);z-index:40;
+         max-width:min(560px,92vw)}
+  #toast.err{background:var(--err)}
+
   @media (max-width:780px){
     main{grid-template-columns:1fr;grid-template-rows:auto minmax(0,1fr)}
     #list{border-right:none;border-bottom:1px solid var(--line);max-height:34vh}
@@ -120,6 +190,7 @@
   <b id="title">MSTL</b>
   <span class="dot" id="conn"></span>
   <span class="sp"></span>
+  <button id="newinst">＋</button>
   <button id="refresh">⟳</button>
 </header>
 <main>
@@ -129,11 +200,36 @@
       <span class="name" id="cur"></span>
       <span class="badge" id="curstate"></span>
       <span class="sp"></span>
+      <button class="tab" id="tab-console"></button>
+      <button class="tab" id="tab-files"></button>
       <button id="clear"></button>
       <button id="follow"></button>
     </div>
     <div id="details"></div>
     <pre id="log"></pre>
+    <div id="files" hidden>
+      <div id="fbar">
+        <button id="fup" title="..">↑</button>
+        <button id="froot">/</button>
+        <span id="fpath"></span>
+        <span class="sp" style="flex:1"></span>
+        <button id="fnewfile"></button>
+        <button id="fnewdir"></button>
+        <button id="fupload"></button>
+        <button id="frefresh">⟳</button>
+      </div>
+      <input type="file" id="fupload-input" hidden>
+      <div id="flist"></div>
+      <div id="editor" hidden>
+        <div id="ebar">
+          <span id="epath"></span>
+          <span class="sp" style="flex:1"></span>
+          <button class="primary" id="esave"></button>
+          <button id="ecancel"></button>
+        </div>
+        <textarea id="etext" spellcheck="false" autocomplete="off"></textarea>
+      </div>
+    </div>
     <button id="jump" hidden></button>
     <div id="bar">
       <div id="chips"></div>
@@ -144,6 +240,113 @@
     </div>
   </div>
 </main>
+
+<div id="modal" hidden>
+  <div id="dialog">
+    <div class="dhead">
+      <b id="dtitle"></b>
+      <span style="flex:1"></span>
+      <button id="dclose">✕</button>
+    </div>
+    <div class="dtabs">
+      <button class="tab on" id="ntab-core"></button>
+      <button class="tab" id="ntab-jar"></button>
+      <button class="tab" id="ntab-import"></button>
+    </div>
+    <div class="dbody">
+      <div id="npane-core">
+        <div class="drow">
+          <div class="field">
+            <label id="l-core"></label>
+            <select id="ni-core"></select>
+          </div>
+          <div class="field">
+            <label id="l-version"></label>
+            <select id="ni-version"></select>
+          </div>
+        </div>
+        <div class="hint" id="ni-core-desc"></div>
+        <div class="drow">
+          <div class="field">
+            <label id="l-name"></label>
+            <input id="ni-name" placeholder="">
+          </div>
+          <div class="field">
+            <label id="l-mcver"></label>
+            <input id="ni-mcver" placeholder="">
+          </div>
+        </div>
+        <div class="drow">
+          <div class="field">
+            <label id="l-minmem"></label>
+            <input id="ni-minmem" value="1G">
+          </div>
+          <div class="field">
+            <label id="l-maxmem"></label>
+            <input id="ni-maxmem" value="4G">
+          </div>
+        </div>
+        <div class="dactions">
+          <button id="ni-create"></button>
+          <button id="ni-blank"></button>
+        </div>
+      </div>
+
+      <div id="npane-jar" hidden>
+        <div class="hint" id="ni-jar-hint"></div>
+        <div class="drow">
+          <div class="field">
+            <label id="l-jarfile"></label>
+            <input type="file" id="ni-jarfile" accept=".jar">
+          </div>
+        </div>
+        <div class="drow">
+          <div class="field">
+            <label id="l-name2"></label>
+            <input id="ni-jarname" placeholder="">
+          </div>
+          <div class="field">
+            <label id="l-minmem2"></label>
+            <input id="ni-jarmin" value="1G">
+          </div>
+          <div class="field">
+            <label id="l-maxmem2"></label>
+            <input id="ni-jarmax" value="4G">
+          </div>
+        </div>
+        <div class="dactions">
+          <button class="primary" id="ni-jar-create"></button>
+        </div>
+      </div>
+
+      <div id="npane-import" hidden>
+        <div class="hint" id="ni-import-hint"></div>
+        <div class="drow">
+          <div class="field" style="flex:3">
+            <label id="l-zippath"></label>
+            <input id="ni-zip" placeholder="D:\backup\server.zip">
+          </div>
+        </div>
+        <div class="drow">
+          <div class="field">
+            <label id="l-importjar"></label>
+            <select id="ni-importjar"></select>
+          </div>
+          <div class="field">
+            <label id="l-name3"></label>
+            <input id="ni-importname" placeholder="">
+          </div>
+        </div>
+        <div class="dactions">
+          <button id="ni-scan"></button>
+          <button class="primary" id="ni-import"></button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="toast" hidden></div>
 <script>
 const $ = (id) => document.getElementById(id);
 const MAX_LINES = 2000;
@@ -288,6 +491,46 @@ function applyStrings() {
   $("jump").textContent = strings["web.panel.jump_bottom"] || "Bottom";
   $("refresh").title = strings["web.panel.instances"] || "";
   $("follow").className = follow ? "on" : "";
+
+  $("tab-console").textContent = strings["web.tab.console"] || "Console";
+  $("tab-files").textContent = strings["web.tab.files"] || "Files";
+  $("fup").title = strings["web.files.up"] || "..";
+  $("froot").title = strings["web.files.root"] || "/";
+  $("fnewfile").textContent = strings["web.files.new_file"] || "New file";
+  $("fnewdir").textContent = strings["web.files.new_dir"] || "New folder";
+  $("fupload").textContent = strings["web.files.upload"] || "Upload";
+  $("frefresh").title = strings["web.files.refresh"] || "Refresh";
+  $("esave").textContent = strings["web.files.save"] || "Save";
+  $("ecancel").textContent = strings["web.files.cancel"] || "Cancel";
+
+  $("newinst").title = strings["web.new.title"] || "New instance";
+  $("dtitle").textContent = strings["web.new.title"] || "New instance";
+  $("ntab-core").textContent = strings["web.new.tab_core"] || "Core";
+  $("ntab-jar").textContent = strings["web.new.tab_jar"] || "Local jar";
+  $("ntab-import").textContent = strings["web.new.tab_import"] || "Import";
+  $("l-core").textContent = strings["web.new.core_type"] || "";
+  $("l-version").textContent = strings["web.new.core_version"] || "";
+  $("l-name").textContent = strings["web.new.name"] || "";
+  $("l-name2").textContent = strings["web.new.name"] || "";
+  $("l-name3").textContent = strings["web.new.name"] || "";
+  $("l-mcver").textContent = strings["web.new.mc_version"] || "";
+  $("l-minmem").textContent = strings["web.new.min_mem"] || "";
+  $("l-maxmem").textContent = strings["web.new.max_mem"] || "";
+  $("l-minmem2").textContent = strings["web.new.min_mem"] || "";
+  $("l-maxmem2").textContent = strings["web.new.max_mem"] || "";
+  $("l-jarfile").textContent = strings["web.new.jar_pick"] || "";
+  $("l-zippath").textContent = strings["web.new.import_path"] || "";
+  $("l-importjar").textContent = strings["web.new.import_jar"] || "";
+  $("ni-jar-hint").textContent = strings["web.new.jar_hint"] || "";
+  $("ni-import-hint").textContent = strings["web.new.import_hint"] || "";
+  $("ni-create").textContent = strings["web.new.create"] || "";
+  $("ni-blank").textContent = strings["web.new.create_blank"] || "";
+  $("ni-jar-create").textContent = strings["web.new.create"] || "";
+  $("ni-scan").textContent = strings["web.new.import_scan"] || "";
+  $("ni-import").textContent = strings["web.new.import_commit"] || "";
+  $("ni-name").placeholder = strings["web.new.name_placeholder"] || "";
+  $("ni-jarname").placeholder = strings["web.new.name_placeholder"] || "";
+  $("ni-mcver").placeholder = strings["web.new.optional"] || "";
 }
 
 function stateLabel(state) {
@@ -451,6 +694,8 @@ function select(name) {
   renderLog();
   render();
   renderDetails();
+  // 文件管理器是按实例的，换实例就得回到根目录重新列
+  if (tab === "files") loadFiles("");
 }
 
 /* ---------------------------------------------------------------- 指令 */
@@ -480,6 +725,519 @@ function buildChips() {
   });
 }
 
+/* ---------------------------------------------------------------- 通用提示 */
+
+let toastTimer = null;
+
+function toast(message, isError) {
+  const el = $("toast");
+  el.textContent = message || "";
+  el.className = isError ? "err" : "";
+  el.hidden = false;
+  if (toastTimer) clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { el.hidden = true; }, isError ? 6000 : 2600);
+}
+
+function fail(err) {
+  toast((err && err.message) ? err.message : String(err), true);
+}
+
+/* api() 只负责取回 JSON；业务失败由 core 以 {ok:false,message} 表达，
+   这里统一转成异常，调用方一个 catch 就能兜住所有情况。 */
+async function apiOk(path, body) {
+  const data = await api(path, body);
+  if (data && data.ok === false) throw new Error(data.message || "error");
+  return data;
+}
+
+/* ---------------------------------------------------------------- 标签切换 */
+
+let tab = "console";
+
+function switchTab(name) {
+  tab = name;
+  const isFiles = name === "files";
+  $("tab-console").className = "tab" + (isFiles ? "" : " on");
+  $("tab-files").className = "tab" + (isFiles ? " on" : "");
+  $("files").hidden = !isFiles;
+  $("log").hidden = isFiles;
+  $("bar").hidden = isFiles;
+  $("clear").hidden = isFiles;
+  $("follow").hidden = isFiles;
+  $("jump").hidden = true;
+  if (isFiles) loadFiles(filesPath);
+}
+
+/* -------------------------------------------------------------- 文件管理器 */
+
+let filesPath = "";
+let filesParent = "";
+let editorPath = null;
+
+function joinPath(base, name) {
+  return base ? base + "/" + name : name;
+}
+
+function fmtSize(bytes) {
+  if (!bytes) return "";
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  let value = bytes;
+  let i = 0;
+  while (value >= 1024 && i < units.length - 1) { value /= 1024; i += 1; }
+  return (i === 0 ? String(value) : value.toFixed(1)) + " " + units[i];
+}
+
+function fmtTime(ts) {
+  if (!ts) return "";
+  const d = new Date(ts * 1000);
+  const p = (n) => String(n).padStart(2, "0");
+  return d.getFullYear() + "-" + p(d.getMonth() + 1) + "-" + p(d.getDate()) +
+         " " + p(d.getHours()) + ":" + p(d.getMinutes());
+}
+
+function opButton(symbol, title, handler) {
+  const b = document.createElement("button");
+  b.textContent = symbol;
+  if (title) b.title = title;
+  b.onclick = (ev) => { ev.stopPropagation(); handler(); };
+  return b;
+}
+
+function renderFiles(entries, parent) {
+  $("fpath").textContent = "/" + (filesPath || "");
+  const box = $("flist");
+  box.innerHTML = "";
+
+  if (!selected) {
+    const hint = document.createElement("div");
+    hint.className = "fempty";
+    hint.textContent = strings["web.panel.no_instances"] || "";
+    box.appendChild(hint);
+    return;
+  }
+
+  const table = document.createElement("table");
+  const head = document.createElement("thead");
+  const headRow = document.createElement("tr");
+  [strings["web.files.name"] || "Name",
+   strings["web.files.size"] || "Size",
+   strings["web.files.modified"] || "Modified", ""].forEach((label) => {
+    const th = document.createElement("th");
+    th.textContent = label;
+    headRow.appendChild(th);
+  });
+  head.appendChild(headRow);
+  table.appendChild(head);
+
+  const tbody = document.createElement("tbody");
+  if (filesPath) {
+    tbody.appendChild(buildFileRow(
+      { name: "..", path: parent, dir: true, size: 0, mtime: 0, editable: false },
+      true));
+  }
+  if (!entries.length && !filesPath) {
+    const tr = document.createElement("tr");
+    const td = document.createElement("td");
+    td.colSpan = 4;
+    td.className = "fempty";
+    td.textContent = strings["web.files.empty"] || "";
+    tr.appendChild(td);
+    tbody.appendChild(tr);
+  }
+  entries.forEach((entry) => tbody.appendChild(buildFileRow(entry, false)));
+  table.appendChild(tbody);
+  box.appendChild(table);
+}
+
+function buildFileRow(entry, isUp) {
+  const tr = document.createElement("tr");
+
+  const nameTd = document.createElement("td");
+  const nameBox = document.createElement("div");
+  nameBox.className = "fname" + (entry.dir ? " fdir" : "");
+  const icon = document.createElement("span");
+  icon.className = "fico";
+  icon.textContent = entry.dir ? "📁" : (entry.editable ? "📄" : "📦");
+  const label = document.createElement("span");
+  label.textContent = entry.name;
+  nameBox.appendChild(icon);
+  nameBox.appendChild(label);
+  nameBox.onclick = () => {
+    if (entry.dir) loadFiles(entry.path);
+    else if (entry.editable) openEditor(entry.path);
+    else downloadFile(entry);
+  };
+  nameTd.appendChild(nameBox);
+  tr.appendChild(nameTd);
+
+  const sizeTd = document.createElement("td");
+  sizeTd.className = "fmeta";
+  sizeTd.textContent = entry.dir ? "" : fmtSize(entry.size);
+  tr.appendChild(sizeTd);
+
+  const timeTd = document.createElement("td");
+  timeTd.className = "fmeta";
+  timeTd.textContent = isUp ? "" : fmtTime(entry.mtime);
+  tr.appendChild(timeTd);
+
+  const opsTd = document.createElement("td");
+  const ops = document.createElement("div");
+  ops.className = "fops";
+  if (!isUp) {
+    if (!entry.dir) {
+      ops.appendChild(opButton("⭳", strings["web.files.download"], () => downloadFile(entry)));
+      if (entry.editable) {
+        ops.appendChild(opButton("✎", strings["web.files.edit"], () => openEditor(entry.path)));
+      }
+    }
+    ops.appendChild(opButton("⇄", strings["web.files.rename"], () => renameEntry(entry)));
+    ops.appendChild(opButton("✕", strings["web.files.delete"], () => deleteEntry(entry)));
+  }
+  opsTd.appendChild(ops);
+  tr.appendChild(opsTd);
+  return tr;
+}
+
+async function loadFiles(path) {
+  if (path !== undefined && path !== null) filesPath = path;
+  if (!selected) {
+    filesPath = "";
+    filesParent = "";
+    renderFiles([], "");
+    return;
+  }
+  try {
+    const data = await apiOk("/api/files?name=" + encodeURIComponent(selected) +
+                             "&path=" + encodeURIComponent(filesPath));
+    filesPath = data.path || "";
+    filesParent = data.parent || "";
+    renderFiles(data.entries || [], filesParent);
+  } catch (err) {
+    fail(err);
+    renderFiles([], "");
+  }
+}
+
+function downloadFile(entry) {
+  const a = document.createElement("a");
+  a.href = "/api/file/raw?name=" + encodeURIComponent(selected) +
+           "&path=" + encodeURIComponent(entry.path);
+  a.download = entry.name;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+}
+
+async function openEditor(path) {
+  if (!selected) return;
+  try {
+    const data = await apiOk("/api/file?name=" + encodeURIComponent(selected) +
+                             "&path=" + encodeURIComponent(path));
+    editorPath = data.path;
+    $("etext").value = data.text || "";
+    $("epath").textContent = fmt(strings["web.files.editing"] || "{path}",
+                                 { path: data.path });
+    $("editor").hidden = false;
+    $("etext").focus();
+  } catch (err) {
+    fail(err);
+  }
+}
+
+function closeEditor() {
+  editorPath = null;
+  $("etext").value = "";
+  $("editor").hidden = true;
+}
+
+async function saveEditor() {
+  if (!selected || editorPath === null) return;
+  try {
+    await apiOk("/api/file/write",
+                { name: selected, path: editorPath, content: $("etext").value });
+    toast(strings["web.files.saved"] || "Saved");
+    closeEditor();
+    loadFiles();
+  } catch (err) {
+    fail(err);
+  }
+}
+
+async function newEntry(isDir) {
+  if (!selected) return;
+  const question = isDir ? strings["web.files.prompt_new_dir"]
+                         : strings["web.files.prompt_new_file"];
+  const name = (window.prompt(question || "") || "").trim();
+  if (!name) return;
+  const path = joinPath(filesPath, name);
+  try {
+    if (isDir) {
+      await apiOk("/api/file/mkdir", { name: selected, path: path });
+    } else {
+      await apiOk("/api/file/write", { name: selected, path: path, content: "" });
+    }
+    loadFiles();
+  } catch (err) {
+    fail(err);
+  }
+}
+
+async function renameEntry(entry) {
+  if (!selected) return;
+  const next = (window.prompt(strings["web.files.prompt_rename"] || "", entry.name) || "").trim();
+  if (!next || next === entry.name) return;
+  try {
+    await apiOk("/api/file/rename",
+                { name: selected, path: entry.path, new_name: next });
+    loadFiles();
+  } catch (err) {
+    fail(err);
+  }
+}
+
+async function deleteEntry(entry) {
+  if (!selected) return;
+  const ask = fmt(strings["web.files.confirm_delete"] || "Delete {name}?",
+                  { name: entry.name });
+  if (!window.confirm(ask)) return;
+  try {
+    await apiOk("/api/file/delete", { name: selected, path: entry.path });
+    loadFiles();
+  } catch (err) {
+    fail(err);
+  }
+}
+
+async function uploadFile(file) {
+  if (!file || !selected) return;
+  const path = joinPath(filesPath, file.name);
+  toast(strings["web.files.uploading"] || "");
+  try {
+    // 直接把 File 当请求体发，省掉 multipart 解析；token 走 Cookie
+    const res = await fetch("/api/file/upload?name=" + encodeURIComponent(selected) +
+                            "&path=" + encodeURIComponent(path), {
+      method: "POST",
+      headers: { "Content-Type": "application/octet-stream" },
+      body: file
+    });
+    const data = await res.json();
+    if (!data.ok) throw new Error(data.message || "upload failed");
+    toast(fmt(strings["web.files.upload_done"] || "{name}", { name: file.name }));
+    loadFiles();
+  } catch (err) {
+    fail(err);
+  }
+}
+
+/* ---------------------------------------------------------------- 新建实例 */
+
+let coresLoaded = false;
+let importPlan = null;
+
+function newTab(name) {
+  [["core", "npane-core"], ["jar", "npane-jar"], ["import", "npane-import"]]
+    .forEach(([key, id]) => {
+      $(id).hidden = key !== name;
+      $("ntab-" + key).className = "tab" + (key === name ? " on" : "");
+    });
+}
+
+function openNewInstance() {
+  $("modal").hidden = false;
+  $("ni-name").value = "";
+  $("ni-jarname").value = "";
+  $("ni-importname").value = "";
+  $("ni-zip").value = "";
+  $("ni-jarfile").value = "";
+  $("ni-importjar").innerHTML = "";
+  importPlan = null;
+  newTab("core");
+  if (!coresLoaded) {
+    coresLoaded = true;
+    loadCores();
+  }
+}
+
+function closeNewInstance() {
+  $("modal").hidden = true;
+}
+
+async function loadCores() {
+  const select = $("ni-core");
+  select.innerHTML = "";
+  try {
+    const data = await apiOk("/api/cores");
+    (data.cores || []).forEach((core) => {
+      const option = document.createElement("option");
+      option.value = core.id;
+      option.textContent = core.name + "  (" + core.id + ")";
+      select.appendChild(option);
+    });
+    await loadCoreVersions();
+  } catch (err) {
+    fail(err);
+  }
+}
+
+async function loadCoreVersions() {
+  const select = $("ni-version");
+  select.innerHTML = "";
+  const type = $("ni-core").value;
+  if (!type) return;
+  try {
+    const data = await apiOk("/api/cores?type=" + encodeURIComponent(type));
+    (data.versions || []).forEach((version) => {
+      const option = document.createElement("option");
+      option.value = version;
+      option.textContent = version;
+      select.appendChild(option);
+    });
+    $("ni-core-desc").textContent = data.description || "";
+    // 核心版本号本身就是 MC 版本号，帮忙填一下省得用户再敲一遍
+    if (!$("ni-mcver").value && data.versions && data.versions.length) {
+      $("ni-mcver").value = data.versions[0];
+    }
+  } catch (err) {
+    fail(err);
+  }
+}
+
+function memFields(minId, maxId) {
+  return {
+    min_mem: ($(minId).value || "").trim() || "1G",
+    max_mem: ($(maxId).value || "").trim() || "4G"
+  };
+}
+
+function needName(name) {
+  if (name) return true;
+  fail(new Error(strings["web.error.name_required"] || "name required"));
+  return false;
+}
+
+async function afterCreate(data) {
+  toast(data.message || "");
+  closeNewInstance();
+  await refresh();
+  switchTab("console");
+  select(data.name);
+}
+
+async function createWithCore() {
+  const name = $("ni-name").value.trim();
+  if (!needName(name)) return;
+  const coreType = $("ni-core").value;
+  const coreVersion = $("ni-version").value;
+  if (!coreType || !coreVersion) {
+    fail(new Error(strings["web.error.core_selection_required"] || ""));
+    return;
+  }
+  const body = Object.assign({
+    name: name,
+    mc_version: $("ni-mcver").value.trim(),
+    core_type: coreType,
+    core_version: coreVersion
+  }, memFields("ni-minmem", "ni-maxmem"));
+  toast(strings["web.new.creating"] || "");
+  try {
+    await afterCreate(await apiOk("/api/instances", body));
+  } catch (err) {
+    fail(err);
+  }
+}
+
+async function createBlank() {
+  const name = $("ni-name").value.trim();
+  if (!needName(name)) return;
+  const body = Object.assign({
+    name: name,
+    mc_version: $("ni-mcver").value.trim()
+  }, memFields("ni-minmem", "ni-maxmem"));
+  try {
+    await afterCreate(await apiOk("/api/instances", body));
+  } catch (err) {
+    fail(err);
+  }
+}
+
+async function createWithJar() {
+  const file = $("ni-jarfile").files && $("ni-jarfile").files[0];
+  if (!file) {
+    fail(new Error(strings["web.new.jar_pick"] || "pick a jar"));
+    return;
+  }
+  const name = $("ni-jarname").value.trim();
+  if (!needName(name)) return;
+  toast(strings["web.new.creating"] || "");
+  let created = null;
+  try {
+    // 先建实例（jar 名先写进配置），再把 jar 传上去
+    created = await apiOk("/api/instances", Object.assign({
+      name: name, jar_name: file.name, mc_version: ""
+    }, memFields("ni-jarmin", "ni-jarmax")));
+    const res = await fetch("/api/file/upload?name=" + encodeURIComponent(created.name) +
+                            "&path=" + encodeURIComponent(file.name), {
+      method: "POST",
+      headers: { "Content-Type": "application/octet-stream" },
+      body: file
+    });
+    const uploaded = await res.json();
+    if (!uploaded.ok) throw new Error(uploaded.message || "upload failed");
+    await afterCreate(created);
+  } catch (err) {
+    fail(err);
+    // 实例可能已经建好了，刷新一下让用户能看到并自己去补 jar
+    if (created) {
+      await refresh().catch(() => {});
+      closeNewInstance();
+    }
+  }
+}
+
+async function scanArchive() {
+  const zipPath = $("ni-zip").value.trim();
+  if (!zipPath) {
+    fail(new Error(strings["web.new.import_path"] || ""));
+    return;
+  }
+  try {
+    const data = await apiOk("/api/instances/import/scan", { zip_path: zipPath });
+    importPlan = data;
+    const select = $("ni-importjar");
+    select.innerHTML = "";
+    (data.candidates || []).forEach((jar) => {
+      const option = document.createElement("option");
+      option.value = jar;
+      option.textContent = jar;
+      select.appendChild(option);
+    });
+    if (data.auto_choice) select.value = data.auto_choice;
+    $("ni-importname").value = data.suggested_name || "";
+    toast(strings["web.new.import_jar"] || "");
+  } catch (err) {
+    fail(err);
+  }
+}
+
+async function commitImport() {
+  if (!importPlan) {
+    await scanArchive();
+    if (!importPlan) return;
+  }
+  toast(strings["web.new.creating"] || "");
+  try {
+    const data = await apiOk("/api/instances/import/commit", {
+      zip_path: importPlan.zip_path,
+      jar: $("ni-importjar").value,
+      name: $("ni-importname").value.trim()
+    });
+    importPlan = null;
+    await afterCreate(data);
+  } catch (err) {
+    fail(err);
+  }
+}
+
 /* ---------------------------------------------------------------- 绑定 */
 
 $("send").onclick = () => sendCommand(null);
@@ -488,6 +1246,45 @@ $("refresh").onclick = () => refresh().catch(() => {});
 $("clear").onclick = clearLog;
 $("follow").onclick = () => setFollow(!follow);
 $("jump").onclick = () => setFollow(true);
+
+$("tab-console").onclick = () => switchTab("console");
+$("tab-files").onclick = () => switchTab("files");
+
+$("fup").onclick = () => { if (filesPath) loadFiles(filesParent); };
+$("froot").onclick = () => loadFiles("");
+$("frefresh").onclick = () => loadFiles();
+$("fnewfile").onclick = () => newEntry(false);
+$("fnewdir").onclick = () => newEntry(true);
+$("fupload").onclick = () => $("fupload-input").click();
+$("fupload-input").onchange = (ev) => {
+  const file = ev.target.files && ev.target.files[0];
+  ev.target.value = "";
+  uploadFile(file);
+};
+$("esave").onclick = saveEditor;
+$("ecancel").onclick = closeEditor;
+
+$("newinst").onclick = openNewInstance;
+$("dclose").onclick = closeNewInstance;
+$("ntab-core").onclick = () => newTab("core");
+$("ntab-jar").onclick = () => newTab("jar");
+$("ntab-import").onclick = () => newTab("import");
+$("ni-core").onchange = loadCoreVersions;
+$("ni-create").onclick = createWithCore;
+$("ni-blank").onclick = createBlank;
+$("ni-jar-create").onclick = createWithJar;
+$("ni-scan").onclick = scanArchive;
+$("ni-import").onclick = commitImport;
+
+// 点遮罩空白处关掉对话框；Esc 关掉对话框 / 编辑器
+$("modal").addEventListener("click", (ev) => {
+  if (ev.target === $("modal")) closeNewInstance();
+});
+document.addEventListener("keydown", (ev) => {
+  if (ev.key !== "Escape") return;
+  if (!$("editor").hidden) closeEditor();
+  else if (!$("modal").hidden) closeNewInstance();
+});
 
 buildChips();
 
