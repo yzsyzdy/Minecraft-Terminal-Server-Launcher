@@ -40,7 +40,7 @@ java_list.json   # Java 检测缓存（首次检测后生成）
 
 ### 方式一：下载服务端核心
 
-主菜单 → `[3] 下载服务器`：
+主菜单 → `[3] 新建实例` → `[1] 下载 Minecraft 服务端核心`：
 
 1. 选择服务端类型（Paper、Purpur、Fabric、Forge、Velocity 等 30 余种）
 2. 选择版本（版本列表会缓存一天，避免重复请求）
@@ -55,6 +55,10 @@ java_list.json   # Java 检测缓存（首次检测后生成）
 2. MSTL 解压到临时目录，自动识别核心 jar
 3. 如果识别到多个 jar，会让你挑一个
 4. 确认后落到 `servers/<名称>/`
+
+### 方式三：新建通用实例
+
+主菜单 → `[3] 新建实例` → `[2] 通用实例`。它不跑 Minecraft，而是跑你指定的一个可执行文件，或者一段 `cmd` / `powershell` 命令；一样有启停、实时控制台与日志。详见[通用实例](../features/web-panel.md#通用实例)。
 
 ## 启动
 
@@ -76,6 +80,7 @@ Minecraft 服务端首次启动会因未同意 EULA 直接退出。MSTL 会识�
 
 ## 下一步
 
+- 不想守在终端跟前：主菜单 `[8] 网页面板`，浏览器里启停、看控制台、管文件、配 frp —— 见[网页面板](../features/web-panel.md)
 - 想把内存、JVM 参数调一调：[配置说明](configuration.md)
 - 想装插件或模组：[插件管理](../features/plugin-management.md)、[模组管理](../features/mod-management.md)
 - 想让朋友连进来：[内网穿透](../features/tunnel.md)

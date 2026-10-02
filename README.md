@@ -227,11 +227,14 @@ MSTL 会自动检测系统架构并下载对应的 frpc 二进制文件。
 
 ## 网页面板
 
-除了终端菜单，MSTL 还能跑成一个网页面板：
+除了终端菜单，MSTL 还能跑成一个网页面板。
+
+**直接在主菜单里选 `[8] 网页面板`** 即可（双击 exe 进去就能看到），面板子菜单里能启动面板、改监听地址与端口、重新生成访问 token。也可以从命令行直接起：
 
 ```bash
 python start.py web                # 默认 http://127.0.0.1:8765
 python start.py web --port 9000    # 换端口
+python start.py --help             # 忘了参数就看这个
 ```
 
 启动后会打印一条带 token 的地址，用它打开即完成登录，token 写在 `config.json` 的 `web.token` 里。面板里能看实例列表、启动与停止、实时看控制台、敲服务端指令，控制台同时追加写入实例目录下的 `logs/mstl-console.log`。

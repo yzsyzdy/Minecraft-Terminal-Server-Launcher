@@ -76,7 +76,7 @@ Import is deliberately split in two steps, because "which candidate core jar to 
 
 | Module | Responsibility |
 |---|---|
-| `start.py` | Terminal entry point; `python start.py web` switches straight to the web panel |
+| `start.py` | Terminal entry point; menu `[8]` or `python start.py web` reaches the panel, `--help` prints usage |
 | `menu.py` | Terminal menus: prompting and printing only |
 | `web/server.py` | Web panel backend: HTTP routing, token auth, SSE pushing |
 | `webui/index.html` | Panel front end, one file, no build step |

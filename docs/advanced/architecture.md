@@ -76,7 +76,7 @@
 
 | 模块 | 职责 |
 |---|---|
-| `start.py` | 终端入口；`python start.py web` 直接切到网页面板 |
+| `start.py` | 终端入口；主菜单 `[8] 网页面板` 或 `python start.py web` 进面板，`--help` 打用法 |
 | `menu.py` | 终端交互菜单：只负责提问与打印 |
 | `web/server.py` | 网页面板后端：HTTP 路由、token 鉴权、SSE 推送 |
 | `webui/index.html` | 面板前端，单文件，无构建步骤 |

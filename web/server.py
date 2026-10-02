@@ -875,8 +875,12 @@ def build_server(project_dir: str, *, host: str = "127.0.0.1", port: int = 8765,
 
 
 def run_web(project_dir: str, host: Optional[str] = None,
-            port: Optional[int] = None) -> None:
-    """命令行入口：`python start.py web [--host H] [--port P]`。"""
+            port: Optional[int] = None) -> bool:
+    """进网页面板的事件循环：`python start.py web [--host H] [--port P]`。
+
+    会一直阻塞到 Ctrl+C。返回 False 表示根本没起来（比如端口被占），
+    调用方据此决定要不要报错——菜单里启动面板时要分得清这两种结果。
+    """
     config = load_config(project_dir)
     load_language(config.get("language", "") or detect_os_language())
 
@@ -893,18 +897,30 @@ def run_web(project_dir: str, host: Optional[str] = None,
     # 用 is not None 判断：--port 0 是「随便挑一个空闲端口」，是合法请求，
     # 写成 `port or cfg_port` 会把它当成没传
     bind_port = cfg_port if port is None else port
-    httpd = build_server(project_dir, host=bind_host, port=bind_port, token=token)
+
+    try:
+        httpd = build_server(project_dir, host=bind_host, port=bind_port, token=token)
+    except OSError as e:
+        # 端口被占是最常见的一种；原来会直接抛一个 traceback 出来，
+        # 从菜单里启动面板时看起来像是程序崩了
+        print(t("web.cli.bind_failed",
+                addr=f"{bind_host}:{bind_port}", msg=str(e)))
+        return False
+
     shown_host = "127.0.0.1" if bind_host in ("0.0.0.0", "::") else bind_host
     print(t("web.cli.launched", url=f"http://{shown_host}:{httpd.server_address[1]}/?token={token}"))
     print(t("web.cli.token", token=token))
+    print(t("web.cli.stop_hint"))
     if bind_host in ("0.0.0.0", "::"):
-        print("  [警告] 面板正在监听所有网卡，请确认前面有反代与 HTTPS。")
+        print(t("web.cli.external_warning"))
+    print()
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:
         print()
     finally:
         httpd.server_close()
+    return True
 
 
 __all__ = ["build_server", "run_web", "web_settings", "WEB_STRINGS", "COOKIE_NAME"]

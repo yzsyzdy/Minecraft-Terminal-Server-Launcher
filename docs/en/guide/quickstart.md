@@ -40,7 +40,7 @@ If `servers/` is empty, the main menu will walk you through importing or downloa
 
 ### Option A: download a server core
 
-Main menu → `[3] Download server`:
+Main menu → `[3] New instance` → `[1] Download a Minecraft server core`:
 
 1. Pick a server type (Paper, Purpur, Fabric, Forge, Velocity, and 30-odd more)
 2. Pick a version (the version list is cached for a day to avoid repeat requests)
@@ -55,6 +55,12 @@ Main menu → `[2] Import server archive`:
 2. MSTL unpacks it into a temporary directory and detects the core jar automatically
 3. If several jars are found, it asks you to pick one
 4. Confirm, and it lands in `servers/<name>/`
+
+### Option C: create a generic instance
+
+Main menu → `[3] New instance` → `[2] Generic instance`. It does not run Minecraft; it runs
+an executable of your choosing, or a `cmd` / `powershell` command — with the same start/stop,
+live console and log file. See [Generic instances](../features/web-panel.md#generic-instances).
 
 ## Starting
 
@@ -76,6 +82,7 @@ A Minecraft server exits immediately on first launch if the EULA has not been ac
 
 ## Next steps
 
+- Tired of sitting at the terminal: main menu `[8] Web panel` — start, watch the console, manage files and frp from a browser. See [Web panel](../features/web-panel.md)
 - Want to tune memory or JVM flags: [Configuration](configuration.md)
 - Want to install plugins or mods: [Plugin management](../features/plugin-management.md), [Mod management](../features/mod-management.md)
 - Want friends to connect: [Tunneling](../features/tunnel.md)

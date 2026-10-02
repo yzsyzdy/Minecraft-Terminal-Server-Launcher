@@ -214,11 +214,14 @@ See the [tunneling docs](https://yzsyzdy.github.io/Minecraft-Terminal-Server-Lau
 
 ## Web panel
 
-Besides the terminal menu, MSTL can run as a web panel:
+Besides the terminal menu, MSTL can run as a web panel.
+
+**Pick `[8] Web panel` in the main menu** — it is right there as soon as you start the app, and the panel submenu starts it, changes the bind address and port, and regenerates the access token. You can also start it straight from the command line:
 
 ```bash
 python start.py web                # http://127.0.0.1:8765 by default
 python start.py web --port 9000    # pick another port
+python start.py --help             # if you forget the options
 ```
 
 Startup prints a URL carrying a token; opening it logs you in. The token lives in `web.token` under `config.json`. From the panel you can list instances, start and stop them, watch the console live, and send server commands. Console output is also appended to `logs/mstl-console.log` inside the instance directory.

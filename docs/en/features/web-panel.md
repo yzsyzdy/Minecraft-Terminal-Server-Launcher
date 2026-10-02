@@ -1,6 +1,12 @@
 # Web panel
 
-Entry point: `python start.py web`, on `http://127.0.0.1:8765` by default.
+Three ways in, pick whichever suits you:
+
+- **Main menu `[8] Web panel`** — visible as soon as you double-click the exe or run `python start.py`; nothing to memorise
+- **`python start.py web`** — starts the panel directly, on `http://127.0.0.1:8765` by default
+- **`python start.py --help`** — for when you have forgotten the options
+
+The panel submenu also lets you change the bind address / port and regenerate the access token; on start it prints a URL carrying that token, and opening it logs you in.
 
 The terminal menu suits someone sitting at the machine. The web panel suits everyone else: away from home, on a phone, or simply tired of that black window.
 

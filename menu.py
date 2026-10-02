@@ -1447,6 +1447,93 @@ def _import_server_flow(servers_dir: str, project_dir: str) -> None:
     input(t("app.press_enter"))
 
 
+def _edit_web_binding(project_dir: str, config: dict, host: str, port: int) -> None:
+    """改网页面板的监听地址与端口。"""
+    print()
+    new_host = input(t("web.menu.host_prompt", cur=host)).strip() or host
+    raw_port = input(t("web.menu.port_prompt", cur=port)).strip()
+    new_port = port
+    if raw_port:
+        try:
+            new_port = int(raw_port)
+            if not 1 <= new_port <= 65535:
+                raise ValueError
+        except ValueError:
+            print(t("web.menu.bad_port"))
+            input(t("app.press_enter"))
+            return
+
+    web_cfg = dict(config.get("web") or {})
+    web_cfg.update({"host": new_host, "port": new_port})
+    config["web"] = web_cfg
+    save_config(config, project_dir)
+    print(t("web.menu.saved", host=new_host, port=new_port))
+    if new_host in ("0.0.0.0", "::"):
+        print(t("web.menu.external_hint"))
+    input(t("app.press_enter"))
+
+
+def _web_menu(project_dir: str) -> None:
+    """网页面板：启动、改监听、换 token。
+
+    面板是个长期驻留的服务，形态和「启动服务器」一样：选了就一直阻塞在
+    这里，Ctrl+C 才回到菜单。
+    """
+    from web.server import run_web, web_settings
+
+    while True:
+        config = load_config(project_dir)
+        host, port, token = web_settings(config)
+
+        clear_screen()
+        print()
+        print(t("web.menu.title"))
+        print()
+        print(t("web.menu.current", host=host, port=port))
+        if token:
+            print(t("web.menu.token_set", n=len(token)))
+        else:
+            print(t("web.menu.token_unset"))
+        print()
+        print(t("web.menu.start", n=1))
+        print(t("web.menu.edit", n=2))
+        print(t("web.menu.regen", n=3))
+        print(t("menu.plugin.back", n=0))
+        print()
+        choice = input("  " + t("menu.main.prompt", max=3)).strip()
+
+        if choice == "0":
+            return
+
+        if choice == "1":
+            print()
+            print(t("web.menu.starting"))
+            print()
+            started = run_web(project_dir)   # 阻塞到 Ctrl+C
+            print()
+            print(t("web.menu.stopped") if started else t("web.menu.start_failed"))
+            input(t("app.press_enter"))
+            continue
+
+        if choice == "2":
+            _edit_web_binding(project_dir, config, host, port)
+            continue
+
+        if choice == "3":
+            import secrets
+            web_cfg = dict(config.get("web") or {})
+            web_cfg["token"] = secrets.token_urlsafe(24)
+            config["web"] = web_cfg
+            save_config(config, project_dir)
+            print()
+            print(t("web.menu.regenerated"))
+            input(t("app.press_enter"))
+            continue
+
+        print(t("app.invalid_choice_short"))
+        input(t("app.press_enter"))
+
+
 def show_main_menu(servers_dir: str, project_dir: str) -> Optional[dict[str, Any]]:
     """
     Main menu. Returns selected server config for launching, or None to exit.
@@ -1471,10 +1558,11 @@ def show_main_menu(servers_dir: str, project_dir: str) -> Optional[dict[str, Any
         print(t("menu.main.export", n=5))
         print(t("menu.main.tunnel", n=6))
         print(t("menu.main.settings", n=7))
+        print(t("menu.main.web", n=8))
         print(t("menu.main.exit", n=0))
         print()
 
-        choice = input(t("menu.main.prompt", max=7)).strip()
+        choice = input(t("menu.main.prompt", max=8)).strip()
 
         if choice == "0":
             print(t("app.exit_user"))
@@ -1525,8 +1613,12 @@ def show_main_menu(servers_dir: str, project_dir: str) -> Optional[dict[str, Any
             _settings_menu(project_dir)
             continue
 
+        elif choice == "8":
+            _web_menu(project_dir)
+            continue
+
         else:
-            print(t("app.invalid_choice", max=7))
+            print(t("app.invalid_choice", max=8))
 
 
 def _select_server_for_launch(

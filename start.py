@@ -258,47 +258,84 @@ def _start_server(server_cfg: dict, server_path: str,
     return exit_code
 
 
-def _dispatch_web(argv: list[str]) -> bool:
-    """`python start.py web [--host H] [--port P]` 直接进网页面板。
+def _print_usage() -> None:
+    """把用法打出来。
 
-    终端菜单是默认形态，只有显式写了 web 才切过去，不影响现有用法。
+    打包成 exe 之后用户是双击运行的，看不见任何命令；这里用 argv[0] 的
+    文件名当程序名，好让提示在源码模式和 exe 模式下都说得通。
     """
-    if not argv or argv[0].lower() not in ("web", "serve", "--web"):
+    prog = os.path.basename(sys.argv[0] or "") or "start.py"
+    print()
+    print(t("usage.title", prog=prog))
+    print()
+    print(t("usage.menu"))
+    print(t("usage.web", n=8))
+    print(t("usage.help"))
+    print()
+    print(t("usage.hint", host="127.0.0.1", port=8765))
+    print()
+
+
+def _dispatch_args(argv: list[str]) -> bool:
+    """处理命令行参数：web 子命令、--help、以及认不出来的参数。
+
+    返回 True 表示参数已经消化完，调用方直接退出即可。
+    """
+    if not argv:
         return False
 
-    host = None
-    port = None
-    rest = argv[1:]
-    i = 0
-    while i < len(rest):
-        flag = rest[i]
-        value = rest[i + 1] if i + 1 < len(rest) else None
-        if flag in ("--host", "-H") and value:
-            host = value
-            i += 2
-            continue
-        if flag in ("--port", "-p") and value:
-            try:
-                port = int(value)
-            except ValueError:
-                print(f"  [警告] 忽略无效端口: {value}")
-            i += 2
-            continue
-        i += 1
+    first = argv[0].lower()
+    if first in ("-h", "--help", "help", "/?"):
+        _print_usage()
+        return True
 
-    from web.server import run_web
-    run_web(_project_dir(), host=host, port=port)
-    return True
+    if first in ("web", "serve", "--web"):
+        host = None
+        port = None
+        rest = argv[1:]
+        i = 0
+        while i < len(rest):
+            flag = rest[i]
+            value = rest[i + 1] if i + 1 < len(rest) else None
+            if flag in ("--host", "-H") and value:
+                host = value
+                i += 2
+                continue
+            if flag in ("--port", "-p") and value:
+                try:
+                    port = int(value)
+                except ValueError:
+                    print("  " + t("web.menu.bad_port_arg", value=value))
+                i += 2
+                continue
+            i += 1
+
+        from web.server import run_web
+        # 面板没起来（比如端口被占）就是失败，别回一个 0 让脚本以为成功了
+        if not run_web(_project_dir(), host=host, port=port):
+            sys.exit(1)
+        return True
+
+    # 认不出来就说清楚，别默默进菜单——原来写错参数会毫无提示地打开终端菜单，
+    # 用户只会以为自己写对了
+    print("  " + t("usage.unknown", arg=argv[0]))
+    _print_usage()
+    sys.exit(2)
 
 
 def main():
     """程序入口。"""
-    if _dispatch_web(sys.argv[1:]):
+    project_dir = _project_dir()
+
+    # 语言要在处理参数之前就位，否则 --help 与参数报错会显示成一串 i18n key
+    config = load_config(project_dir)
+    load_language(config.get("language", "") or detect_os_language())
+
+    if _dispatch_args(sys.argv[1:]):
         return
 
     from clear import clear_screen
     clear_screen()
-    project_dir = _project_dir()
 
     # 版本更新检查 (静默执行，不阻塞启动流程)
     from check_update import check_for_update
@@ -308,10 +345,6 @@ def main():
         print(f"        下载: {REPO_URL}/releases/tag/{latest_ver}")
         print()
 
-    # 加载配置和语言
-    config = load_config(project_dir)
-    lang = config.get("language", "") or detect_os_language()
-    load_language(lang)
     save_config(config, project_dir)
 
     servers_dir = ensure_servers_folder(project_dir)
