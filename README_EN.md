@@ -84,7 +84,10 @@ The first run automatically creates `config.json` and the `servers/` directory.
 | `language` | UI language; empty string follows the OS (`zh` / `en` / `ru`) |
 | `curseforge_api_key` | CurseForge API key (optional, enables CurseForge mod search) |
 | `download_threads` | Concurrent chunks for multithreaded download, default 16 |
-| `auto_start_server` | Server name to launch straight from startup, empty to disable |
+| `auto_start_server` | Server name to launch straight from startup, empty to disable (foreground, skips the main menu) |
+| `web.*` | Web panel bind address, port, token, and whether it starts with the app; normally no need to hand-edit — main menu `[8] Web panel` covers all of it |
+
+An instance's own "start with the app" lives in `servers/<name>/.server.json` as `auto_start`, toggled from the panel's instance settings or the terminal config menu. It starts **in the background**, which is not the same thing as the foreground `auto_start_server` above.
 
 > `config.json` holds machine-specific settings, so the repository only ships `config.example.json`. Your own file is gitignored. Full field reference: [Configuration](https://yzsyzdy.github.io/Minecraft-Terminal-Server-Launcher/guide/configuration/).
 
@@ -216,7 +219,7 @@ See the [tunneling docs](https://yzsyzdy.github.io/Minecraft-Terminal-Server-Lau
 
 Besides the terminal menu, MSTL can run as a web panel.
 
-**Pick `[8] Web panel` in the main menu** — it is right there as soon as you start the app, and the panel submenu starts it, changes the bind address and port, and regenerates the access token. You can also start it straight from the command line:
+**Pick `[8] Web panel` in the main menu** — it is right there as soon as you start the app, and the panel submenu starts it, changes the bind address and port, regenerates the access token, and lets the **panel start with the app**. You can also start it straight from the command line:
 
 ```bash
 python start.py web                # http://127.0.0.1:8765 by default
@@ -230,7 +233,9 @@ The right-hand pane has two tabs, **Console** and **Files**. The file manager br
 
 A **generic instance** runs something of your own instead of Minecraft: an executable (`exec`, no shell involved) or a command handed to `cmd` / `powershell`. It still gets start/stop, a live console, a log file, the ability to receive input, and an optional tunnel — it just skips Java resolution and the jar check. The terminal menu has the same entry point (`[3] New instance`). Select an instance and press `⚙` to edit it, or edit `.server.json` through the file manager.
 
-The `frp` button in the top bar configures vanilla frp from the panel: connection settings in `frpc.toml`, adding and removing tunnels, starting and stopping frpc, and downloading or updating the frpc binary.
+The `frp` button in the top bar configures vanilla frp from the panel: connection settings in `frpc.toml`, adding and removing tunnels, starting and stopping frpc, and downloading or updating the frpc binary (with a manual upload fallback).
+
+Downloading a server core, downloading frpc and uploading files all show a progress bar along the bottom of the panel. Instance settings also gained "start with the app", which raises that instance in the background when the app starts.
 
 > **It listens on 127.0.0.1 only, by default.** The panel can send commands to a server console, rewrite files inside the instance directory, *and* configure an instance to execute arbitrary commands, so it hands both a command channel and the instance tree to a browser. To reach it through frp, put a reverse proxy and HTTPS in front, and think twice before changing `web.host`.
 

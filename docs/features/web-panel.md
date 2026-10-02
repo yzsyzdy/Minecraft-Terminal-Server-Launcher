@@ -6,7 +6,9 @@
 - **`python start.py web`** —— 直接起面板，默认 `http://127.0.0.1:8765`
 - **`python start.py --help`** —— 忘了怎么用的时候看这个
 
-面板子菜单里还能改监听地址 / 端口、重新生成访问 token；启动后会打印一条带 token 的地址，点开即登录。
+面板子菜单里还能改监听地址 / 端口、重新生成访问 token、以及**让面板随软件启动**；启动后会打印一条带 token 的地址，点开即登录。
+
+开启「随软件启动」后，软件一起来面板就在后台线程里跑着，终端该进菜单进菜单、该起服务器起服务器，互不干扰。
 
 终端菜单适合人坐在机器跟前用，网页面板适合人不在跟前的时候：出门在外、手机上，或者只是不想开着那个黑窗口。
 
@@ -22,8 +24,9 @@
 - **控制台操作**：清屏、是否跟随自动滚动、`WARN` 与 `ERROR` 分开着色，向上翻看时自动暂停跟随
 - **文件管理器**：按实例浏览目录树，直接编辑 `server.properties` 这类文本文件；新建文件/文件夹、重命名、删除、上传、下载
 - **新建实例**：从 MSL 镜像下载服务端核心、用本地 jar、导入已有的服务端 zip 存档，或者建一台**通用实例**
-- **实例设置**：改内存、额外 JVM 参数、进程优先级、通用实例的启动配置，以及 OpenFrp 隧道绑定
-- **frp 内网穿透**：在面板里配 `frpc.toml`、增删隧道、启停 frpc、下载 / 更新 frpc 二进制
+- **实例设置**：改内存、额外 JVM 参数、进程优先级、**随软件启动**、通用实例的启动配置，以及 OpenFrp 隧道绑定
+- **frp 内网穿透**：在面板里配 `frpc.toml`、增删隧道、启停 frpc、下载 / 更新 frpc 二进制（下载不通时可手动上传）
+- **进度可见**：下载服务端核心、下载 frpc、上传文件都会在底部显示进度条——几十 MB 的核心不必再对着一个转圈的按钮干等
 
 控制台与文件管理器是右侧面板的两个标签页，切换标签不会中断 SSE 连接；实例设置（`⚙`）与 frp（顶栏 `frp`）是另外两个对话框。
 
@@ -119,8 +122,12 @@
 | 字段 | 默认值 | 说明 |
 |---|---|---|
 | `web.host` | `"127.0.0.1"` | 监听地址，`0.0.0.0` 表示所有网卡 |
-| `web.port` | `8765` | 监听端口 |
+| `web.port` | `8765` | 监听端口；填 `0` 表示随便挑一个空闲端口 |
 | `web.token` | `""` | 访问 token，留空则首次启动自动生成 |
+| `web.auto_start` | `false` | 面板随软件启动。后台线程运行，不阻塞终端菜单；在面板子菜单 `[4]` 里开关 |
+
+!!! tip "关于 8765 端口"
+    8765 也是 VS Code 的 Python 调试器（debugpy）默认端口。若正在调试 Python 时启动面板，两者会抢同一个端口；Windows 上旧版本会因为 `SO_REUSEADDR` 静默「抢成功」，表现为面板偶发 401 或打不开。现在 Windows 上已关掉该选项，冲突会直接报「无法监听」。换端口即可。
 
 命令行参数可以临时覆盖 host 与 port：
 
@@ -149,7 +156,7 @@ python start.py web --host 0.0.0.0 --port 9000
 | `POST` | `/api/file/upload` | `?name=&path=`，请求体就是文件内容，按 `Content-Length` 精确读取 |
 | `GET` | `/api/cores` | 服务端核心列表；带 `?type=<核心>` 返回该核心的版本列表 |
 | `POST` | `/api/instances` | `{"name", "kind"?, "mc_version", "min_mem", "max_mem", "core_type"?, "core_version"?, "jar_name"?, "launch"?}` |
-| `POST` | `/api/instances/settings` | 改实例设置：`{"name", "min_mem"?, "extra_jvm_args"?, "launch"?, "openfrp"?, ...}`；`kind` 与 `name` 不可改 |
+| `POST` | `/api/instances/settings` | 改实例设置：`{"name", "min_mem"?, "extra_jvm_args"?, "launch"?, "openfrp"?, "auto_start"?, ...}`；`kind` 与 `name` 不可改 |
 | `POST` | `/api/instances/import/scan` | `{"zip_path": "..."}`，返回候选核心 |
 | `POST` | `/api/instances/import/commit` | `{"zip_path": "...", "jar": "...", "name": "..."}` |
 | `POST` | `/api/instances/import/abort` | `{"zip_path": "..."}`，丢弃解压出来的临时目录 |
@@ -164,8 +171,9 @@ python start.py web --host 0.0.0.0 --port 9000
 约定：
 
 - 失败一律回 `{"ok": false, "key": "<i18n key>", "message": "<当前语言的说明>"}`，HTTP 400；没预料到的异常回 500，前端统一把 `message` 弹出来
-- SSE 事件只有两种：`{"type": "line", ...}` 是控制台的一行，`{"type": "state", ...}` 是状态变化。每条都带 `instance` 字段标明来自哪个实例，还带一个实例内单调递增的 `seq`——断线重连时服务端会把历史整段重放，前端靠 `seq` 把画过的行筛掉，不会出现重复
+- SSE 事件有三种：`{"type": "line", ...}` 是控制台的一行，`{"type": "state", ...}` 是状态变化，`{"type": "job", ...}` 是长任务进度（带 `label` / `ratio` / `done`）。`line` 与 `state` 带 `instance` 字段标明来自哪个实例，还带一个实例内单调递增的 `seq`——断线重连时服务端会把历史整段重放，前端靠 `seq` 把画过的行筛掉，不会出现重复；`job` 不属于任何实例，因此也不参与按实例过滤
 - 带 `kind: "note"` 的行由 MSTL 自己产生，服务端已经翻好文案再推出去
+- 下载类的 POST 是同步的，进度靠上面那条 SSE 推；上传由浏览器直接报进度（`XMLHttpRequest.upload.onprogress`），服务端不参与
 
 ## 已知边界
 

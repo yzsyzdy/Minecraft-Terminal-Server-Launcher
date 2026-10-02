@@ -178,6 +178,21 @@
          max-width:min(560px,92vw)}
   #toast.err{background:var(--err)}
 
+  /* 长任务进度条（下载服务端核心、下载 frpc、上传文件） */
+  #job{position:fixed;left:50%;bottom:72px;transform:translateX(-50%);
+       display:flex;align-items:center;gap:10px;background:#ffffff;
+       border:1px solid var(--line);border-radius:10px;padding:8px 14px;
+       box-shadow:0 8px 22px rgba(31,36,48,.16);z-index:38;font-size:13px;
+       max-width:min(600px,92vw)}
+  #jobbar{width:170px;height:6px;border-radius:99px;flex:0 0 auto;
+          background:var(--tint-2);overflow:hidden}
+  #jobfill{height:100%;width:0;border-radius:99px;
+           background:linear-gradient(90deg,var(--accent-2),var(--accent));
+           transition:width .15s linear}
+  #joblabel{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  #jobpct{color:var(--dim);font-size:12px;flex:0 0 auto;
+          font-variant-numeric:tabular-nums}
+
   @media (max-width:780px){
     main{grid-template-columns:1fr;grid-template-rows:auto minmax(0,1fr)}
     #list{border-right:none;border-bottom:1px solid var(--line);max-height:34vh}
@@ -420,6 +435,13 @@
           </select>
         </div>
       </div>
+      <div class="drow">
+        <label style="display:flex;gap:6px;align-items:center;font-size:13px">
+          <input type="checkbox" id="setinstauto" style="min-width:auto">
+          <span id="l-setinstauto"></span>
+        </label>
+      </div>
+      <div class="hint" id="set-instauto-hint"></div>
       <div id="set-mc">
         <div class="drow">
           <div class="field">
@@ -608,6 +630,12 @@
   </div>
 </div>
 
+<div id="job" hidden>
+  <span id="joblabel"></span>
+  <div id="jobbar"><div id="jobfill"></div></div>
+  <span id="jobpct"></span>
+</div>
+
 <div id="toast" hidden></div>
 <script>
 const $ = (id) => document.getElementById(id);
@@ -717,6 +745,10 @@ function bufferLine(event) {
 
 function handle(event) {
   if (alreadySeen(event)) return;
+  if (event.type === "job") {
+    showJob(event);
+    return;
+  }
   if (event.type === "state") {
     const item = instances.find(x => x.name === event.instance);
     if (item) {
@@ -815,6 +847,8 @@ function applyStrings() {
   // 实例设置
   $("instset").title = strings["web.settings.title"] || "Settings";
   $("l-setprio").textContent = strings["web.settings.priority"] || "";
+  $("l-setinstauto").textContent = strings["web.settings.auto_start_instance"] || "";
+  $("set-instauto-hint").textContent = strings["web.settings.auto_start_instance_hint"] || "";
   $("l-setmcver").textContent = strings["web.new.mc_version"] || "";
   $("l-setjar").textContent = strings["web.settings.mc"] ? "Jar" : "Jar";
   $("l-setminmem").textContent = strings["web.new.min_mem"] || "";
@@ -1086,6 +1120,51 @@ function fail(err) {
   toast((err && err.message) ? err.message : String(err), true);
 }
 
+/* 长任务进度条：下载/上传的进度从服务端的 SSE 来，或者由 XHR 自己报。 */
+let jobHideTimer = null;
+
+function showJob(event) {
+  const ratio = typeof event.ratio === "number" ? event.ratio : 0;
+  $("joblabel").textContent = event.label || "";
+  $("jobfill").style.width = Math.round(ratio * 100) + "%";
+  $("jobpct").textContent = Math.round(ratio * 100) + "%";
+  $("job").hidden = false;
+  if (jobHideTimer) clearTimeout(jobHideTimer);
+  if (event.done) {
+    jobHideTimer = setTimeout(() => { $("job").hidden = true; }, 700);
+  }
+}
+
+/* 包一层：任务开始时把进度条摆出来，无论成败最后都收掉 */
+async function withProgress(label, task) {
+  showJob({ label: label, ratio: 0 });
+  try {
+    return await task((ratio) => showJob({ label: label, ratio: ratio }));
+  } finally {
+    showJob({ label: label, ratio: 1, done: true });
+  }
+}
+
+/* fetch() 报不了上传进度，上传统一走 XHR */
+function uploadWithProgress(url, file, onProgress) {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", url, true);
+    xhr.setRequestHeader("Content-Type", "application/octet-stream");
+    xhr.upload.onprogress = (ev) => {
+      if (ev.lengthComputable && onProgress) onProgress(ev.loaded / ev.total);
+    };
+    xhr.onload = () => {
+      let data = {};
+      try { data = JSON.parse(xhr.responseText); } catch (e) { data = {}; }
+      if (xhr.status >= 200 && xhr.status < 300 && data.ok !== false) resolve(data);
+      else reject(new Error(data.message || ("HTTP " + xhr.status)));
+    };
+    xhr.onerror = () => reject(new Error("network error"));
+    xhr.send(file);
+  });
+}
+
 /* api() 只负责取回 JSON；业务失败由 core 以 {ok:false,message} 表达，
    这里统一转成异常，调用方一个 catch 就能兜住所有情况。 */
 async function apiOk(path, body) {
@@ -1355,17 +1434,12 @@ async function deleteEntry(entry) {
 async function uploadFile(file) {
   if (!file || !selected) return;
   const path = joinPath(filesPath, file.name);
-  toast(strings["web.files.uploading"] || "");
+  const label = (strings["web.files.uploading"] || "Uploading…") + " " + file.name;
   try {
     // 直接把 File 当请求体发，省掉 multipart 解析；token 走 Cookie
-    const res = await fetch("/api/file/upload?name=" + encodeURIComponent(selected) +
-                            "&path=" + encodeURIComponent(path), {
-      method: "POST",
-      headers: { "Content-Type": "application/octet-stream" },
-      body: file
-    });
-    const data = await res.json();
-    if (!data.ok) throw new Error(data.message || "upload failed");
+    await withProgress(label, (report) => uploadWithProgress(
+      "/api/file/upload?name=" + encodeURIComponent(selected) +
+      "&path=" + encodeURIComponent(path), file, report));
     toast(fmt(strings["web.files.upload_done"] || "{name}", { name: file.name }));
     loadFiles();
   } catch (err) {
@@ -1646,6 +1720,7 @@ function openSettings() {
              : "Minecraft") + " — " +
     (strings["web.settings.kind_locked"] || "");
   $("setprio").value = item.process_priority || "normal";
+  $("setinstauto").checked = !!item.auto_start;
   $("set-mc").hidden = generic;
   $("set-generic").hidden = !generic;
 
@@ -1687,6 +1762,7 @@ async function saveSettings() {
   const body = {
     name: selected,
     process_priority: $("setprio").value,
+    auto_start: $("setinstauto").checked,
     openfrp: {
       token: $("settoken").value.trim(),
       proxy_id: parseInt($("setproxyid").value, 10) || 0,
@@ -1883,16 +1959,11 @@ async function frpDownload() {
 
 async function frpUpload(file) {
   if (!file) return;
-  toast(strings["web.frp.uploading"] || "");
+  const label = (strings["web.frp.uploading"] || "Uploading…") + " " + file.name;
   try {
     // 直接把 File 当请求体发；压缩包和裸二进制都收
-    const res = await fetch("/api/frp/upload", {
-      method: "POST",
-      headers: { "Content-Type": "application/octet-stream" },
-      body: file
-    });
-    const data = await res.json();
-    if (!data.ok) throw new Error(data.message || "upload failed");
+    const data = await withProgress(label, (report) => uploadWithProgress(
+      "/api/frp/upload", file, report));
     toast(data.message || "");
   } catch (err) {
     fail(err);

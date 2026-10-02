@@ -112,7 +112,7 @@ def normalize_launch(value) -> dict[str, Any]:
 _PATCH_FIELDS = (
     "mc_version", "jar", "java_path", "min_mem", "max_mem",
     "extra_jvm_args", "extra_server_args", "process_priority",
-    "launch", "openfrp",
+    "launch", "openfrp", "auto_start",
 )
 
 
@@ -181,8 +181,12 @@ def create_instance(
 
 
 def install_core(server_dir: str, core_type: str, core_version: str,
-                 *, reporter: Optional[Reporter] = None) -> str:
-    """从 MSL 镜像下载指定核心到实例目录，返回落地后的 jar 文件名。"""
+                 *, reporter: Optional[Reporter] = None,
+                 on_progress=None) -> str:
+    """从 MSL 镜像下载指定核心到实例目录，返回落地后的 jar 文件名。
+
+    on_progress(ratio, downloaded, total) 会透传给下载引擎，供界面层画进度。
+    """
     reporter = as_reporter(reporter)
     if not core_type or not core_version:
         raise CoreError("web.error.core_selection_required")
@@ -203,7 +207,7 @@ def install_core(server_dir: str, core_type: str, core_version: str,
     target = os.path.join(server_dir, jar_name)
     reporter.progress(label=_server_display_name(core_type))
     if not multithreaded_download(url, target, desc=_server_display_name(core_type),
-                                  quiet=True):
+                                  quiet=True, on_progress=on_progress):
         raise CoreError("web.error.core_download_failed", name=core_type)
     if not os.path.isfile(target) or os.path.getsize(target) == 0:
         raise CoreError("web.error.core_download_failed", name=core_type)

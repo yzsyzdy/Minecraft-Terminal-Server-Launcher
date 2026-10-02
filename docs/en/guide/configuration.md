@@ -29,10 +29,11 @@ It lives at the project root (next to the executable in a packaged build) and is
 | `language` | string | `""` | UI language. An empty string follows the system (Chinese environments get `zh`, everything else `en`); `zh` / `en` / `ru` can also be set explicitly |
 | `curseforge_api_key` | string | `""` | CurseForge API key. Left empty, CurseForge mod search is unavailable |
 | `download_threads` | int | `16` | Number of concurrent download chunks. Falls back to a single thread when the mirror does not support Range requests |
-| `auto_start_server` | string | `""` | Name of the server that "Settings" has marked as the default to launch; empty means no auto-start |
+| `auto_start_server` | string | `""` | Name of the server that "Settings" has marked as the default to launch; empty means no auto-start. That one is launched **in the foreground** and skips the menu |
 | `web.host` | string | `"127.0.0.1"` | Web panel bind address; `0.0.0.0` means all interfaces |
-| `web.port` | int | `8765` | Web panel bind port |
+| `web.port` | int | `8765` | Web panel bind port; `0` means "pick a free one" |
 | `web.token` | string | `""` | Web panel access token; generated on first start when empty |
+| `web.auto_start` | bool | `false` | Whether the panel starts with the app. It runs on a background thread and does not block the terminal menu |
 
 The `language`, `download_threads`, and `auto_start_server` fields normally do not need hand-editing; use menu `[7] Settings` instead:
 
@@ -42,7 +43,13 @@ The `language`, `download_threads`, and `auto_start_server` fields normally do n
 - `[4] Auto-start server`: choose which server the main menu launches by default
 - `[5] Run at startup`: writes the Windows registry key `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`; unavailable on non-Windows platforms
 
-The three `web.*` fields are not in the menu; edit `config.json` directly. Usage and the security boundary are covered in [Web panel](../features/web-panel.md).
+The bind address, port, token and "start with the app" flag all live in the main menu's `[8] Web panel` submenu, so `config.json` normally needs no hand-editing. Usage and the security boundary are covered in [Web panel](../features/web-panel.md).
+
+!!! tip "Two different \"auto-start\" switches"
+    - **`auto_start_server` (global, one server)**: the app skips the main menu and runs that instance **in the foreground** — the terminal belongs to it, Ctrl+C ends it.
+    - **An instance's `auto_start` (one per instance)**: the app raises it **in the background**, so the terminal stays on the menu; its console is visible in the panel, and it is stopped when the app exits.
+
+    When both point at the same instance, only the foreground path runs — it is never started twice.
 
 !!! note "About config.json and version control"
     `config.json` holds machine-specific settings, so the repository ships only `config.example.json` as a template. After you clone the project, `config.json` is generated from the defaults and is not tracked by git.
@@ -81,11 +88,24 @@ It lives at `servers/<server name>/.server.json`.
 | `extra_jvm_args` | list[str] | `[]` | Extra JVM arguments, such as `-XX:+UseG1GC` |
 | `extra_server_args` | list[str] | `[]` | Extra server arguments, such as `--nogui` |
 | `process_priority` | string | `"normal"` | Process priority: `normal` / `below` (below normal) / `low` |
+| `kind` | string | `"minecraft"` | Instance kind: `minecraft` or `generic`. Cannot be changed after creation |
+| `auto_start` | bool | `false` | Start with the app: raised **in the background** when the app starts, manageable from the panel |
+| `launch` | object | see below | The **generic instance** launch spec; ignored when `kind` is `minecraft` |
 | `openfrp.token` | string | `""` | OpenFrp user token bound to this instance |
 | `openfrp.proxy_id` | int | `0` | Bound tunnel ID; `0` means unbound |
 | `openfrp.auto_start` | bool | `false` | Whether to start frpc automatically when the server launches |
 
-The `process_priority`, `extra_jvm_args`, and `extra_server_args` fields can be changed directly from the configuration menu that appears after selecting an instance under main menu `[1] Start server`; no need to hand-edit JSON.
+A generic instance's `launch` block:
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `mode` | string | `"exec"` | `exec` (run an executable directly, no shell) / `cmd` / `powershell` |
+| `program` | string | `""` | With `mode=exec`, the executable; relative paths resolve inside the instance |
+| `args` | list[str] | `[]` | With `mode=exec`, one argument per entry |
+| `command` | string | `""` | With `mode=cmd` / `powershell`, the command string |
+| `workdir` | string | `""` | Working directory, relative to the instance; empty means the instance itself |
+
+`process_priority`, `extra_jvm_args`, `extra_server_args`, `auto_start` (and a generic instance's whole `launch` block) can be changed from the configuration menu that appears after selecting an instance under main menu `[1] Start server` — no hand-editing needed. In the web panel, select the instance and press `⚙` in the pane header.
 
 ## Auto-generated files
 

@@ -429,9 +429,11 @@ def _edit_server_config(server_cfg: dict, server_dir: str) -> None:
         print(t("menu.config.1", n=1, val=prio))
         print(t("menu.config.2", n=2, val=" ".join(server_cfg.get("extra_jvm_args", []))))
         print(t("menu.config.3", n=3, val=" ".join(server_cfg.get("extra_server_args", []))))
+        print(t("menu.config.4", n=4,
+                val=t("settings.on") if server_cfg.get("auto_start") else t("settings.off")))
         print(t("menu.plugin.back", n=0))
         print()
-        c = input("  " + t("menu.main.prompt", max=3)).strip()
+        c = input("  " + t("menu.main.prompt", max=4)).strip()
         if c == "0":
             return
         elif c == "1":
@@ -454,6 +456,11 @@ def _edit_server_config(server_cfg: dict, server_dir: str) -> None:
             server_cfg["extra_server_args"] = raw.split() if raw else []
             save_server_config(server_cfg, server_dir)
             print(t("menu.config.saved"))
+        elif c == "4":
+            server_cfg["auto_start"] = not bool(server_cfg.get("auto_start"))
+            save_server_config(server_cfg, server_dir)
+            print(t("menu.config.auto_start_saved",
+                    val=t("settings.on") if server_cfg["auto_start"] else t("settings.off")))
         else:
             print(t("app.invalid_choice_short"))
 
@@ -480,9 +487,11 @@ def _edit_generic_config(server_cfg: dict, server_dir: str) -> None:
                 val=" ".join(launch.get("args") or []) or "-"))
         print(t("menu.generic.cfg_command", n=5, val=launch.get("command") or "-"))
         print(t("menu.generic.cfg_workdir", n=6, val=launch.get("workdir") or "-"))
+        print(t("menu.config.4", n=7,
+                val=t("settings.on") if server_cfg.get("auto_start") else t("settings.off")))
         print(t("menu.plugin.back", n=0))
         print()
-        c = input("  " + t("menu.main.prompt", max=6)).strip()
+        c = input("  " + t("menu.main.prompt", max=7)).strip()
         if c == "0":
             return
 
@@ -521,6 +530,8 @@ def _edit_generic_config(server_cfg: dict, server_dir: str) -> None:
             print()
             value = input(t("menu.generic.workdir_prompt")).strip().strip('"')
             patch["launch"] = {**launch, "workdir": value}
+        elif c == "7":
+            patch["auto_start"] = not bool(server_cfg.get("auto_start"))
         else:
             print(t("app.invalid_choice_short"))
 
@@ -1509,12 +1520,12 @@ def _edit_web_binding(project_dir: str, config: dict, host: str, port: int) -> N
 
 
 def _web_menu(project_dir: str) -> None:
-    """网页面板：启动、改监听、换 token。
+    """网页面板：启动、改监听、换 token、设置随软件启动。
 
-    面板是个长期驻留的服务，形态和「启动服务器」一样：选了就一直阻塞在
-    这里，Ctrl+C 才回到菜单。
+    面板是个长期驻留的服务，「启动面板」和「启动服务器」是一个形态：
+    选了就一直阻塞在这里，Ctrl+C 才回到菜单。
     """
-    from web.server import run_web, web_settings
+    from web.server import run_web, web_auto_start, web_settings
 
     while True:
         config = load_config(project_dir)
@@ -1533,12 +1544,25 @@ def _web_menu(project_dir: str) -> None:
         print(t("web.menu.start", n=1))
         print(t("web.menu.edit", n=2))
         print(t("web.menu.regen", n=3))
+        print(t("web.menu.autostart", n=4,
+                val=t("settings.on") if web_auto_start(config) else t("settings.off")))
         print(t("menu.plugin.back", n=0))
         print()
-        choice = input("  " + t("menu.main.prompt", max=3)).strip()
+        choice = input("  " + t("menu.main.prompt", max=4)).strip()
 
         if choice == "0":
             return
+
+        if choice == "4":
+            web_cfg = dict(config.get("web") or {})
+            web_cfg["auto_start"] = not web_auto_start(config)
+            config["web"] = web_cfg
+            save_config(config, project_dir)
+            print()
+            print(t("web.menu.autostart_saved",
+                    val=t("settings.on") if web_cfg["auto_start"] else t("settings.off")))
+            input(t("app.press_enter"))
+            continue
 
         if choice == "1":
             print()

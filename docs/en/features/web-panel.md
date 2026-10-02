@@ -6,7 +6,9 @@ Three ways in, pick whichever suits you:
 - **`python start.py web`** — starts the panel directly, on `http://127.0.0.1:8765` by default
 - **`python start.py --help`** — for when you have forgotten the options
 
-The panel submenu also lets you change the bind address / port and regenerate the access token; on start it prints a URL carrying that token, and opening it logs you in.
+The panel submenu also lets you change the bind address / port, regenerate the access token, and **make the panel start with the app**; on start it prints a URL carrying that token, and opening it logs you in.
+
+With "start with the app" enabled, the panel runs on a background thread as soon as the app starts — the terminal still reaches its menu, and any server you start still gets the terminal.
 
 The terminal menu suits someone sitting at the machine. The web panel suits everyone else: away from home, on a phone, or simply tired of that black window.
 
@@ -22,8 +24,9 @@ The panel revolves around one loop — see instances → start → watch the con
 - **Console controls**: clear, toggle auto-scroll, colour `WARN` and `ERROR` separately, and pause following automatically when you scroll up
 - **File manager**: browse an instance's tree and edit text files such as `server.properties` in place; create files and folders, rename, delete, upload, download
 - **New instance**: download a server core from the MSL mirror, use a local jar, import an existing server zip archive, or create a **generic instance**
-- **Instance settings**: memory, extra JVM arguments, process priority, a generic instance's launch spec, and the OpenFrp tunnel binding
-- **frp tunneling**: edit `frpc.toml`, add and remove tunnels, start and stop frpc, download or update the frpc binary — all from the panel
+- **Instance settings**: memory, extra JVM arguments, process priority, **start with the app**, a generic instance's launch spec, and the OpenFrp tunnel binding
+- **frp tunneling**: edit `frpc.toml`, add and remove tunnels, start and stop frpc, download or update the frpc binary (with a manual upload fallback)
+- **Visible progress**: downloading a server core, downloading frpc and uploading files all show a progress bar along the bottom — a tens-of-megabytes core no longer means staring at a spinning button
 
 The console and the file manager are two tabs of the right-hand pane; switching tabs does not drop the SSE connection. Instance settings (`⚙`) and frp (`frp` in the top bar) are separate dialogs.
 
@@ -119,8 +122,12 @@ Open that once and the token lands in a cookie; after that `http://127.0.0.1:876
 | Field | Default | Description |
 |---|---|---|
 | `web.host` | `"127.0.0.1"` | Bind address; `0.0.0.0` means all interfaces |
-| `web.port` | `8765` | Bind port |
+| `web.port` | `8765` | Bind port; `0` means "pick a free one" |
 | `web.token` | `""` | Access token; generated on first start when empty |
+| `web.auto_start` | `false` | Start the panel with the app. Runs on a background thread and does not block the terminal menu; toggled under the panel submenu `[4]` |
+
+!!! tip "About port 8765"
+    8765 is also the default port of VS Code's Python debugger (debugpy). If you start the panel while debugging Python, the two compete for it; on Windows `SO_REUSEADDR` used to let the second bind "succeed" silently, which showed up as intermittent 401s or a panel that would not load. That option is now disabled on Windows, so the conflict is reported as a bind failure. Just pick another port.
 
 Command-line flags can override host and port for one run:
 
@@ -149,7 +156,7 @@ The entire contract between the front end and the back end:
 | `POST` | `/api/file/upload` | `?name=&path=`; the request body *is* the file, read to exactly `Content-Length` |
 | `GET` | `/api/cores` | Server core list; add `?type=<core>` for that core's versions |
 | `POST` | `/api/instances` | `{"name", "kind"?, "mc_version", "min_mem", "max_mem", "core_type"?, "core_version"?, "jar_name"?, "launch"?}` |
-| `POST` | `/api/instances/settings` | Update an instance: `{"name", "min_mem"?, "extra_jvm_args"?, "launch"?, "openfrp"?, ...}`; `kind` and `name` are not changeable |
+| `POST` | `/api/instances/settings` | Update an instance: `{"name", "min_mem"?, "extra_jvm_args"?, "launch"?, "openfrp"?, "auto_start"?, ...}`; `kind` and `name` are not changeable |
 | `POST` | `/api/instances/import/scan` | `{"zip_path": "..."}` — returns the candidate cores |
 | `POST` | `/api/instances/import/commit` | `{"zip_path": "...", "jar": "...", "name": "..."}` |
 | `POST` | `/api/instances/import/abort` | `{"zip_path": "..."}` — discards the extracted temp folder |
@@ -164,8 +171,9 @@ The entire contract between the front end and the back end:
 Conventions:
 
 - A failure always returns `{"ok": false, "key": "<i18n key>", "message": "<explanation in the current language>"}` with HTTP 400; an unexpected exception returns 500. The front end simply shows `message`
-- There are two event shapes: `{"type": "line", ...}` for a console line and `{"type": "state", ...}` for a state change. Every event carries an `instance` field saying where it came from, plus a per-instance monotonic `seq` — on reconnect the server replays the whole history, and the front end uses `seq` to skip lines it has already drawn instead of duplicating them
+- There are three event shapes: `{"type": "line", ...}` for a console line, `{"type": "state", ...}` for a state change, and `{"type": "job", ...}` for long-task progress (carrying `label` / `ratio` / `done`). `line` and `state` carry an `instance` field saying where they came from, plus a per-instance monotonic `seq` — on reconnect the server replays the whole history, and the front end uses `seq` to skip lines it has already drawn instead of duplicating them. `job` belongs to no instance, so it is never filtered by the per-instance subscription
 - Lines with `kind: "note"` are produced by MSTL itself, already translated by the server before being pushed
+- The download POSTs are synchronous and their progress rides the SSE stream above; uploads report progress straight from the browser (`XMLHttpRequest.upload.onprogress`), with the server uninvolved
 
 ## Known limits
 

@@ -25,6 +25,7 @@ from java_tools import resolve_java
 from server_launcher import start_minecraft_server, start_server_interactive
 from i18n import t, load_language, detect_os_language
 from constants import REPO_URL
+from core.errors import CoreError
 
 
 # ---------------------------------------------------------------------------
@@ -323,6 +324,44 @@ def _dispatch_args(argv: list[str]) -> bool:
     sys.exit(2)
 
 
+def _auto_start_instances(servers_dir: str, project_dir: str, config: dict) -> None:
+    """把标了「随软件启动」的实例在后台拉起来。
+
+    走的是 RuntimeManager（PIPE + 读线程），不是前台交互模式：这样它们有
+    控制台缓冲、有 logs/mstl-console.log，网页面板里能看能管，终端还留在
+    菜单上。config.auto_start_server 指定的那一台仍走原来的前台流程，这里
+    跳过它，免得同一台服被拉起两次。
+    """
+    from web.server import shared_manager
+
+    foreground = config.get("auto_start_server", "")
+    targets = [s for s in list_servers(servers_dir)
+               if s.get("auto_start") and s.get("name") != foreground]
+    if not targets:
+        return
+
+    manager = shared_manager(project_dir)
+    started: list[str] = []
+    for entry in targets:
+        path = entry["_path"]
+        name = entry.get("name") or os.path.basename(os.path.normpath(path))
+        try:
+            manager.start(load_server_config(path), path)
+            started.append(name)
+        except CoreError as e:
+            print("  " + t(e.key, **e.kwargs))
+        except Exception as e:  # noqa: BLE001
+            print(f"  [警告] 自动启动 {name} 失败: {e}")
+
+    if started:
+        print(t("app.auto_started", names=", ".join(started)))
+        print(t("app.auto_started_hint"))
+        print()
+        # 进程退出时把这些后台实例一并停掉，别留下没人管的 java 进程
+        import atexit
+        atexit.register(lambda: manager.stop_all(timeout=10))
+
+
 def main():
     """程序入口。"""
     project_dir = _project_dir()
@@ -348,6 +387,16 @@ def main():
     save_config(config, project_dir)
 
     servers_dir = ensure_servers_folder(project_dir)
+
+    # 面板随软件启动：守护线程里跑，不挡住后面的菜单与服务器
+    from web.server import start_background, web_auto_start
+
+    if web_auto_start(config):
+        start_background(project_dir)
+        print()
+
+    # 实例自己的「随软件启动」：后台拉起，面板里能看能管
+    _auto_start_instances(servers_dir, project_dir, config)
 
     # 如果配置了自动启动的服务器，直接跳过主菜单
     selected = None

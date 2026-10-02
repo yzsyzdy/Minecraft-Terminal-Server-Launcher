@@ -18,6 +18,8 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "host": "127.0.0.1",
         "port": 8765,
         "token": "",
+        # 启动软件时顺带把面板也拉起来（后台线程，不挡住终端菜单）
+        "auto_start": False,
     },
 }
 

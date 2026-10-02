@@ -648,5 +648,15 @@
     "web.frp.upload": "Загрузить frpc",
     "web.frp.uploading": "Загрузка…",
     "web.frp.upload_done": "frpc установлен",
-    "web.error.frpc_install_failed": "В этом файле нет {name}; убедитесь, что это официальный архив релиза frp ({asset})"
+    "web.error.frpc_install_failed": "В этом файле нет {name}; убедитесь, что это официальный архив релиза frp ({asset})",
+
+    "app.auto_started": "  [Auto] запущено в фоне: {names}",
+    "app.auto_started_hint": "        Их консоли видны в веб-панели; при выходе из программы они будут остановлены.",
+    "menu.config.4": "  [{n}] Запускать вместе с программой = {val}",
+    "menu.config.auto_start_saved": "  Запуск вместе с программой: {val}.",
+    "web.menu.autostart": "  [{n}] Запускать вместе с программой = {val}",
+    "web.menu.autostart_saved": "  Автозапуск панели: {val}.",
+    "web.cli.auto_launched": "Веб-панель запущена в фоне: {url}",
+    "web.settings.auto_start_instance": "Запускать вместе с программой",
+    "web.settings.auto_start_instance_hint": "Поднимает этот инстанс в фоне при старте программы; он по-прежнему пишет лог консоли и управляется из веб-панели. При выходе из программы останавливается."
 }

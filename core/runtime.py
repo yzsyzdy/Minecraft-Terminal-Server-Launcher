@@ -491,6 +491,21 @@ class RuntimeManager:
         runtime = self._runtimes.get(name)
         return runtime.snapshot() if runtime is not None else None
 
+    def running(self) -> list[str]:
+        """当前还没停下来的实例名。"""
+        return [name for name, rt in list(self._runtimes.items())
+                if rt.state() != STATE_STOPPED]
+
+    def stop_all(self, timeout: float = 20.0) -> None:
+        """把所有还在跑的实例停掉。进程退出时收尾用。"""
+        for name in self.running():
+            try:
+                self.stop(name)
+            except CoreError:
+                pass
+            except Exception:  # noqa: BLE001
+                pass
+
     def histories(self) -> dict[str, list[Event]]:
         return {name: rt.history() for name, rt in self._runtimes.items()}
 

@@ -274,7 +274,8 @@ def _download_chunk(url: str, start: int, end: int, target_path: str,
 
 def download_file_with_progress(url: str, target_path: str, desc: str = "",
                                 headers: Optional[dict] = None,
-                                quiet: bool = False) -> bool:
+                                quiet: bool = False,
+                                on_progress=None) -> bool:
     """单线程文件下载（带进度条）。
 
     Args:
@@ -283,6 +284,8 @@ def download_file_with_progress(url: str, target_path: str, desc: str = "",
         desc: 进度条描述文字
         headers: 自定义请求头（可选）
         quiet: 不往 stdout 画进度，供不需要终端的调用方使用
+        on_progress: 进度回调 on_progress(ratio, downloaded, total)，
+                     供网页面板把进度推给浏览器
 
     Returns:
         成功返回 True，失败返回 False
@@ -305,6 +308,11 @@ def download_file_with_progress(url: str, target_path: str, desc: str = "",
                         break
                     f.write(chunk)
                     downloaded += len(chunk)
+                    if on_progress is not None and total:
+                        try:
+                            on_progress(downloaded / total, downloaded, total)
+                        except Exception:  # noqa: BLE001
+                            pass
                     if quiet:
                         continue
                     if total and total > 0:
@@ -330,7 +338,8 @@ _download_with_progress = download_file_with_progress
 def multithreaded_download(url: str, target_path: str, desc: str = "",
                            num_threads: int = _DEFAULT_DOWNLOAD_THREADS,
                            headers: Optional[dict] = None,
-                           quiet: bool = False) -> bool:
+                           quiet: bool = False,
+                           on_progress=None) -> bool:
     """
     Multi-threaded file download.
 
@@ -340,25 +349,37 @@ def multithreaded_download(url: str, target_path: str, desc: str = "",
 
     headers 会带给探测、分片和单线程回退三条路径。CurseForge 从 2026-07-16
     起要求下载也带 x-api-key，缺了它整个下载路径都只会拿到 401。
-    quiet 供网页面板这类没有终端的调用方使用。
+    quiet 供网页面板这类没有终端的调用方使用；on_progress 同理，用来把
+    进度推给浏览器。
     """
     def say(message: str, end: str = "\n") -> None:
         if not quiet:
             print(message, end=end, flush=True)
 
+    def report(ratio: float, downloaded: int, total: int) -> None:
+        if on_progress is None:
+            return
+        try:
+            on_progress(ratio, downloaded, total)
+        except Exception:  # noqa: BLE001
+            pass
+
     # 检查服务器是否支持 Range 请求，同时获取文件大小
     range_supported, file_size = _check_range_support(url, headers)
 
     if file_size < _MIN_CHUNK_SIZE or file_size <= 0:
-        return download_file_with_progress(url, target_path, desc, headers, quiet)
+        return download_file_with_progress(url, target_path, desc, headers,
+                                           quiet, on_progress)
 
     # 如果服务器明确不支持 Range 请求，直接使用单线程下载
     if not range_supported:
-        return download_file_with_progress(url, target_path, desc, headers, quiet)
+        return download_file_with_progress(url, target_path, desc, headers,
+                                           quiet, on_progress)
 
     actual_threads = min(num_threads, max(1, file_size // _MIN_CHUNK_SIZE))
     if actual_threads <= 1:
-        return download_file_with_progress(url, target_path, desc, headers, quiet)
+        return download_file_with_progress(url, target_path, desc, headers,
+                                           quiet, on_progress)
 
     chunk_size = file_size // actual_threads
 
@@ -389,10 +410,12 @@ def multithreaded_download(url: str, target_path: str, desc: str = "",
         pending = set(futures)
         while pending:
             _done, pending = concurrent.futures.wait(pending, timeout=0.15)
-            if quiet:
-                continue
             with lock:
                 downloaded = shared["downloaded"]
+            if file_size > 0:
+                report(downloaded / file_size, downloaded, file_size)
+            if quiet:
+                continue
             if file_size > 0:
                 pct = downloaded / file_size
                 filled = int(bar_width * pct)
@@ -414,7 +437,8 @@ def multithreaded_download(url: str, target_path: str, desc: str = "",
             except OSError:
                 pass
             say(f"\n  {t('download.retry_fallback')}")
-            return download_file_with_progress(url, target_path, desc, headers, quiet)
+            return download_file_with_progress(url, target_path, desc, headers,
+                                               quiet, on_progress)
 
     final_bar = "\u2588" * bar_width
     say(f"    {desc} [{final_bar}] 100.0%  "

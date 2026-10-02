@@ -230,13 +230,14 @@ def manual_info() -> dict[str, str]:
     }
 
 
-def download(project_dir: str) -> str:
+def download(project_dir: str, on_progress=None) -> str:
     """下载（或重新下载）frpc 二进制，返回路径。
 
     失败时把 GitHub 发布页地址一并带进错误里：面板会把 message 弹给用户，
-    里面直接有可以点的地址，不用再让人自己去搜。
+    里面直接有可以点的地址，不用再让人自己去搜。on_progress 透传给下载
+    引擎，供界面层画进度。
     """
-    path = download_frpc(project_dir, quiet=True)
+    path = download_frpc(project_dir, quiet=True, on_progress=on_progress)
     if not path or not os.path.isfile(path):
         raise CoreError("web.error.frpc_download_failed",
                         url=releases_url(), asset=expected_asset_name())

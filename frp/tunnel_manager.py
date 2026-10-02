@@ -138,7 +138,7 @@ def get_frpc_toml_path(project_dir: str) -> str:
 # 下载与解压
 # ---------------------------------------------------------------------------
 
-def _download_file(url: str, target_path: str) -> bool:
+def _download_file(url: str, target_path: str, on_progress=None) -> bool:
     """下载单个文件（带进度条），成功后返回 True。
 
     校验: 拒绝 text/html 响应（防镜像返回错误页面）。
@@ -161,7 +161,7 @@ def _download_file(url: str, target_path: str) -> bool:
     # 正式下载（带进度条）
     return download_file_with_progress(
         url, target_path, desc="frpc",
-        headers={"User-Agent": USER_AGENT})
+        headers={"User-Agent": USER_AGENT}, on_progress=on_progress)
 
 
 def _make_executable(path: str) -> None:
@@ -338,13 +338,14 @@ def install_frpc_from_file(src_path: str, project_dir: str) -> Optional[str]:
 
 
 def download_frpc(project_dir: str, version: str = "",
-                  quiet: bool = False) -> Optional[str]:
+                  quiet: bool = False, on_progress=None) -> Optional[str]:
     """下载并解压原版 frpc。
 
     Args:
         project_dir: 项目目录
         version: 指定版本；为空时自动获取最新版
         quiet: 不往 stdout 说话，供网页面板这类没有终端的调用方使用
+        on_progress: 进度回调，透传给下载函数
 
     Returns:
         解压后的 frpc 二进制路径；失败返回 None
@@ -372,7 +373,7 @@ def download_frpc(project_dir: str, version: str = "",
         say()
         say(f"  [frp] 正在下载 frpc v{version} ...")
         say(f"  [frp] 源 {i}/{len(urls)}: {url}")
-        if _download_file(url, archive_path):
+        if _download_file(url, archive_path, on_progress=on_progress):
             break
         say("  [frp] 该源下载失败，尝试下一个...")
         try:

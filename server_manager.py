@@ -47,6 +47,8 @@ DEFAULT_SERVER_CONFIG: dict[str, Any] = {
     "extra_jvm_args": [],
     "extra_server_args": [],
     "process_priority": "normal",
+    # 随软件启动而启动：软件一起来就在后台把它拉起（网页面板里能看能管）
+    "auto_start": False,
     "launch": copy.deepcopy(DEFAULT_GENERIC_LAUNCH),
     "openfrp": {
         "token": "",
@@ -88,6 +90,7 @@ def _normalize_server_config(cfg: dict[str, Any]) -> dict[str, Any]:
 
     kind = str(cfg.get("kind") or KIND_MINECRAFT).strip().lower()
     cfg["kind"] = kind if kind in INSTANCE_KINDS else KIND_MINECRAFT
+    cfg["auto_start"] = bool(cfg.get("auto_start"))
 
     launch = cfg.get("launch")
     if not isinstance(launch, dict):

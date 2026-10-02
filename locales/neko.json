@@ -590,5 +590,15 @@
     "web.frp.upload": "上传 frpc",
     "web.frp.uploading": "正在上传……",
     "web.frp.upload_done": "frpc 已安装",
-    "web.error.frpc_install_failed": "这个文件里没有找到 {name}，请确认下的是 frp 官方发布包（{asset}）"
+    "web.error.frpc_install_failed": "这个文件里没有找到 {name}，请确认下的是 frp 官方发布包（{asset}）",
+
+    "app.auto_started": "  [Auto] 已后台启动: {names}",
+    "app.auto_started_hint": "        在网页面板里可以看到它们的控制台；关掉本程序时它们会被一并停止。",
+    "menu.config.4": "  [{n}] 随软件启动而启动 = {val}",
+    "menu.config.auto_start_saved": "  随软件启动已设为 {val}。",
+    "web.menu.autostart": "  [{n}] 随软件启动 = {val}",
+    "web.menu.autostart_saved": "  面板随软件启动已设为 {val}。",
+    "web.cli.auto_launched": "网页面板已在后台启动: {url}",
+    "web.settings.auto_start_instance": "随软件启动而启动",
+    "web.settings.auto_start_instance_hint": "软件启动时在后台把这台实例拉起来；它照常写控制台日志，网页面板里能看能管。关掉本程序时会一并停止。"
 }

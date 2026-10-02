@@ -18,6 +18,7 @@ HTTP 用标准库，事件推送用 SSE，前端是一张不依赖任何构建�
 
 from __future__ import annotations
 
+import atexit
 import hmac
 import json
 import os
@@ -165,6 +166,8 @@ WEB_STRINGS = (
     "web.settings.save",
     "web.settings.saved",
     "web.settings.kind_locked",
+    "web.settings.auto_start_instance",
+    "web.settings.auto_start_instance_hint",
     # frp 面板
     "web.frp.title",
     "web.frp.status",
@@ -210,12 +213,112 @@ def web_settings(config: dict) -> tuple[str, int, str]:
     if not isinstance(web, dict):
         web = {}
     host = str(web.get("host") or "127.0.0.1")
+    # 端口 0 是「随便挑一个空闲端口」，是合法配置；只在值缺失或非法时才回退，
+    # 写成 `port or 8765` 会把 0 一起吞掉
     try:
-        port = int(web.get("port") or 8765)
+        port = int(web.get("port"))
     except (TypeError, ValueError):
         port = 8765
     token = str(web.get("token") or "")
     return host, port, token
+
+
+def web_auto_start(config: dict) -> bool:
+    """config.json 里的 web.auto_start：面板是否随软件启动。"""
+    web = config.get("web")
+    if not isinstance(web, dict):
+        return False
+    return bool(web.get("auto_start"))
+
+
+# ---------------------------------------------------------------------------
+# 进程内共享的运行时管理器
+# ---------------------------------------------------------------------------
+
+_manager_lock = threading.Lock()
+_shared_manager: Optional[RuntimeManager] = None
+
+
+def shared_manager(project_dir: str) -> RuntimeManager:
+    """进程内共用一个 RuntimeManager。
+
+    软件启动时后台拉起的实例、和网页面板里看到的那批，必须是同一个管理器，
+    否则面板会显示它们「未运行」，用户还能在面板里再启动一次——同一台服就
+    被拉起两遍了。
+    """
+    global _shared_manager
+    with _manager_lock:
+        if _shared_manager is None:
+            _shared_manager = RuntimeManager(project_dir)
+        return _shared_manager
+
+
+# ---------------------------------------------------------------------------
+# 长任务进度（下载服务端核心、下载 frpc……）
+# ---------------------------------------------------------------------------
+
+class JobBus:
+    """下载这类与实例无关的进度，走这条独立的事件流。
+
+    塞进 RuntimeManager 的事件总线并不合适：那边的事件都带 instance，
+    而「正在下载服务端核心」属于整个面板，不属于哪台实例。
+    """
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._subs: list = []
+        self._seq = 0
+
+    def subscribe(self, callback) -> Any:
+        with self._lock:
+            self._subs.append(callback)
+
+        def unsubscribe() -> None:
+            with self._lock:
+                if callback in self._subs:
+                    self._subs.remove(callback)
+
+        return unsubscribe
+
+    def publish(self, payload: dict) -> None:
+        with self._lock:
+            self._seq += 1
+            payload = dict(payload, seq=self._seq)
+            subs = list(self._subs)
+        for callback in subs:
+            try:
+                callback(payload)
+            except Exception:  # noqa: BLE001
+                pass
+
+
+JOB_BUS = JobBus()
+
+
+def progress_reporter(label: str):
+    """产出一个给 core 下载函数用的进度回调 -> 面板进度条。
+
+    回调里绝不能把异常抛回去：它是下载链路上的一环，进度画不出来不该让
+    下载失败。
+    """
+    def report(ratio: float, downloaded: int = 0, total: int = 0) -> None:
+        try:
+            JOB_BUS.publish({
+                "type": "job",
+                "label": label,
+                "ratio": max(0.0, min(1.0, float(ratio or 0.0))),
+                "downloaded": int(downloaded or 0),
+                "total": int(total or 0),
+                "done": False,
+            })
+        except Exception:  # noqa: BLE001
+            pass
+    return report
+
+
+def finish_job(label: str, message: str = "") -> None:
+    JOB_BUS.publish({"type": "job", "label": label, "ratio": 1.0,
+                     "done": True, "message": message})
 
 
 def _render_event(event: dict) -> dict:
@@ -694,8 +797,14 @@ def _make_handler(manager: RuntimeManager, servers_dir: str, token: str,
                 if kind == KIND_GENERIC:
                     self._require_generic_launch(body.get("launch"))
                 elif core_type and core_version:
-                    jar_name = provision.install_core(
-                        server_dir, core_type, core_version)
+                    # 核心动辄几十 MB，进度推到面板上，别让用户干等
+                    label = t("web.new.creating")
+                    try:
+                        jar_name = provision.install_core(
+                            server_dir, core_type, core_version,
+                            on_progress=progress_reporter(label))
+                    finally:
+                        finish_job(label)
                     provision.set_instance_core(
                         server_dir, jar_name, mc_version=mc_version or None)
             except CoreError:
@@ -736,6 +845,8 @@ def _make_handler(manager: RuntimeManager, servers_dir: str, token: str,
                 patch["launch"] = body["launch"]
             if isinstance(body.get("openfrp"), dict):
                 patch["openfrp"] = body["openfrp"]
+            if "auto_start" in body:
+                patch["auto_start"] = bool(body["auto_start"])
 
             # 通用实例不能把启动配置清空，否则要等到下次启动才发现跑不起来
             entry = next((s for s in list_servers(servers_dir)
@@ -815,7 +926,12 @@ def _make_handler(manager: RuntimeManager, servers_dir: str, token: str,
                                    "message": t("web.frp.stopped_msg")})
 
             if path == "/api/frp/download":
-                saved_path = frpops.download(project_dir)
+                label = t("web.frp.downloading")
+                try:
+                    saved_path = frpops.download(
+                        project_dir, on_progress=progress_reporter(label))
+                finally:
+                    finish_job(label)
                 return self._json({"ok": True, "path": saved_path,
                                    "status": frpops.status(project_dir),
                                    "message": t("web.frp.downloaded")})
@@ -871,6 +987,8 @@ def _make_handler(manager: RuntimeManager, servers_dir: str, token: str,
 
             inbox: "queue.Queue[dict]" = queue.Queue()
             unsubscribe = manager.subscribe(inbox.put)
+            # 下载进度这类与实例无关的事件也推给同一个客户端
+            unsubscribe_jobs = JOB_BUS.subscribe(inbox.put)
             try:
                 if name:
                     runtime = manager.get(name)
@@ -887,15 +1005,31 @@ def _make_handler(manager: RuntimeManager, servers_dir: str, token: str,
                         self.wfile.write(b": ping\n\n")
                         self.wfile.flush()
                         continue
-                    if name and event.get("instance") != name:
+                    # job 事件不带 instance，别被按实例过滤掉
+                    if (event.get("type") != "job" and name
+                            and event.get("instance") != name):
                         continue
                     self._sse(event)
             except (BrokenPipeError, ConnectionResetError, OSError):
                 pass
             finally:
                 unsubscribe()
+                unsubscribe_jobs()
 
     return Handler
+
+
+class _PanelServer(ThreadingHTTPServer):
+    """面板的 HTTP 服务。
+
+    Windows 上必须关掉 SO_REUSEADDR。它允许直接绑定到已被占用的端口，于是
+    「端口被别的程序占着」不会报错，两个进程分着接同一个端口的请求——表现
+    出来就是面板偶发 401 或干脆打不开，而日志里一片安静。Windows 本来就不
+    依赖它绕过 TIME_WAIT，关掉之后冲突会变成一次明确的 bind 失败。
+    """
+
+    allow_reuse_address = os.name != "nt"
+    daemon_threads = True
 
 
 def build_server(project_dir: str, *, host: str = "127.0.0.1", port: int = 8765,
@@ -909,10 +1043,78 @@ def build_server(project_dir: str, *, host: str = "127.0.0.1", port: int = 8765,
     load_language(config.get("language", "") or detect_os_language())
 
     servers_dir = servers_dir or ensure_servers_folder(project_dir)
-    manager = manager or RuntimeManager(project_dir)
+    manager = manager or shared_manager(project_dir)
     handler = _make_handler(manager, servers_dir, token, project_dir)
-    httpd = ThreadingHTTPServer((host, port), handler)
-    httpd.daemon_threads = True
+    httpd = _PanelServer((host, port), handler)
+    return httpd
+
+
+# ---------------------------------------------------------------------------
+# 随软件启动（后台常驻，不阻塞终端菜单）
+# ---------------------------------------------------------------------------
+
+_background_server: Optional[ThreadingHTTPServer] = None
+
+
+def _stop_background() -> None:
+    global _background_server
+    httpd, _background_server = _background_server, None
+    if httpd is not None:
+        try:
+            httpd.shutdown()
+            httpd.server_close()
+        except Exception:  # noqa: BLE001
+            pass
+
+
+def ensure_token(project_dir: str, config: dict) -> str:
+    """没有 token 就生成一个并存下来，返回 token。"""
+    _, _, token = web_settings(config)
+    if token:
+        return token
+    token = secrets.token_urlsafe(24)
+    web_cfg = dict(config.get("web") or {})
+    web_cfg.update({"token": token})
+    config["web"] = web_cfg
+    save_config(config, project_dir)
+    return token
+
+
+def start_background(project_dir: str, host: Optional[str] = None,
+                     port: Optional[int] = None) -> Optional[ThreadingHTTPServer]:
+    """在后台线程里把面板拉起来，供「随软件启动」使用。
+
+    与 run_web 的区别是不阻塞：面板跑在守护线程上，主线程该进菜单进菜单、
+    该起服务器起服务器。失败返回 None（端口被占之类），调用方据此决定要
+    不要提示。
+    """
+    global _background_server
+    if _background_server is not None:
+        return _background_server      # 已经在跑了，别起第二个
+
+    config = load_config(project_dir)
+    load_language(config.get("language", "") or detect_os_language())
+
+    cfg_host, cfg_port, _ = web_settings(config)
+    token = ensure_token(project_dir, config)
+    bind_host = host or cfg_host
+    bind_port = cfg_port if port is None else port
+
+    try:
+        httpd = build_server(project_dir, host=bind_host, port=bind_port, token=token)
+    except OSError as e:
+        print(t("web.cli.bind_failed", addr=f"{bind_host}:{bind_port}", msg=str(e)))
+        return None
+
+    threading.Thread(target=httpd.serve_forever, name="mstl-web", daemon=True).start()
+    atexit.register(_stop_background)
+
+    shown_host = "127.0.0.1" if bind_host in ("0.0.0.0", "::") else bind_host
+    print(t("web.cli.auto_launched",
+            url=f"http://{shown_host}:{httpd.server_address[1]}/?token={token}"))
+    if bind_host in ("0.0.0.0", "::"):
+        print(t("web.cli.external_warning"))
+    _background_server = httpd
     return httpd
 
 
@@ -926,14 +1128,8 @@ def run_web(project_dir: str, host: Optional[str] = None,
     config = load_config(project_dir)
     load_language(config.get("language", "") or detect_os_language())
 
-    cfg_host, cfg_port, token = web_settings(config)
-    if not token:
-        token = secrets.token_urlsafe(24)
-        # 只覆盖需要的字段，别把 web 段里其它自定义项（比如留给反代的设置）抹掉
-        web_cfg = dict(config.get("web") or {})
-        web_cfg.update({"host": cfg_host, "port": cfg_port, "token": token})
-        config["web"] = web_cfg
-        save_config(config, project_dir)
+    cfg_host, cfg_port, _ = web_settings(config)
+    token = ensure_token(project_dir, config)
 
     bind_host = host or cfg_host
     # 用 is not None 判断：--port 0 是「随便挑一个空闲端口」，是合法请求，
@@ -965,4 +1161,16 @@ def run_web(project_dir: str, host: Optional[str] = None,
     return True
 
 
-__all__ = ["build_server", "run_web", "web_settings", "WEB_STRINGS", "COOKIE_NAME"]
+__all__ = [
+    "build_server",
+    "run_web",
+    "start_background",
+    "web_settings",
+    "web_auto_start",
+    "shared_manager",
+    "JOB_BUS",
+    "progress_reporter",
+    "finish_job",
+    "WEB_STRINGS",
+    "COOKIE_NAME",
+]
