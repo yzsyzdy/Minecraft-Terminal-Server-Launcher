@@ -25,15 +25,43 @@ def _bundled_dir() -> str:
     return bundled_dir()
 
 
-def _read_local_version() -> str:
-    """读取 version.json，返回版本号字符串。不存在返回空字符串。"""
-    path = os.path.join(_bundled_dir(), VERSION_FILENAME)
+def _candidate_paths() -> list[str]:
+    """version.json 可能在哪几个位置。
+
+    1. bundled_dir()：standalone 下就是 dist 目录，CI 就是把文件写在这
+    2. exe 旁边：onefile 的 bundled_dir() 是 %TEMP% 里的解压目录，而
+       version.json 并没有被 --include-data-dir 打进去（只有 locales/
+       与 webui/），它一直躺在用户那个 exe 旁边
+    """
+    paths = [os.path.join(_bundled_dir(), VERSION_FILENAME)]
     try:
-        with open(path, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        return (data.get("version") or "").strip()
-    except (FileNotFoundError, json.JSONDecodeError, OSError):
-        return ""
+        from paths import exe_dir
+        exe_d = exe_dir()
+    except Exception:  # noqa: BLE001
+        exe_d = ""
+    if exe_d:
+        paths.append(os.path.join(exe_d, VERSION_FILENAME))
+    return paths
+
+
+def _read_local_version() -> str:
+    """读取 version.json，返回版本号字符串。都找不到返回空字符串。"""
+    for path in _candidate_paths():
+        try:
+            # utf-8-sig 而不是 utf-8：CI 用的 Windows PowerShell 5.1 里
+            # `Set-Content -Encoding UTF8` 写出来的文件**带 BOM**，用 utf-8
+            # 打开会得到 U+FEFF 开头，json.load 直接抛 JSONDecodeError——
+            # 原来这一抛就被下面的 except 吞掉，于是每个正式发布版的更新
+            # 检查都是哑的：永远显示「已是最新版」，没有任何提示。
+            # utf-8-sig 对带 BOM 和不带 BOM 都能读。
+            with open(path, "r", encoding="utf-8-sig") as f:
+                data = json.load(f)
+        except (FileNotFoundError, json.JSONDecodeError, OSError):
+            continue
+        version = (data.get("version") or "").strip()
+        if version:
+            return version
+    return ""
 
 
 def _parse_version(v: str) -> tuple[int, ...]:

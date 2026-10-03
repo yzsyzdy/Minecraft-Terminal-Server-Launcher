@@ -586,6 +586,33 @@ def _make_handler(manager: RuntimeManager, servers_dir: str, token: str,
                     return entry["_path"]
             raise CoreError("web.error.unknown_instance", name=wanted)
 
+        def _maybe_start_tunnel(self, servers_dir: str, name: str) -> None:
+            """实例配了「随实例自动开启隧道」就在后台把 frpc 拉起来。
+
+            面板设置里那个勾（文案是「启动实例时自动开启隧道」）以前只有
+            终端前台启动会认，从面板点「启动」不开隧道，页面上也不会说
+            任何话——服务器起来了，外面却连不进来。
+
+            放后台线程是因为 launch() 里要等 2 秒确认进程没立刻退出，
+            必要时还得去下载 frpc；这些都不该堵在这个 HTTP 请求里。
+            """
+            def run() -> None:
+                try:
+                    entry = next(
+                        (s for s in list_servers(servers_dir)
+                         if (s.get("name") or os.path.basename(
+                             os.path.normpath(s["_path"]))) == name), None)
+                    if entry is None:
+                        return
+                    from openfrp.tunnel_manager import maybe_auto_start_for_instance
+                    maybe_auto_start_for_instance(project_dir, entry)
+                except Exception as e:  # noqa: BLE001
+                    # 隧道起不来不该影响实例本身，但也不能一声不吭
+                    print(f"  [警告] 自动开启隧道失败: {e}")
+
+            threading.Thread(target=run, name=f"mstl-tunnel-{name}",
+                             daemon=True).start()
+
         # -- 路由 ----------------------------------------------------------
 
         def do_GET(self) -> None:  # noqa: N802 (BaseHTTPRequestHandler 的约定)
@@ -636,6 +663,7 @@ def _make_handler(manager: RuntimeManager, servers_dir: str, token: str,
             try:
                 if path == "/api/start":
                     runtime = manager.start_by_name(servers_dir, name)
+                    self._maybe_start_tunnel(servers_dir, name)
                     return self._json({"ok": True, "instance": runtime.snapshot()})
                 if path == "/api/stop":
                     manager.stop(name)
@@ -693,9 +721,14 @@ def _make_handler(manager: RuntimeManager, servers_dir: str, token: str,
                 # 跑过的实例，运行时里存着更准的一份快照（真实 java、拼接后的命令、退出码）
                 runtime = manager.state_of(name)
                 if runtime:
+                    # min_mem / max_mem 故意不在这里覆盖：它们是用户在设置里
+                    # 填的值，而运行时那份是**启动那一刻**从启动计划里抄下来
+                    # 的。一旦实例被启动过一次，快照就会一直压着磁盘上的新值
+                    # （通用实例的计划里干脆是 1G/4G 默认值），于是设置对话框
+                    # 回显旧内存、用户随手一保存就把自己刚改的数值改了回去。
                     row.update({key: runtime[key] for key in (
                         "state", "exit_code", "pid", "started_at", "java",
-                        "program", "workdir", "min_mem", "max_mem", "command")})
+                        "program", "workdir", "command")})
                 instances.append(row)
             self._json({
                 "ok": True,
@@ -948,8 +981,10 @@ def _make_handler(manager: RuntimeManager, servers_dir: str, token: str,
             server_dir = self._instance_dir(str(body.get("name") or ""))
             patch: dict[str, Any] = {}
 
+            # java_path 也在 _PATCH_FIELDS 白名单里、也由 /api/state 下发，
+            # 这里漏掉它的话，接口收下了却永远写不进 .server.json
             for key in ("mc_version", "jar", "min_mem", "max_mem",
-                        "process_priority"):
+                        "process_priority", "java_path"):
                 if key in body and body[key] is not None:
                     patch[key] = str(body[key])
             for key in ("extra_jvm_args", "extra_server_args"):
@@ -1218,6 +1253,22 @@ def ensure_token(project_dir: str, config: dict) -> str:
     return token
 
 
+def _prepare_data_dir(project_dir: str, config: dict) -> Optional[str]:
+    """准备数据目录并取到 token。失败返回 None，原因已经打印出来。
+
+    这两件事以前混在「绑定端口」的 try 里，而它们抛的同样是 OSError：数据
+    目录不可写时（例如把 exe 解压到了 Program Files），用户看到的是
+    「无法监听 xxx，端口可能已被占用，去菜单里换一个」——照着换端口永远
+    也好不了。分开之后，那条消息才真的只表示端口问题。
+    """
+    try:
+        ensure_servers_folder(project_dir)
+        return ensure_token(project_dir, config)
+    except OSError as e:
+        print(t("web.cli.data_dir_failed", path=project_dir, msg=str(e)))
+        return None
+
+
 def start_background(project_dir: str, host: Optional[str] = None,
                      port: Optional[int] = None) -> Optional[ThreadingHTTPServer]:
     """在后台线程里把面板拉起来，供「随软件启动」使用。
@@ -1234,7 +1285,9 @@ def start_background(project_dir: str, host: Optional[str] = None,
     load_language(config.get("language", "") or detect_os_language())
 
     cfg_host, cfg_port, _ = web_settings(config)
-    token = ensure_token(project_dir, config)
+    token = _prepare_data_dir(project_dir, config)
+    if token is None:
+        return None
     bind_host = host or cfg_host
     bind_port = cfg_port if port is None else port
 
@@ -1269,7 +1322,9 @@ def run_web(project_dir: str, host: Optional[str] = None,
     load_language(config.get("language", "") or detect_os_language())
 
     cfg_host, cfg_port, _ = web_settings(config)
-    token = ensure_token(project_dir, config)
+    token = _prepare_data_dir(project_dir, config)
+    if token is None:
+        return False
 
     bind_host = host or cfg_host
     # 用 is not None 判断：--port 0 是「随便挑一个空闲端口」，是合法请求，

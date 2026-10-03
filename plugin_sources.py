@@ -368,8 +368,11 @@ def search_all(query: str, limit: int = 5) -> dict[str, list[PluginResult]]:
             items = search_fn(query, limit)
             if items:
                 results[src_name] = items
-        except Exception:
-            pass
+        except Exception as e:  # noqa: BLE001
+            # 见 mod_sources 里的同一处：不吭声的话，坏掉的源与「没搜到」
+            # 无法区分，真实 bug 会被当成「这个网站没有这个插件」
+            print(t("search.source_failed", source=src_name,
+                    msg=f"{type(e).__name__}: {e}"))
     return results
 
 
@@ -427,7 +430,11 @@ def download_plugin(result: PluginResult, target_dir: str) -> Optional[str]:
             if _download_jar(dl_url, target_path):
                 return filename
 
-    except Exception:
-        pass
+    except Exception as e:  # noqa: BLE001
+        # 这里以前是 `pass`。调用方只看到「下载失败」，而真正的原因
+        # （比如调了个不存在的函数导致 NameError）被吞得一干二净——
+        # SpigotMC 的插件下载就是这么一直失败、又一直查不出所以然。
+        print(t("download.source_failed", source=source,
+                msg=f"{type(e).__name__}: {e}"))
 
     return None

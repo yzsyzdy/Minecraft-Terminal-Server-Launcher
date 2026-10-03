@@ -73,6 +73,13 @@ CI 的 `build.yml` 里有一道 `Verify bundled assets` 步骤专门检查前两
 
 `check_update.py` 读它拿到当前版本，再和 GitHub Releases 的最新版比较。源码模式没有这个文件，更新检查会静默跳过。
 
+> **这个文件必须写成不带 BOM 的 UTF-8。** CI 用的是 Windows PowerShell 5.1，
+> 它的 `Set-Content -Encoding UTF8` 会加上 BOM，而 Python 侧 `json.load` 会因此抛
+> `JSONDecodeError`——历史上真的这么漏过一版：更新检查从此变成哑的，界面上只是
+> 永远显示「已是最新版」，一点报错都没有。现在写入用
+> `[IO.File]::WriteAllText(..., UTF8Encoding $false)`，读取用 `utf-8-sig`，
+> CI 里还有一条断言专门拦 BOM。
+
 ## CI 发布
 
 `.github/workflows/build.yml` 在推送 `v*` 标签时触发，也可以在 Actions 页面手动跑：

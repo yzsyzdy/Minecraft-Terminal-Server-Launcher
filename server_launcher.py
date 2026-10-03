@@ -38,6 +38,10 @@ _PRIORITY_CLASS = {
 # PROCESS_MODE_BACKGROUND_BEGIN (Windows 8+, 同时降低 I/O 优先级)
 _BG_BEGIN = 0x00100000
 
+# 合法的优先级取值。放在这里而不是各界面自己列一遍：以前面板与终端各写一份，
+# 面板那份设置压根传不到启动计划里（见 core/runtime.py 的 LaunchPlan.priority）。
+PRIORITY_CHOICES = tuple(_PRIORITY_CLASS)
+
 
 def _set_priority_windows(handle: int, creationflags: int,
                           priority: str) -> int:

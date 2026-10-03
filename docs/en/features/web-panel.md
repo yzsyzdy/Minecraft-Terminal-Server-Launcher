@@ -115,7 +115,7 @@ The `frp` button in the top bar opens the tunnel panel, backed by `frp/frpc.toml
 - **Tunnel list**: name, type, local address and port, remote port or domains, each removable
 - **Add tunnel**: `tcp` / `udp` need a remote port, `http` / `https` need domains (comma separated)
 
-The panel only touches those keys; everything else already in `frpc.toml` is read and written back untouched. It shares the same read/write implementation as the terminal menu.
+The panel only touches those keys; everything else already in `frpc.toml` is read and written back untouched — including other arrays-of-tables such as `[[visitors]]`. It shares the same read/write implementation as the terminal menu. The one exception is **comments**: the minimal TOML reader/writer does not preserve them, so saving once drops them.
 
 The upload fallback sniffs the **content**, not the filename (browsers rename things): a zip / tar.gz gets unpacked, a bare binary is taken as-is. It does check that what comes out **looks like an executable for this platform** — grabbing the wrong platform's archive (say a linux tarball on Windows) is refused on the spot and the half-written file is removed, rather than installing an `frpc.exe` that dies with a format error on first run.
 

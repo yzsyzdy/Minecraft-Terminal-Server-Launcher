@@ -336,7 +336,7 @@ _download_with_progress = download_file_with_progress
 
 
 def multithreaded_download(url: str, target_path: str, desc: str = "",
-                           num_threads: int = _DEFAULT_DOWNLOAD_THREADS,
+                           num_threads: Optional[int] = None,
                            headers: Optional[dict] = None,
                            quiet: bool = False,
                            on_progress=None) -> bool:
@@ -351,7 +351,15 @@ def multithreaded_download(url: str, target_path: str, desc: str = "",
     起要求下载也带 x-api-key，缺了它整个下载路径都只会拿到 401。
     quiet 供网页面板这类没有终端的调用方使用；on_progress 同理，用来把
     进度推给浏览器。
+
+    num_threads 默认 None = 「用当前设置」。以前这里写的是
+    `num_threads: int = _DEFAULT_DOWNLOAD_THREADS`，默认值在函数定义时就被
+    固定成 16 了，之后再调 set_download_threads 也改不动它——菜单里设置
+    下载线程数会提示「已保存」，实际永远是 16。
     """
+    if num_threads is None:
+        num_threads = _DEFAULT_DOWNLOAD_THREADS
+
     def say(message: str, end: str = "\n") -> None:
         if not quiet:
             print(message, end=end, flush=True)

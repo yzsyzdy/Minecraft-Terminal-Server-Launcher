@@ -494,7 +494,11 @@ def resolve_java(
             return ap
 
     if storage_dir is None:
-        storage_dir = os.getcwd()
+        # 不能退回 os.getcwd()：打包版从快捷方式/资源管理器启动时，当前目录
+        # 是随机的（往往是 C:\Windows\System32），Java 列表会被读到、写到
+        # 一个和用户数据毫不相干的地方。项目里其它地方一律用 app_dir()。
+        from paths import app_dir
+        storage_dir = app_dir()
 
     saved = load_java_list(storage_dir)
     valid_saved = [j for j in saved if os.path.isfile(j.path)]

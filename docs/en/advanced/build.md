@@ -71,6 +71,13 @@ There is also a runtime version file, `version.json`, written into the output di
 
 `check_update.py` reads it to learn the current version, then compares it against the latest GitHub Release. Running from source there is no such file, so the update check silently skips.
 
+> **This file must be written as UTF-8 without a BOM.** CI uses Windows PowerShell 5.1,
+> whose `Set-Content -Encoding UTF8` prepends a BOM; Python's `json.load` then raises
+> `JSONDecodeError` — which really did ship once: the update check went permanently dumb,
+> showing "you are up to date" forever with no error anywhere. The write now uses
+> `[IO.File]::WriteAllText(..., UTF8Encoding $false)`, the read uses `utf-8-sig`, and CI
+> has an assertion that fails the build on a BOM.
+
 ## CI release
 
 `.github/workflows/build.yml` triggers on a pushed `v*` tag, and can also be run manually from the Actions page:

@@ -7,7 +7,10 @@ CLI 的隧道菜单直接在 menu.py 里 print/input，网页面板不能那么�
 读写 + 单例进程句柄，两边共用同一个 frpc 进程。
 
 面板能改的只有 frpc.toml 里本项目用到的那几个键：serverAddr / serverPort /
-auth.token 与 [[proxies]]。其余内容读进来会原样保留，写回去不会丢。
+auth.token 与 [[proxies]]。其余内容读进来会原样保留，写回去不会丢——包括
+[[visitors]] 这类别的「表的数组」，不能把它们写成字符串。
+
+唯一的例外是注释：那个极简 TOML 读写不保留注释，保存一次就会被去掉。
 """
 
 from __future__ import annotations

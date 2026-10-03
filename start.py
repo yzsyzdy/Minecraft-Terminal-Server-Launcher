@@ -91,21 +91,12 @@ def _maybe_start_frpc(server_cfg: dict, project_dir: str) -> None:
     """按实例配置里的 openfrp 段决定要不要先拉起 frpc 隧道。
 
     Minecraft 实例和通用实例共用这一段：隧道指向哪个本地端口是用户自己配的，
-    和实例种类无关。
+    和实例种类无关。判断逻辑本身已挪到 openfrp.tunnel_manager，好让网页面板
+    与开机自动启动也走同一条，不再各写一份。
     """
-    of_cfg = server_cfg.get("openfrp", {}) or {}
-    if not of_cfg.get("auto_start"):
-        return
-    if not (of_cfg.get("token") and of_cfg.get("proxy_id")):
-        print("  [OpenFrp] 已开启自动启动，但 token 或隧道 ID 没填，跳过。")
-        return
+    from openfrp.tunnel_manager import maybe_auto_start_for_instance
 
-    from openfrp.tunnel_manager import launch_frpc
-
-    print()
-    if launch_frpc(project_dir, server_cfg) is None:
-        print("  [警告] frpc 启动失败，隧道可能不可用")
-    print()
+    maybe_auto_start_for_instance(project_dir, server_cfg)
 
 
 def _start_generic_instance(server_cfg: dict, server_path: str,
@@ -345,13 +336,18 @@ def _auto_start_instances(servers_dir: str, project_dir: str, config: dict) -> N
     for entry in targets:
         path = entry["_path"]
         name = entry.get("name") or os.path.basename(os.path.normpath(path))
+        cfg = load_server_config(path)
         try:
-            manager.start(load_server_config(path), path)
+            manager.start(cfg, path)
             started.append(name)
         except CoreError as e:
             print("  " + t(e.key, **e.kwargs))
         except Exception as e:  # noqa: BLE001
             print(f"  [警告] 自动启动 {name} 失败: {e}")
+            continue
+        # 随实例开隧道：这条后台启动路径以前完全不碰它，
+        # 于是「随软件启动」的实例配了隧道也不会开
+        _maybe_start_frpc(cfg, project_dir)
 
     if started:
         print(t("app.auto_started", names=", ".join(started)))
@@ -362,6 +358,19 @@ def _auto_start_instances(servers_dir: str, project_dir: str, config: dict) -> N
         atexit.register(lambda: manager.stop_all(timeout=10))
 
 
+def _pause_before_exit() -> None:
+    """等用户按一下再退出。
+
+    双击 exe 启动时，进程一结束控制台窗口就没了；启动阶段要是直接报错退出，
+    用户看不到任何原因。stdin 被重定向（脚本、CI）时 input() 会抛 EOFError，
+    那种场合本来也不需要停，吞掉即可。
+    """
+    try:
+        input(t("app.press_enter"))
+    except (EOFError, OSError, KeyboardInterrupt):
+        pass
+
+
 def main():
     """程序入口。"""
     project_dir = _project_dir()
@@ -370,11 +379,35 @@ def main():
     config = load_config(project_dir)
     load_language(config.get("language", "") or detect_os_language())
 
+    # 下载线程数是存在 config.json 里的，每次启动都得重新应用一次：
+    # 菜单里改它只影响当次进程，不在这里补上，重启后又回到 16，
+    # 用户会觉得「我明明设置过了」。
+    try:
+        from download_msl import set_download_threads
+        set_download_threads(int(config.get("download_threads") or 16))
+    except (TypeError, ValueError):
+        pass
+
     if _dispatch_args(sys.argv[1:]):
         return
 
     from clear import clear_screen
     clear_screen()
+
+    # 数据目录必须先能写：config.json、servers/、日志全落在那里。打包版要是
+    # 被解压到 Program Files 这类当前用户没有写权限的地方，这里会抛
+    # PermissionError——而双击启动时控制台一闪就关了，用户只会觉得
+    # 「点了没任何反应」。所以：明确说清楚，并且停一下等用户看完。
+    # 放在更新检查之前：目录都写不了就没必要先去联网转一圈。
+    try:
+        save_config(config, project_dir)
+        servers_dir = ensure_servers_folder(project_dir)
+    except OSError as e:
+        print()
+        print(t("app.data_dir_failed", path=project_dir, msg=str(e)))
+        print()
+        _pause_before_exit()
+        return 1
 
     # 版本更新检查 (静默执行，不阻塞启动流程)
     from check_update import check_for_update
@@ -383,10 +416,6 @@ def main():
         print(f"  [更新] 新版本 {latest_ver} 已发布 (当前: {cur_ver})")
         print(f"        下载: {REPO_URL}/releases/tag/{latest_ver}")
         print()
-
-    save_config(config, project_dir)
-
-    servers_dir = ensure_servers_folder(project_dir)
 
     # 面板随软件启动：守护线程里跑，不挡住后面的菜单与服务器
     from web.server import start_background, web_auto_start
@@ -441,4 +470,7 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    # 把 main() 的返回值交给进程退出码：main() 里启动阶段的致命错误会
+    # return 1，原来直接调用 main() 会把它丢掉，进程照样退出 0，
+    # 脚本/计划任务那边看不出其实没起来。
+    sys.exit(main())

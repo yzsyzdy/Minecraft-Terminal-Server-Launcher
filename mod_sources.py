@@ -339,8 +339,13 @@ def search_all_mods(query: str, mc_version: str = "", loader: str = "",
             items = search_fn(*args)
             if items:
                 target[src_name] = items
-        except Exception:
-            pass
+        except Exception as e:  # noqa: BLE001
+            # 网络层的失败在 fetch_json 里已经降级成 None 了，能走到这里的基本
+            # 都是解析代码自己的问题。以前这里直接 pass，结果「这个源坏了」和
+            # 「真的没搜到」长得一模一样——SpigotMC 那个 NameError 就是这么
+            # 藏了很久的。宁可多打一行，也不要让一个坏掉的源装作搜不到。
+            print(t("search.source_failed", source=src_name,
+                    msg=f"{type(e).__name__}: {e}"))
 
     # 1) 带过滤的精准搜索
     _search_into(results, "Modrinth", modrinth_search, query, mc_version, loader, limit)

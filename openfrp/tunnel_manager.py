@@ -523,6 +523,34 @@ def stop_frpc() -> None:
     FrpcManager.get_instance().stop()
 
 
+def maybe_auto_start_for_instance(project_dir: str, server_cfg: dict) -> bool:
+    """实例配了「随实例自动开启隧道」就把 frpc 拉起来。
+
+    这段策略原来只写在 start.py 的终端前台启动里，于是网页面板的「启动」
+    与「随软件启动」两条路都不会开隧道：面板设置里那个勾（文案写的是
+    「启动实例时自动开启隧道」）存得下、看得见，却从来不生效——用户在面板
+    里点启动，服务器起来了，外面却连不进来，页面上也不会说任何话。
+
+    终端、面板、开机自动启动三条路现在都走这一个函数。
+
+    注意 launch() 里有 2 秒的等待、必要时还会去下载 frpc，所以网页面板那边
+    要放到后台线程里调，别堵住 HTTP 响应。
+    返回是否真的去启动了。
+    """
+    of_cfg = (server_cfg or {}).get("openfrp") or {}
+    if not of_cfg.get("auto_start"):
+        return False
+    if not (of_cfg.get("token") and of_cfg.get("proxy_id")):
+        print("  [OpenFrp] 已开启自动启动，但 token 或隧道 ID 没填，跳过。")
+        return False
+
+    print()
+    if launch_frpc(project_dir, server_cfg) is None:
+        print("  [警告] frpc 启动失败，隧道可能不可用")
+    print()
+    return True
+
+
 def _tar_extract(tf: tarfile.TarFile, target_dir: str, member=None) -> None:
     """按安全过滤器解压 tar 成员。
 

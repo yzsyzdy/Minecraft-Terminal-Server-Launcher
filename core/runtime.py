@@ -24,7 +24,7 @@ from typing import Callable, Optional
 from .errors import CoreError
 from .java import resolve_java_for_launch
 from .report import Reporter, as_reporter
-from server_launcher import build_jvm_command, spawn_priority_process
+from server_launcher import build_jvm_command, spawn_priority_process, PRIORITY_CHOICES
 from server_manager import (
     KIND_GENERIC,
     KIND_MINECRAFT,
@@ -57,6 +57,10 @@ class LaunchPlan:
     min_mem: str = "1G"
     max_mem: str = "4G"
     log_path: str = ""
+    # 进程优先级。以前 start() 里写死 "normal"，于是面板里设置的「低优先级」
+    # 存得下、看得见，从面板（或随软件启动）拉起来时却从来没生效过——
+    # 只有终端前台启动那条路会去读这个设置。
+    priority: str = "normal"
 
 
 def _exec_args(value) -> list[str]:
@@ -78,6 +82,26 @@ def _resolve_workdir(server_dir: str, raw: str) -> str:
     if os.path.isabs(raw):
         return os.path.normpath(raw)
     return os.path.normpath(os.path.join(server_dir, raw))
+
+
+def _priority_of(server_cfg: dict) -> str:
+    """取实例的进程优先级，认不出来的值一律当 normal。"""
+    value = str((server_cfg or {}).get("process_priority") or "normal").strip().lower()
+    return value if value in PRIORITY_CHOICES else "normal"
+
+
+def _global_java_path(project_dir: str) -> str:
+    """config.json 里的全局 java_path。
+
+    实例没写 java_path 时用它。终端前台启动一直是这么做的
+    （start.py: server_cfg.get("java_path") or config.get("java_path")），
+    而面板这条路原来只看实例自己的值，于是同一个全局设置两边行为不一致。
+    load_config 自己会把缺失/损坏的配置降级成默认值，不需要再包一层。
+    """
+    if not project_dir:
+        return ""
+    from config import load_config
+    return str(load_config(project_dir).get("java_path") or "")
 
 
 def build_generic_plan(server_cfg: dict, server_dir: str) -> LaunchPlan:
@@ -134,6 +158,7 @@ def build_generic_plan(server_cfg: dict, server_dir: str) -> LaunchPlan:
         kind=KIND_GENERIC,
         program=summary,
         log_path=os.path.join(server_dir, "logs", "mstl-console.log"),
+        priority=_priority_of(server_cfg),
     )
 
 
@@ -153,7 +178,7 @@ def build_launch_plan(
     name = server_cfg.get("name") or fallback_name
 
     java = resolve_java_for_launch(
-        server_cfg.get("java_path"),
+        server_cfg.get("java_path") or _global_java_path(project_dir),
         project_dir,
         server_cfg.get("mc_version", ""),
         reporter=reporter,
@@ -183,6 +208,7 @@ def build_launch_plan(
         min_mem=min_mem,
         max_mem=max_mem,
         log_path=os.path.join(server_dir, "logs", "mstl-console.log"),
+        priority=_priority_of(server_cfg),
     )
 
 
@@ -253,7 +279,7 @@ class ServerRuntime:
             self._open_log()
             try:
                 self._proc = spawn_priority_process(
-                    self.plan.cmd, self.plan.workdir, "normal",
+                    self.plan.cmd, self.plan.workdir, self.plan.priority,
                     stdin=subprocess.PIPE,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.STDOUT,

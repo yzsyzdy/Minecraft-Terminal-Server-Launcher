@@ -64,7 +64,9 @@ jobs:
           $required = @(
             "webui\index.html",
             "locales\zh.json",
-            "locales\en.json"
+            "locales\en.json",
+            "locales\ru.json",
+            "locales\neko.json"
           )
           $missing = @()
           foreach ($rel in $required) {
@@ -99,8 +101,24 @@ jobs:
             version = "${{ github.ref_name }}" -replace '^v', ''
             tag_name = "${{ github.ref_name }}"
           } | ConvertTo-Json
-          Set-Content -Path $versionFile -Value $json -Encoding UTF8
+          # 必须写成不带 BOM 的 UTF-8。Windows PowerShell 5.1 的
+          # `Set-Content -Encoding UTF8` 会加上 BOM，而 Python 侧 json.load
+          # 会因此抛 JSONDecodeError——更新检查就此变成哑的，界面上只是永远
+          # 显示「已是最新版」，一点报错都没有。下面那条断言就是防它回来。
+          [IO.File]::WriteAllText($versionFile, $json, (New-Object Text.UTF8Encoding $false))
           Write-Host "Created $versionFile"
+
+          $bytes = [IO.File]::ReadAllBytes($versionFile)
+          if ($bytes.Length -ge 3 -and $bytes[0] -eq 0xEF -and
+              $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF) {
+            Write-Error "version.json 带了 UTF-8 BOM，Python 侧读不出来"
+            exit 1
+          }
+          if (([Text.Encoding]::UTF8.GetString($bytes)) -notmatch '"version"') {
+            Write-Error "version.json 内容里没有 version 字段"
+            exit 1
+          }
+          Write-Host "version.json 无 BOM，内容已校验"
 
           $zipFile = "MSTL-${{ github.ref_name }}.zip"
           Compress-Archive -Path "$source\*" -DestinationPath $zipFile -Force

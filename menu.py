@@ -325,7 +325,11 @@ def _search_and_download_mod(name: str, mods_dir: str,
                 return current
             parent = os.path.dirname(current)
             if parent == current:
-                return os.getcwd()
+                # 走到盘根还没找到配置，就退回真正的数据目录。
+                # 不能用 os.getcwd()：打包版从快捷方式启动时它是随机的，
+                # 会把 CurseForge key 之类的配置读到别处去。
+                from paths import app_dir
+                return app_dir()
             current = parent
 
     cfg = load_config(_find_project_dir(mods_dir))

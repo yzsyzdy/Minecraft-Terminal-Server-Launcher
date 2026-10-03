@@ -15,6 +15,7 @@
     "app.error_file_not_found": "[呜…错误喵] {msg}",
     "app.cancel": "[关闭喵] 用户中断惹",
     "app.press_enter": "  按 Enter 返回喵~",
+    "app.data_dir_failed": "  数据目录写不进去喵（{path}）。\n  {msg}\n  把程序挪到能写的目录，或者用 MSTL_DATA_DIR 指一个能写的目录喵。",
     "app.no_servers": "  当前还没有配置服务器呢…",
     "app.no_servers_export": "  没有可以导出的服务器哦~",
     "app.no_servers_manage": "  没有可以管理的服务器酱~",
@@ -245,6 +246,8 @@
     "search.download_failed": "  [呜…错误] 下载失败，可能需要手动下载喵~",
     "search.mod_no_version": "  [呜…错误] 没找到匹配当前版本的模组文件",
     "search.curseforge_hint": "  提示：如需搜索 CurseForge，请在 config.json 中配置 curseforge_api_key 喵",
+    "search.source_failed": "  [{source}] 搜索出错了喵，跳过: {msg}",
+    "download.source_failed": "  [{source}] 下载出错了喵: {msg}",
     "search.modrinth_only": "  提示：仅搜索了 Modrinth（未配置 CurseForge API key）喵",
     "search.fallback_hint": "  [提示] 在当前版本范围没找到足够结果，已自动放宽搜索范围喵~",
 
@@ -576,6 +579,7 @@
     "web.menu.start_failed": "  面板没能启动，请看上面的提示。",
     "web.menu.external_hint": "  注意：监听所有网卡时，请确认前面有反向代理与 HTTPS。",
     "web.cli.bind_failed": "  面板启动失败: 无法监听 {addr}（{msg}）。端口可能已被占用，可在菜单 [8] 里换一个。",
+    "web.cli.data_dir_failed": "  面板启动失败喵: 数据目录用不了（{path}，{msg}）。把程序挪到能写的目录，或者用 MSTL_DATA_DIR 指一个能写的目录喵。",
     "web.cli.stop_hint": "  按 Ctrl+C 停止面板。",
     "web.cli.external_warning": "  [警告] 面板正在监听所有网卡，请确认前面有反代与 HTTPS。",
 

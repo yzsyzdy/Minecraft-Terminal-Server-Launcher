@@ -13,6 +13,7 @@
     "app.error_file_not_found": "[Error] {msg}",
     "app.cancel": "[Shutdown] User interrupt",
     "app.press_enter": "  Press Enter to return...",
+    "app.data_dir_failed": "  The data directory is not writable ({path}).\n  {msg}\n  Move the program to a writable folder, or point MSTL_DATA_DIR at one.",
     "app.no_servers": "  No servers configured.",
     "app.no_servers_export": "  No servers to export.",
     "app.no_servers_manage": "  No servers to manage.",
@@ -244,6 +245,8 @@
     "search.download_failed": "  [Error] Download failed. You may need to download manually.",
     "search.mod_no_version": "  [Error] No matching version found for this mod.",
     "search.curseforge_hint": "  Tip: To search CurseForge, set curseforge_api_key in config.json",
+    "search.source_failed": "  [{source}] search failed, skipped: {msg}",
+    "download.source_failed": "  [{source}] download failed: {msg}",
     "search.modrinth_only": "  Tip: Only searched Modrinth (no CurseForge API key configured)",
     "search.fallback_hint": "  [Tip] Not enough results with strict filters, broadened search automatically.",
 
@@ -634,6 +637,7 @@
     "web.menu.start_failed": "  The panel could not start; see the message above.",
     "web.menu.external_hint": "  Note: when listening on every interface, make sure a reverse proxy and HTTPS sit in front.",
     "web.cli.bind_failed": "  Could not start the panel: cannot bind {addr} ({msg}). The port may be in use; pick another under menu [8].",
+    "web.cli.data_dir_failed": "  Could not start the panel: the data directory is unusable ({path}, {msg}). Move the program to a writable folder, or point MSTL_DATA_DIR at one.",
     "web.cli.stop_hint": "  Press Ctrl+C to stop the panel.",
     "web.cli.external_warning": "  [warning] the panel is listening on every interface; make sure a reverse proxy and HTTPS sit in front.",
 

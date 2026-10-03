@@ -550,10 +550,35 @@ def _escape_toml_string(value: str) -> str:
                  .replace("\n", "\\n").replace("\r", "\\r").replace("\t", "\\t"))
 
 
+def _is_array_of_tables(value: Any) -> bool:
+    """是不是 [[xxx]] 那种「表的数组」（非空的、元素全是字典的列表）。"""
+    return (isinstance(value, (list, tuple)) and len(value) > 0
+            and all(isinstance(item, dict) for item in value))
+
+
 def _write_toml_table(lines: list[str], table: dict, prefix: str = "") -> None:
-    """把一个表写出来：先写标量，再写嵌套子表（子表必须排在同层标量之后）。"""
-    scalars = [(k, v) for k, v in table.items() if not isinstance(v, dict)]
-    nested = [(k, v) for k, v in table.items() if isinstance(v, dict)]
+    """把一个表写出来。
+
+    顺序有讲究：TOML 里子表与数组表必须排在同层标量之后，所以分三批写。
+
+    数组表必须单独处理。以前只特判了 proxies，别的 [[xxx]] 会落到
+    _fmt_toml_value 的兜底分支——那个分支对字典是 str() 加引号，于是手写的
+    [[visitors]]（stcp/xtcp 要用）会被写成
+        visitors = ["{'name': 'v1', ...}"]
+    这既不是原来那张表、也不是合法 TOML，frpc 之后连整个配置都读不进去，
+    而用户只是在面板里点了下保存。core/frp.py 明确承诺过「其余内容原样保留」。
+    """
+    scalars: list[tuple[str, Any]] = []
+    nested: list[tuple[str, dict]] = []
+    arrays: list[tuple[str, Any]] = []
+    for key, value in table.items():
+        if isinstance(value, dict):
+            nested.append((key, value))
+        elif _is_array_of_tables(value):
+            arrays.append((key, value))
+        else:
+            scalars.append((key, value))
+
     for key, value in scalars:
         lines.append(f"{key} = {_fmt_toml_value(value)}")
     for key, sub in nested:
@@ -561,18 +586,22 @@ def _write_toml_table(lines: list[str], table: dict, prefix: str = "") -> None:
         lines.append("")
         lines.append(f"[{header}]")
         _write_toml_table(lines, sub, header)
+    for key, items in arrays:
+        header = f"{prefix}.{key}" if prefix else key
+        for item in items:
+            lines.append("")
+            lines.append(f"[[{header}]]")
+            _write_toml_table(lines, item, header)
 
 
 def _build_toml(cfg: dict[str, Any]) -> str:
-    """从配置字典生成 frpc.toml 文本。"""
+    """从配置字典生成 frpc.toml 文本。
+
+    proxies 不再单独特判：它就是一个数组表，和其它 [[xxx]] 走同一条路。
+    单独特判的代价是——别的数组表全被写坏。
+    """
     lines: list[str] = []
-    _write_toml_table(lines, {k: v for k, v in cfg.items() if k != "proxies"})
-
-    for proxy in cfg.get("proxies") or []:
-        lines.append("")
-        lines.append("[[proxies]]")
-        _write_toml_table(lines, proxy, "proxies")
-
+    _write_toml_table(lines, cfg)
     return "\n".join(lines).strip() + "\n"
 
 
