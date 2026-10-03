@@ -37,3 +37,6 @@ site/
 
 # version.json 只在 CI 打包产物中生成，源码目录下不应出现
 version.json
+
+# 发布压缩包（CI 在仓库根目录生成 MSTL-<tag>.zip）
+MSTL-*.zip
