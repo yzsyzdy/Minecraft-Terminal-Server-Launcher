@@ -10,7 +10,7 @@
 import os
 import sys
 
-from paths import exe_dir, is_temp_onefile_dir
+from paths import exe_path, is_packaged
 
 RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
 APP_NAME = "MSTL"
@@ -21,31 +21,25 @@ def _is_windows() -> bool:
 
 
 def _startup_command() -> str:
-    """构建注册表中存储的启动命令。
+    """构建注册表中存储的启动命令。取不到可靠路径时返回空串。
 
-    打包模式 (Nuitka/PyInstaller): 指向 exe。
-    注意 onefile 模式下 sys.executable/sys.argv[0] 指向临时解压目录
-    （退出即删除），必须用原始 exe 路径。
+    打包模式 (Nuitka/PyInstaller): 指向用户启动的那个 exe。exe 路径一律从
+    paths.exe_path() 取——它认得 Nuitka 记下的原始 exe，而 sys.executable
+    在 standalone 下指向 dist 里并不存在的 python.exe。
     源码模式: python.exe + start.py 的绝对路径。
-    """
-    if getattr(sys, "frozen", False):
-        # 这里必须用 exe_dir() 而不是 original_exe_dir()：后者会把
-        # MSTL_DATA_DIR（用户指定的数据目录）当成 exe 目录返回，拼出来的
-        # 路径下并没有 exe。注册表照样写入成功、设置页也显示「已启用」，
-        # 但 Windows 到开机时只会静默跳过一条指向不存在文件的命令。
-        real_dir = exe_dir()
-        if real_dir:
-            candidate = os.path.join(real_dir, os.path.basename(sys.executable))
-            if os.path.isfile(candidate):
-                return f'"{candidate}"'
 
-        argv0 = os.path.abspath(sys.argv[0])
-        argv0_dir = os.path.dirname(argv0)
-        if (os.path.isfile(argv0) and os.path.isdir(argv0_dir)
-                and os.access(argv0_dir, os.W_OK)
-                and not is_temp_onefile_dir(argv0_dir)):
-            return f'"{argv0}"'
-        return f'"{sys.executable}"'
+    判断打包与否必须走 is_packaged()：Nuitka 的 standalone 不设置
+    sys.frozen，只看它的话打包版会掉进下面的源码分支，写出
+    "<dist>\\python.exe" "<dist>\\start.py" —— 这两个文件在 dist 里都不存在，
+    注册表却照样写入成功、界面还显示「已启用」。
+    """
+    if is_packaged():
+        real = exe_path()
+        if real:
+            return f'"{real}"'
+        # 取不到就交白卷，让 set_startup_enabled 返回失败：写一条指向
+        # 不存在文件的命令，比明确失败更糟——用户会以为已经生效了
+        return ""
     python = sys.executable
     start_py = os.path.join(
         os.path.dirname(os.path.abspath(__file__)), "start.py")
@@ -56,6 +50,10 @@ def set_startup_enabled(enabled: bool) -> bool:
     """启用/禁用开机自启动。成功返回 True，失败返回 False。"""
     if not _is_windows():
         return False
+    command = _startup_command()
+    if enabled and not command:
+        # 拼不出可靠命令就明确失败，别往注册表里塞空值
+        return False
     try:
         import winreg
         with winreg.OpenKey(
@@ -63,7 +61,7 @@ def set_startup_enabled(enabled: bool) -> bool:
         ) as key:
             if enabled:
                 winreg.SetValueEx(
-                    key, APP_NAME, 0, winreg.REG_SZ, _startup_command())
+                    key, APP_NAME, 0, winreg.REG_SZ, command)
             else:
                 try:
                     winreg.DeleteValue(key, APP_NAME)

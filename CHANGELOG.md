@@ -237,10 +237,27 @@ MkDocs Material 双语（中 / 英）文档站，涵盖使用指南、功能详�
 - 中文 Windows 的语言检测不再依赖已废弃且排定移除的 API
 - 版本号 `1.0` 不再被判定比 `1.0.0` 旧，反复提示有新版本
 
+#### 打包版（Nuitka）
+
+Nuitka 的 `--standalone` **不设置 `sys.frozen`**（实测），而项目里所有「是不是打包版」
+的判断都写成 `if sys.frozen`，于是打包版里这些分支一次都没走到过：
+
+- 修复打包版**完全无视 `MSTL_DATA_DIR`**：把数据目录指到别处也没用，`config.json`
+  与 `servers/` 一律落在 exe 旁边。现在这个开关与是否打包无关，优先级最高
+- 修复打包版**开机自启写出一条永远跑不起来的命令**：原来会写
+  `"<目录>\python.exe" "<目录>\start.py"`，而 dist 里既没有 `python.exe` 也没有
+  `start.py`（`sys.executable` 在 standalone 下指向的就是那个不存在的 `python.exe`）。
+  现在改为取 Nuitka 记下的原始 exe 路径，写出的就是真正的 `MSTL.exe`；
+  万一取不到可靠路径，会明确返回失败而不是往注册表里塞一条坏命令
+- 新增 `paths.is_packaged()` / `paths.exe_path()` 统一这两个判断，别再各自
+  `getattr(sys, "frozen", False)`
+
 ### 升级提示
 
 - `config.json` 与 `.server.json` 均向后兼容，缺失字段会自动补默认值，直接覆盖安装即可
 - 升级后首次运行 `python start.py web` 会生成 `web.token` 并写入 `config.json`
+- **打包版用户**：如果你曾在打包版里开过「开机自启」，注册表里那条命令是坏的（指向
+  不存在的 `python.exe`），升级后设置页会显示成「已关闭」。重新开一次即可写对
 - 面板默认只监听 `127.0.0.1`。**它能在实例目录里任意读写文件，等于把实例目录交给浏览器**——
   要经 frp 穿到公网，请务必在前面加一层反向代理与 HTTPS
 - 文件管理器的边界：单文件编辑上限 2 MB，单次上传上限 512 MB，
