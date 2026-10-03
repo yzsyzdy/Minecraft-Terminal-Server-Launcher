@@ -1,0 +1,30 @@
+name: Tests
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # 3.11 是发版打包用的解释器，3.13 是开发机上的；两个都跑一遍
+        python-version: ['3.11', '3.13']
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      # 测试只用标准库，不需要装任何依赖——项目本身也是零运行时依赖
+      - name: Run tests
+        run: python -m unittest discover -s tests -t . -v

@@ -1,5 +1,33 @@
 # Building from source
 
+## Running the tests
+
+The tests use only the standard-library `unittest` and **need no dependencies installed**
+(the project itself has zero runtime dependencies). From the repository root:
+
+```bash
+python -m unittest discover -s tests -t . -v
+```
+
+CI (`.github/workflows/tests.yml`) runs them on every push / PR against Python 3.11 and
+3.13; `build.yml` also runs them before packaging, so a failing suite can't ship.
+
+The tests target *contracts* rather than implementation details, concentrating on the
+things that break quietly:
+
+| File | Covers |
+| --- | --- |
+| `test_web_api.py` | Panel auth (all three token channels), `/api/state` values must equal disk, settings writes |
+| `test_config.py` | `config.json` round-trip, unknown keys must survive, atomic writes |
+| `test_server_manager.py` | Instance scanning, type normalization, the parse cache and its isolation |
+| `test_paths.py` | Packaged-build path resolution (simulated with a fake `__compiled__`, no real build) |
+| `test_runtime_plan.py` | Launch plans, process priority, runtime snapshots |
+| `test_frp_toml.py` | `frpc.toml` round-trips stay valid TOML (checked with `tomllib`) |
+| `test_frpc_files.py` / `test_tunnel_install.py` | Shared frpc detection, extraction and validation for both tunnels |
+| `test_archive.py` | Zip-slip and archive-bomb protection for online extraction |
+| `test_i18n.py` | Fallback to Chinese for missing translations, placeholder parity |
+| `test_static.py` | Undefined-name sweep, panel id/string consistency, JS syntax |
+
 ## Prerequisites
 
 - Python 3.11 (the version CI uses; 3.10+ generally works)

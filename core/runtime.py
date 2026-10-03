@@ -346,18 +346,37 @@ class ServerRuntime:
 
     def _pump(self, proc: subprocess.Popen) -> None:
         try:
-            for line in proc.stdout:
-                self._push({"type": "line", "kind": "out",
-                            "text": line.rstrip("\r\n")})
-        except (OSError, ValueError):
-            pass
-        code = proc.wait()
-        with self._lock:
-            self._state = STATE_STOPPED
-            self._exit_code = code
-        self._note("web.console.exited", code=code)
-        self._emit_state()
-        self._close_log()
+            try:
+                for line in proc.stdout:
+                    self._push({"type": "line", "kind": "out",
+                                "text": line.rstrip("\r\n")})
+            except (OSError, ValueError):
+                pass
+            code = proc.wait()
+            with self._lock:
+                self._state = STATE_STOPPED
+                self._exit_code = code
+            self._note("web.console.exited", code=code)
+            self._emit_state()
+        finally:
+            self._close_pipes(proc)
+            self._close_log()
+
+    @staticmethod
+    def _close_pipes(proc: subprocess.Popen) -> None:
+        """进程结束后把管道关掉。
+
+        self._proc 会一直持有这个 Popen 对象（面板是长期驻留的，运行时对象
+        不会被回收），所以不显式关闭的话，每启动一次就攒下一对没释放的管道
+        句柄——反复启停实例会一直涨。
+        """
+        for stream in (proc.stdout, proc.stdin):
+            if stream is None:
+                continue
+            try:
+                stream.close()
+            except (OSError, ValueError):
+                pass
 
     def _push(self, event: Event) -> None:
         # 事件在落进历史前就带上实例名：这样一条全局流里能分辨哪行来自哪台服，

@@ -8,10 +8,11 @@
 删除/启用 jar 在 core/instances.py。
 """
 
-import copy
 import os
 import json
 import glob
+import threading
+import time
 from typing import Any
 
 # 实例种类。minecraft 走原来的「解析 Java → 拼 JVM 命令」，generic 只认下面
@@ -49,7 +50,8 @@ DEFAULT_SERVER_CONFIG: dict[str, Any] = {
     "process_priority": "normal",
     # 随软件启动而启动：软件一起来就在后台把它拉起（网页面板里能看能管）
     "auto_start": False,
-    "launch": copy.deepcopy(DEFAULT_GENERIC_LAUNCH),
+    # 显式造一份新的（args 是列表，不能用 dict(DEFAULT_GENERIC_LAUNCH) 直接共用）
+    "launch": {**DEFAULT_GENERIC_LAUNCH, "args": []},
     "openfrp": {
         "token": "",
         "proxy_id": 0,
@@ -68,11 +70,130 @@ def _default_server_config() -> dict[str, Any]:
     """返回一份独立的默认配置。
 
     不能写成 dict(DEFAULT_SERVER_CONFIG)：那是浅拷贝，extra_jvm_args /
-    extra_server_args / openfrp 会与模块级常量共用同一个对象。界面层只要
-    就地改一下 server_cfg["openfrp"]，改动就留在了默认值里，之后加载的每个
-    实例都会继承上一个实例的隧道绑定（start.py 会照着它去自动开隧道）。
+    extra_server_args / launch / openfrp 会与模块级常量共用同一个对象。
+    界面层只要就地改一下 server_cfg["openfrp"]，改动就留在了默认值里，之后
+    加载的每个实例都会继承上一个实例的隧道绑定（start.py 会照着它去自动
+    开隧道）。
+
+    显式复制那几个可变容器，而不是 copy.deepcopy 整个字典：结果一样，但
+    快得多——这个函数在 list_servers() 里每个实例都要调一次。
+    **以后往 DEFAULT_SERVER_CONFIG 里加可变值，记得在这里也复制一份。**
     """
-    return copy.deepcopy(DEFAULT_SERVER_CONFIG)
+    fresh = dict(DEFAULT_SERVER_CONFIG)
+    fresh["extra_jvm_args"] = []
+    fresh["extra_server_args"] = []
+    fresh["launch"] = dict(DEFAULT_GENERIC_LAUNCH)
+    fresh["launch"]["args"] = []
+    fresh["openfrp"] = dict(DEFAULT_SERVER_CONFIG["openfrp"])
+    return fresh
+
+
+def _clone_entry(entry: dict[str, Any]) -> dict[str, Any]:
+    """复制一条实例条目，确保调用方改它不会污染缓存或别的调用方。
+
+    extra_jvm_args / extra_server_args / launch(含 args) / openfrp 都是可变
+    容器。历史上就出过「改一个实例的隧道绑定污染了默认值、进而影响之后
+    加载的其它实例」这一类问题，所以这里必须真的复制，不能只 dict(entry)。
+    """
+    clone = dict(entry)
+    clone["extra_jvm_args"] = list(entry.get("extra_jvm_args") or [])
+    clone["extra_server_args"] = list(entry.get("extra_server_args") or [])
+    launch = dict(entry.get("launch") or {})
+    launch["args"] = list(launch.get("args") or [])
+    clone["launch"] = launch
+    clone["openfrp"] = dict(entry.get("openfrp") or {})
+    return clone
+
+
+# .server.json 的解析缓存：配置路径 -> (mtime_ns, size, 已合并并归一化的条目)
+#
+# list_servers() 被调得很勤：/api/state 每次一遍，每个文件管理操作解析实例
+# 目录时还要一遍。每次都要打开、解析每个 .server.json，再造一份默认配置
+# 合并、归一化——100 个实例时单次约 30ms。缓存按「文件 mtime + 大小」判断
+# 是否还有效，未变动的实例直接复用上次的结果。
+_ENTRY_CACHE: dict[str, tuple[int, int, float, dict[str, Any]]] = {}
+_CACHE_LOCK = threading.Lock()
+
+# 缓存最长存活时间。
+#
+# 光靠 mtime 判断在 Windows 上有个坑：文件时间戳取自系统时钟，粒度约 15ms，
+# 所以「上一次读」和「紧接着的一次改写」有可能拿到同一个 mtime，大小又没变
+# （比如把 "4G" 改成 "6G"），于是缓存看起来还有效。自家写盘会在 save 之后
+# 显式清缓存，所以受影响的是「用户在编辑器里手改 .server.json」这种情况：
+# 加了这个上限，面板最多看到 2 秒前的值，而不是一直看旧值。
+_CACHE_TTL = 2.0
+
+
+def _cache_key(config_path: str) -> str:
+    return os.path.normcase(os.path.abspath(config_path))
+
+
+def invalidate_server_cache(server_dir: str = "") -> None:
+    """丢掉实例配置缓存。传实例目录只丢那一个，不传就全清。
+
+    save_server_config() 写完会调它。光靠 mtime 判断是不够的：FAT/exFAT 与
+    某些网络盘的时间戳粒度是 1~2 秒，同一秒内的改写可能看起来「没变」，
+    那样面板改完设置再读就会拿到旧值——正是我们要避免的那类 bug。
+    """
+    with _CACHE_LOCK:
+        if not server_dir:
+            _ENTRY_CACHE.clear()
+            return
+        _ENTRY_CACHE.pop(_cache_key(os.path.join(server_dir, ".server.json")), None)
+
+
+def list_servers(servers_dir: str) -> list[dict[str, Any]]:
+    """扫描 servers/ 目录，返回所有合法实例的配置。
+
+    返回的是副本，调用方可以放心就地修改。
+    """
+    servers: list[dict[str, Any]] = []
+    if not os.path.isdir(servers_dir):
+        return servers
+    seen: set[str] = set()
+    for entry in sorted(os.listdir(servers_dir)):
+        server_path = os.path.join(servers_dir, entry)
+        if not os.path.isdir(server_path):
+            continue
+        config_path = os.path.join(server_path, ".server.json")
+        # 用一次 stat 同时拿到「在不在」和 mtime/大小，省掉原来的 isfile
+        try:
+            st = os.stat(config_path)
+        except OSError:
+            continue
+        key = _cache_key(config_path)
+        seen.add(key)
+        with _CACHE_LOCK:
+            cached = _ENTRY_CACHE.get(key)
+        fresh = (cached is not None
+                 and (time.monotonic() - cached[2]) <= _CACHE_TTL
+                 and cached[0] == st.st_mtime_ns
+                 and cached[1] == st.st_size)
+        if fresh:
+            servers.append(_clone_entry(cached[3]))
+            continue
+        try:
+            with open(config_path, "r", encoding="utf-8") as f:
+                cfg = json.load(f)
+            if not isinstance(cfg, dict):
+                continue
+            merged = _default_server_config()
+            merged.update(cfg)
+            merged["_path"] = server_path
+            merged["_config_path"] = config_path
+            normalized = _normalize_server_config(merged)
+        except (json.JSONDecodeError, OSError):
+            continue
+        with _CACHE_LOCK:
+            _ENTRY_CACHE[key] = (st.st_mtime_ns, st.st_size,
+                                 time.monotonic(), normalized)
+        servers.append(_clone_entry(normalized))
+
+    # 顺手把已经不存在的实例从缓存里清掉，别让它无限长
+    with _CACHE_LOCK:
+        for stale in [k for k in _ENTRY_CACHE if k not in seen]:
+            _ENTRY_CACHE.pop(stale, None)
+    return servers
 
 
 def _normalize_server_config(cfg: dict[str, Any]) -> dict[str, Any]:
@@ -113,7 +234,8 @@ def _normalize_server_config(cfg: dict[str, Any]) -> dict[str, Any]:
 
     openfrp = cfg.get("openfrp")
     if not isinstance(openfrp, dict):
-        openfrp = copy.deepcopy(DEFAULT_SERVER_CONFIG["openfrp"])
+        # 造一份新的，别把模块级默认值那个 dict 直接挂到实例上
+        openfrp = dict(DEFAULT_SERVER_CONFIG["openfrp"])
     else:
         openfrp = dict(openfrp)
         try:
@@ -131,33 +253,6 @@ def ensure_servers_folder(storage_dir: str) -> str:
     path = os.path.join(storage_dir, "servers")
     os.makedirs(path, exist_ok=True)
     return path
-
-
-def list_servers(servers_dir: str) -> list[dict[str, Any]]:
-    """扫描 servers/ 目录，返回所有合法实例的配置。"""
-    servers: list[dict[str, Any]] = []
-    if not os.path.isdir(servers_dir):
-        return servers
-    for entry in sorted(os.listdir(servers_dir)):
-        server_path = os.path.join(servers_dir, entry)
-        if not os.path.isdir(server_path):
-            continue
-        config_path = os.path.join(server_path, ".server.json")
-        if not os.path.isfile(config_path):
-            continue
-        try:
-            with open(config_path, "r", encoding="utf-8") as f:
-                cfg = json.load(f)
-            if not isinstance(cfg, dict):
-                continue
-            merged = _default_server_config()
-            merged.update(cfg)
-            merged["_path"] = server_path
-            merged["_config_path"] = config_path
-            servers.append(_normalize_server_config(merged))
-        except (json.JSONDecodeError, OSError):
-            continue
-    return servers
 
 
 def load_server_config(server_dir: str) -> dict[str, Any]:
@@ -186,6 +281,8 @@ def save_server_config(config: dict[str, Any], server_dir: str) -> None:
     os.makedirs(server_dir, exist_ok=True)
     with open(config_path, "w", encoding="utf-8") as f:
         json.dump(merged, f, ensure_ascii=False, indent=2)
+    # 写盘之后必须让缓存失效，否则紧接着的 list_servers() 会拿回旧值
+    invalidate_server_cache(server_dir)
 
 
 # ---------------------------------------------------------------------------

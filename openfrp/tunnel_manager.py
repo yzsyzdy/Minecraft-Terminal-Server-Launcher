@@ -14,21 +14,15 @@ OpenFrp 有两套认证体系:
   - Authorization (API 2/3/4/5/6/7): 创建/编辑/删除隧道
 """
 
-import json
 import os
-import platform
 import subprocess
-import shutil
 import time
-import zipfile
-import tarfile
 import urllib.parse
-import urllib.request
-import urllib.error
 from typing import Any, Optional
 from dataclasses import dataclass, field
 
 from constants import USER_AGENT, OPENFRP_API, OPENFRP_SOFTWARE
+from frp import frpc_files
 from http_utils import fetch_json
 from download_msl import download_file_with_progress
 from i18n import t
@@ -113,26 +107,10 @@ def _os_arch() -> tuple[str, str, str]:
     """检测当前操作系统和架构，返回 (os, arch, file_name)。
 
     frpc 的发布文件命名规则: frpc_{os}_{arch}.zip / .tar.gz
-    兼容 amd64 / arm64 / 386 三种架构。
+    平台与架构的映射表在 frpc_files 里，与原版 frp 共用一份。
     """
-    system = platform.system().lower()
-    machine = platform.machine().lower()
-
-    os_map = {
-        "windows": "windows", "linux": "linux", "darwin": "darwin",
-    }
-    arch_map = {
-        "amd64": "amd64", "x86_64": "amd64", "x64": "amd64",
-        "i386": "386", "i686": "386", "x86": "386",
-        "arm64": "arm64", "aarch64": "arm64",
-        "armv7": "arm", "armv7l": "arm", "arm": "arm",
-    }
-
-    os_name = os_map.get(system, "linux")
-    arch = arch_map.get(machine, "amd64")
-    ext = ".zip" if os_name == "windows" else ".tar.gz"
-    file_name = f"frpc_{os_name}_{arch}{ext}"
-    return os_name, arch, file_name
+    os_name, arch, ext = frpc_files.os_arch()
+    return os_name, arch, f"frpc_{os_name}_{arch}{ext}"
 
 
 # ---------------------------------------------------------------------------
@@ -219,51 +197,6 @@ def delete_tunnel(auth_token: str, proxy_id: int) -> Optional[str]:
     result = fetch_json(url, data={"proxy_id": proxy_id},
                          headers={"Authorization": auth_token})
     if not result or not result.get("flag"):
-        return None
-    return result.get("msg", "")
-
-
-def edit_tunnel(auth_token: str, params: dict) -> Optional[str]:
-    """编辑隧道 (API 7)。成功返回服务端提示消息，失败返回 None。"""
-    url = f"{OPENFRP_API}/frp/api/editProxy"
-    result = fetch_json(url, data=params, headers={"Authorization": auth_token})
-    if not result or not result.get("flag"):
-        return None
-    return result.get("msg", "")
-
-
-def get_tunnels_by_auth(auth_token: str) -> Optional[list[TunnelInfo]]:
-    """用 Authorization 获取隧道列表 (API 3)。
-
-    比 API 8 多返回 online 在线状态。
-    """
-    url = f"{OPENFRP_API}/frp/api/getUserProxies"
-    result = fetch_json(url, headers={"Authorization": auth_token}, timeout=10)
-    if not result or not result.get("flag"):
-        return None
-    data = result.get("data") or {}
-    raw_list = data.get("list") or []
-    return [TunnelInfo.from_auth_api(item) for item in raw_list]
-
-
-def get_user_info(auth_token: str) -> Optional[dict]:
-    """获取用户信息 (API 2，含流量使用情况)。"""
-    url = f"{OPENFRP_API}/frp/api/getUserInfo"
-    result = fetch_json(url, headers={"Authorization": auth_token})
-    if not result or not result.get("flag"):
-        return None
-    return result.get("data")
-
-
-def user_sign(auth_token: str) -> Optional[str]:
-    """每日签到 (API 9)。
-
-    注意: 按 OpenFrp 服务条款，自动签到不被允许，
-    所以此函数仅用于手动签到，不做定时调用。
-    """
-    url = f"{OPENFRP_API}/frp/api/userSign"
-    result = fetch_json(url, headers={"Authorization": auth_token})
-    if not result:
         return None
     return result.get("msg", "")
 
@@ -362,17 +295,11 @@ def _download_frpc_file(url: str, target_path: str) -> bool:
     if not download_file_with_progress(url, target_path, desc="frpc", headers=headers):
         return False
 
-    # zip 文件必须以 PK\x03\x04 开头
-    if target_path.endswith(".zip"):
-        with open(target_path, "rb") as f:
-            magic = f.read(4)
-        if magic != b"PK\x03\x04":
-            print(f"\n  [错误] 下载的文件不是有效的 zip 文件")
-            try:
-                os.remove(target_path)
-            except OSError:
-                pass
-            return False
+    # zip 文件必须以 PK\x03\x04 开头（判断方式与 frpc_files 保持一致）
+    if target_path.endswith(".zip") and frpc_files.archive_kind(target_path) != "zip":
+        print(f"\n  [错误] 下载的文件不是有效的 zip 文件")
+        frpc_files.remove_quietly(target_path)
+        return False
 
     return True
 
@@ -441,7 +368,7 @@ class FrpcManager:
             return self._process
 
         frpc_dir = os.path.join(project_dir, "openfrp")
-        base_name = "frpc.exe" if platform.system().lower() == "windows" else "frpc"
+        base_name = frpc_files.default_binary_name()
         frpc_bin = os.path.join(frpc_dir, base_name)
         frpc_archive = get_frpc_local_path(project_dir)
 
@@ -551,106 +478,17 @@ def maybe_auto_start_for_instance(project_dir: str, server_cfg: dict) -> bool:
     return True
 
 
-def _tar_extract(tf: tarfile.TarFile, target_dir: str, member=None) -> None:
-    """按安全过滤器解压 tar 成员。
-
-    Python 3.14 起默认就是 'data'，更早的版本默认 'fully_trusted'：一个
-    恶意压缩包可以用 ../ 或绝对路径把文件写到 openfrp/ 目录外面，而下载
-    地址来自 API 返回的镜像列表。老版本没有 filter 参数，只能退回原行为。
-    """
-    try:
-        if member is None:
-            tf.extractall(target_dir, filter="data")
-        else:
-            tf.extract(member, target_dir, filter="data")
-    except TypeError:
-        if member is None:
-            tf.extractall(target_dir)
-        else:
-            tf.extract(member, target_dir)
-
-
 def _extract_frpc_if_needed(archive_path: str, project_dir: str) -> str:
-    """从 zip/tar.gz 中解压 frpc 二进制文件。
+    """从 zip/tar.gz 中解出 frpc 二进制，返回它的路径；失败返回空串。
 
-    解压策略:
-      1. 先精确匹配 frpc.exe (Windows) 或 frpc (Unix)
-      2. 找不到时全量解压，再递归搜索带 "frpc" 的可执行文件
-      3. 最后清理多余文件，只保留 frpc 二进制
+    实现在 frpc_files（与原版 frp 共用一份）。相比原来这里自己的实现，
+    有两点变化：
 
-    Returns:
-        解压后的二进制路径; 失败返回空字符串
+      - 只挑出 frpc 那一个文件，不再「找不到就整包解压再递归搜索」。
+        解压目录是用户的数据目录，往里倒一整个第三方包既没必要也不安全
+        （原来那套还要再回头删掉多出来的文件）。档案内部按 basename 递归
+        匹配，子目录里的 frpc 一样找得到。
+      - 解出来的东西要像本平台的可执行文件，不像就删掉并失败——原来这里
+        不校验，用户传个 txt 进来也会显示「已就绪」。
     """
-    target_dir = os.path.dirname(archive_path)
-    base_name = "frpc.exe" if platform.system().lower() == "windows" else "frpc"
-    expected = os.path.join(target_dir, base_name)
-
-    def _find_binary(dirpath: str) -> str:
-        """在目录树中递归搜索 frpc 可执行文件。"""
-        for root, _dirs, files in os.walk(dirpath):
-            for f in files:
-                if f == base_name or f.lower() == base_name.lower():
-                    return os.path.join(root, f)
-                if "frpc" in f.lower() and (
-                    f.endswith(".exe") or "." not in f
-                ):
-                    return os.path.join(root, f)
-        return ""
-
-    def _cleanup_extras(keep: str) -> None:
-        """删除解压目录中除了 keep 和存档以外的所有文件。"""
-        for root, dirs, files in os.walk(target_dir):
-            for f in files:
-                fp = os.path.join(root, f)
-                if fp != keep and fp != archive_path:
-                    try:
-                        os.remove(fp)
-                    except OSError:
-                        pass
-            for d in dirs:
-                fp = os.path.join(root, d)
-                try:
-                    shutil.rmtree(fp)
-                except OSError:
-                    pass
-
-    try:
-        if archive_path.endswith(".zip"):
-            with zipfile.ZipFile(archive_path, "r") as zf:
-                for m in zf.infolist():
-                    if m.filename.endswith("frpc.exe") or m.filename.endswith("/frpc"):
-                        zf.extract(m, target_dir)
-                        extracted = os.path.join(target_dir, m.filename)
-                        if extracted != expected:
-                            shutil.move(extracted, expected)
-                        _cleanup_extras(expected)
-                        return expected
-                # 精确匹配失败，全量解压后再搜索
-                zf.extractall(target_dir)
-        elif archive_path.endswith(".tar.gz"):
-            with tarfile.open(archive_path, "r:gz") as tf:
-                for m in tf.getmembers():
-                    if m.name.endswith("/frpc") or m.name == "frpc":
-                        _tar_extract(tf, target_dir, m)
-                        extracted = os.path.join(target_dir, m.name)
-                        if extracted != expected:
-                            shutil.move(extracted, expected)
-                        _cleanup_extras(expected)
-                        return expected
-                _tar_extract(tf, target_dir)
-    except (zipfile.BadZipFile, tarfile.TarError, OSError):
-        return ""
-
-    # 如果前两步都没找到，递归搜索整个目录
-    found = _find_binary(target_dir)
-    if found:
-        if found != expected:
-            try:
-                shutil.move(found, expected)
-            except OSError:
-                pass
-        _cleanup_extras(expected)
-        return expected if os.path.isfile(expected) else found
-
-    _cleanup_extras("")
-    return ""
+    return frpc_files.extract_binary(archive_path, os.path.dirname(archive_path))

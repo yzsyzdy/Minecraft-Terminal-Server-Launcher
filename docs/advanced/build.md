@@ -1,5 +1,32 @@
 # 从源码构建
 
+## 跑测试
+
+测试只用标准库 `unittest`，**不需要装任何依赖**（项目本身也是零运行时依赖），
+在仓库根目录跑：
+
+```bash
+python -m unittest discover -s tests -t . -v
+```
+
+CI（`.github/workflows/tests.yml`）在每次 push / PR 上会用 Python 3.11 与 3.13
+各跑一遍；`build.yml` 在打包前也会跑一次，免得带着失败的测试发版。
+
+测试盯的是「契约」而不是实现细节，重点在这些容易悄悄坏掉的地方：
+
+| 文件 | 管什么 |
+| --- | --- |
+| `test_web_api.py` | 面板鉴权（三条 token 通道）、`/api/state` 回显必须等于磁盘值、设置写入 |
+| `test_config.py` | `config.json` 读写、未知键不能丢、写盘要原子 |
+| `test_server_manager.py` | 实例扫描、类型归一化、解析缓存与隔离 |
+| `test_paths.py` | 打包版路径解析（用伪造的 `__compiled__` 模拟，不用真编译） |
+| `test_runtime_plan.py` | 启动计划、进程优先级、运行时快照 |
+| `test_frp_toml.py` | `frpc.toml` 往返仍然合法（用 `tomllib` 校验） |
+| `test_frpc_files.py` / `test_tunnel_install.py` | 两套隧道共用的 frpc 识别、提取、校验 |
+| `test_archive.py` | 在线解压的越界与炸弹防护 |
+| `test_i18n.py` | 缺翻译回退到中文、占位符一致性 |
+| `test_static.py` | 未定义名扫描、面板 id/文案前后端一致性、JS 语法 |
+
 ## 前置条件
 
 - Python 3.11（CI 用的版本，3.10+ 基本都能跑）

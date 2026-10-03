@@ -33,6 +33,12 @@ jobs:
         run: |
           pip install nuitka imageio
 
+      # 发版前先跑测试：测试只用标准库，不需要额外装东西。
+      # 单独的 tests.yml 会在每次 push/PR 上跑，这里再拦一道，
+      # 免得带着失败的测试发出去。
+      - name: Run tests
+        run: python -m unittest discover -s tests -t .
+
       - name: Build with Nuitka
         run: |
           $version = "${{ github.ref_name }}" -replace '^v', ''

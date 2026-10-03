@@ -28,11 +28,6 @@ def _is_temp_onefile_dir(path: str) -> bool:
     return base.startswith("onefile_") or base.startswith("onefile-")
 
 
-def is_temp_onefile_dir(path: str) -> bool:
-    """公开版本，供启动项等模块复用同一套判断。"""
-    return _is_temp_onefile_dir(path)
-
-
 def _nuitka_info():
     """Nuitka 会往它编译的每个模块里注入 `__compiled__`（1.9+），没有则返回 None。"""
     return globals().get("__compiled__")
