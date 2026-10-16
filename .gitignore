@@ -1,5 +1,5 @@
-# 导入解压临时目录
-.import_temp/
+# 导入解压临时目录（每次导入一个独立目录，所以用通配）
+.import_temp*/
 
 # 服务器实例（每个服务器有自己的数据，不纳入版本控制）
 servers/
@@ -17,8 +17,14 @@ msl_cache.json
 __pycache__/
 *.pyc
 
-openfrp/frpc_windows_amd64.zip
-openfrp/frpc.exe
+# frpc 运行时产物。以前只写了 Windows 那两个名字，于是同一个仓库在 Linux 或
+# macOS 上跑一遍就会多出 frpc_linux_amd64.tar.gz / frpc_darwin_* 之类的未跟踪
+# 文件。改成按前缀匹配，再显式把源码和脚本捞回来。
+openfrp/frpc*
+!openfrp/*.py
+!openfrp/*.bat
+!openfrp/*.md
+!openfrp/*.txt
 
 # 原版 frp 运行时产物（二进制与含 token 的配置不提交，源码 frp/*.py 正常跟踪）
 frp/frpc*
@@ -28,6 +34,12 @@ frp/frpc.toml
 
 # Nuitka 构建输出
 build/
+
+# 原子写/解压留下的中间文件。正常结束会自己换名或删掉，进程被杀时可能残留。
+*.mstl-tmp
+*.mstl-upload
+*.mstl-export
+*.mstl-extract
 
 # MkDocs 构建输出与本地预览用的临时依赖
 site/
