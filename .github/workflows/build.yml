@@ -66,7 +66,22 @@ jobs:
         run: |
           # 运行时要读的资源必须真的在 dist 里：漏一个，打包版的对应功能就是坏的
           # （webui 曾经就漏过，结果面板一打开就是 index.html missing）
-          $dist = "build\MSTL\start.dist"
+          #
+          # 不硬编码 start.dist：Nuitka 的输出目录名随版本会变，直接找 build 下最新的 *.dist。
+          # 注意：下面给 ::error::/::warning:: 的文案一律用纯 ASCII——这个步骤是
+          # shell: powershell（5.1），它会按 ANSI 码页读这个无 BOM 的 UTF-8 脚本，
+          # 中文会变成乱码，而 annotation 是我们唯一能匿名看到的 CI 诊断通道。
+          $distDirs = @(Get-ChildItem -Path build -Recurse -Directory -Filter '*.dist' -ErrorAction SilentlyContinue)
+          $distDir = $distDirs | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+          if (-not $distDir) {
+            $tree = Get-ChildItem -Path build -Recurse -ErrorAction SilentlyContinue |
+                    Select-Object -First 40 | ForEach-Object { $_.FullName }
+            Write-Host ("::error::no *.dist directory under build; Nuitka output path changed? || build tree: " + ($tree -join ' | '))
+            exit 1
+          }
+          $dist = $distDir.FullName
+          Write-Host "dist = $dist"
+
           $required = @(
             "webui\index.html",
             "locales\zh.json",
@@ -74,10 +89,30 @@ jobs:
             "locales\ru.json",
             "locales\neko.json"
           )
+
+          # --include-data-dir 正常会把这些拷好，但它漏过，所以缺什么就从源码目录补拷一次，
+          # 并用 ::warning:: 记一笔：CI 日志要登录才能看，annotation 却是公开可读的，
+          # 这样「Nuitka 到底漏了什么」以后不用登录也能查到。
+          $repaired = @()
+          foreach ($rel in $required) {
+            if (Test-Path -LiteralPath (Join-Path $dist $rel)) { continue }
+            $top = $rel.Split('\')[0]
+            $destDir = Join-Path $dist $top
+            try {
+              New-Item -ItemType Directory -Force -Path $destDir | Out-Null
+              Copy-Item -Path (Join-Path $env:GITHUB_WORKSPACE "$top\*") -Destination $destDir -Recurse -Force
+              $repaired += $rel
+            } catch {
+              Write-Host ("::error::copy from source failed for " + $rel + ": " + $_.Exception.Message)
+            }
+          }
+          if ($repaired.Count -gt 0) {
+            Write-Host "::warning::Nuitka did not bundle these assets; copied from source: $($repaired -join ', ')"
+          }
+
           $missing = @()
           foreach ($rel in $required) {
-            $p = Join-Path $dist $rel
-            if (Test-Path $p) {
+            if (Test-Path -LiteralPath (Join-Path $dist $rel)) {
               Write-Host "  ok   $rel"
             } else {
               Write-Host "  MISSING $rel"
@@ -85,19 +120,30 @@ jobs:
             }
           }
           if ($missing.Count -gt 0) {
-            Write-Error "打包产物缺少运行所需资源: $($missing -join ', ')"
+            $tree = Get-ChildItem -Path $dist -Recurse -ErrorAction SilentlyContinue |
+                    Select-Object -First 40 | ForEach-Object { $_.FullName.Substring($dist.Length) }
+            Write-Host ("::error::dist is missing required assets: " + ($missing -join ', ') + " || dist tree: " + ($tree -join ' | '))
             exit 1
           }
 
       - name: List build output
-        run: Get-ChildItem -Path build\MSTL\start.dist | Select-Object FullName, Length
+        run: |
+          $dist = (Get-ChildItem -Path build -Recurse -Directory -Filter '*.dist' -ErrorAction SilentlyContinue |
+                   Sort-Object LastWriteTime -Descending | Select-Object -First 1).FullName
+          if (-not $dist) {
+            Write-Host "::error::no *.dist directory under build"
+            exit 1
+          }
+          Get-ChildItem -Path $dist | Select-Object FullName, Length
 
       - name: Compress build output
         shell: powershell
         run: |
-          $source = "build\MSTL\start.dist"
-          if (-not (Test-Path $source)) {
-            Write-Host "Build output not found at $source"
+          # 别硬编码 start.dist：Nuitka 的输出目录名可能随版本变，直接找 build 下最新的 *.dist。
+          $source = (Get-ChildItem -Path build -Recurse -Directory -Filter '*.dist' -ErrorAction SilentlyContinue |
+                     Sort-Object LastWriteTime -Descending | Select-Object -First 1).FullName
+          if (-not $source) {
+            Write-Host "::error::no *.dist directory under build, nothing to compress"
             exit 1
           }
 
