@@ -87,6 +87,17 @@ def _zip_is_symlink(info: zipfile.ZipInfo) -> bool:
     return (info.external_attr >> 16) & 0o170000 == 0o120000
 
 
+def _zip_is_dir(info: zipfile.ZipInfo) -> bool:
+    """这个 zip 成员是不是目录。
+
+    ZipInfo.is_dir() 只看文件名结尾是不是 "/"，而 Windows 的资源管理器打包
+    时把目录项写成 "sub\\"。只认 "/" 的话 "sub\\" 会被当作零字节普通文件，
+    随后 "sub\\file.txt" 就建不出父目录，整个解压失败。所以两种分隔符都认。
+    """
+    name = str(info.filename or "")
+    return info.is_dir() or name.endswith("\\")
+
+
 def _dest_rel_for(root: str, src_rel: str, dest_rel: Optional[str]) -> str:
     if dest_rel is None:
         return os.path.dirname(src_rel).replace("\\", "/")
@@ -140,10 +151,17 @@ def extract(root: str, src_rel: str, dest_rel: Optional[str] = None,
             skipped += 1
             return
         parent = os.path.dirname(target)
-        if parent and not os.path.isdir(parent):
-            os.makedirs(parent, exist_ok=True)
         tmp = target + ".mstl-extract"
         try:
+            # 建父目录必须留在 try 里面。放在外面时，FileExistsError 会一路
+            # 穿出 _write，被调用方那个 except OSError 接住并翻译成
+            # 「压缩包损坏」——可压缩包明明好好的：Windows 做出来的 zip 会把
+            # 目录项写成 "sub\"，而 ZipInfo.is_dir() 只认结尾的 "/"，于是它被
+            # 当成零字节普通文件建了出来，紧接着 "sub\file.txt" 就发现自己的
+            # 父目录是个文件，建不动。放进 try 之后这类失败统一报
+            # web.error.write_failed，和本函数其它 OSError 的说法一致。
+            if parent and not os.path.isdir(parent):
+                os.makedirs(parent, exist_ok=True)
             with open(tmp, "wb") as out:
                 while True:
                     chunk = stream.read(1024 * 1024)
@@ -187,7 +205,7 @@ def extract(root: str, src_rel: str, dest_rel: Optional[str] = None,
                     if _zip_is_symlink(info):
                         refused += 1
                         continue
-                    if info.is_dir():
+                    if _zip_is_dir(info):
                         try:
                             os.makedirs(target, exist_ok=True)
                         except OSError:

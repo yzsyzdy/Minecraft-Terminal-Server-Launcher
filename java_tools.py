@@ -5,6 +5,7 @@ Java auto-detection, version compatibility, and JDK download module
 import subprocess
 import sys
 import os
+import re
 import json
 import glob
 import zipfile
@@ -16,6 +17,14 @@ from typing import Optional, Any
 
 from download_msl import _download_with_progress
 from i18n import t
+
+
+def _remove_quietly(path: str) -> None:
+    """删文件，失败不抛——清理动作不该把主流程带崩。"""
+    try:
+        os.remove(path)
+    except OSError:
+        pass
 
 
 # =============================================================================
@@ -201,14 +210,47 @@ def detect_java_versions() -> list[JavaInfo]:
     return merged
 
 
+_VERSION_SEG_RE = re.compile(r"\d+|[A-Za-z]+")
+_MAJOR_RE = re.compile(r"^\s*(\d+)(?:\.(\d+))?")
+
+
 def _version_sort_key(version: str) -> tuple:
-    parts = []
-    for seg in version.split("."):
-        try:
-            parts.append(int(seg))
-        except ValueError:
-            parts.append(seg)
-    return tuple(parts)
+    """把版本串拆成「永远可比较」的元组，供 Java 列表降序排列。
+
+    每个元素是 (0, 数字, "") 或 (1, 0, 文本)——类型标签放在最前面，所以
+    任何两个元素之间都不会出现 int 与 str 直接比较。旧实现是数字段放 int、
+    其余原样放 str，于是 "21-ea" 得到 ('21-ea',)，和 (21, 0, 2) 一比就抛
+    TypeError: '<' not supported between instances of 'str' and 'int'，
+    整个 Java 扫描崩掉。机器上任何一处 EA / 厂商后缀构建就够触发。
+    """
+    key: list[tuple] = []
+    for seg in _VERSION_SEG_RE.findall(str(version or "")):
+        if seg.isdigit():
+            key.append((0, int(seg), ""))
+        else:
+            key.append((1, 0, seg.lower()))
+    if not key:
+        # 完全取不出任何字母数字的串排到最后，但不能返回空元组——空元组和
+        # 非空元组比较时永远「更小」，会让这类条目静默沉底且彼此相等。
+        key.append((2, 0, ""))
+    return tuple(key)
+
+
+def _java_major_version(version_str: str) -> int:
+    """从 `java -version` 给出的版本串里取出主版本号，取不到返回 0。
+
+    实际会遇到的形态：21.0.2、17.0.9+11、21-ea、22+36、1.8.0_392。
+    旧实现是 int(s.split(".")[0])，带任何后缀的串（21-ea、22+36）都落进
+    except 返回 0；0 >= 21 为假，于是一个 Java 21 被判定成「对 MC 1.20.5+
+    太旧」，用户被劝去下载本机已经装好的版本。
+    """
+    s = str(version_str or "").strip()
+    m = _MAJOR_RE.match(s)
+    if not m:
+        return 0
+    if s.startswith("1.") and m.group(2) is not None:
+        return int(m.group(2))
+    return int(m.group(1))
 
 
 # ---------------------------------------------------------------------------
@@ -335,21 +377,6 @@ def _os_platform() -> str:
     return "linux"
 
 
-def _java_major_version(version_str: str) -> int:
-    s = version_str.strip()
-    if s.startswith("1."):
-        parts = s.split(".")
-        if len(parts) >= 2:
-            try:
-                return int(parts[1])
-            except ValueError:
-                pass
-    try:
-        return int(s.split(".")[0])
-    except ValueError:
-        return 0
-
-
 def _check_java_compatibility(
     java_version: str, mc_version: str, storage_dir: str, project_dir: str,
 ) -> Optional[str]:
@@ -403,9 +430,50 @@ def _check_java_compatibility(
         return None
 
 
+def _safe_extract_tar(tf: tarfile.TarFile, dest: str) -> None:
+    """把 tar 解到 dest，先拒绝任何会落到 dest 之外的成员。
+
+    `tarfile.extractall()` 默认会老老实实照成员名里的 "../" 或绝对路径往外写
+    （Python 3.12 起要显式传 filter 才会拦）。实测一个含 "../TAROUT.txt" 的
+    归档能把文件放到目标目录外面。java_tools 是全项目唯一裸调 extractall 的
+    地方，core/transfer.py 与 core/archive.py 都刻意做了同类防护。
+    """
+    dest_abs = os.path.realpath(dest)
+    prefix = dest_abs + os.sep
+
+    def _inside(path: str) -> bool:
+        return path == dest_abs or path.startswith(prefix)
+
+    for member in tf.getmembers():
+        name = member.name
+        if os.path.isabs(name) or name.startswith(("/", "\\")):
+            raise ValueError(f"unsafe tar member (absolute): {name}")
+        if not _inside(os.path.realpath(os.path.join(dest_abs, name))):
+            raise ValueError(f"unsafe tar member (escapes target): {name}")
+        if member.issym() or member.islnk():
+            link = member.linkname
+            # 符号链接的 linkname 相对成员所在目录，硬链接相对归档根。
+            base = dest_abs if member.islnk() else os.path.dirname(
+                os.path.join(dest_abs, name))
+            link_target = link if os.path.isabs(link) else os.path.join(base, link)
+            if not _inside(os.path.realpath(link_target)):
+                raise ValueError(f"unsafe tar link: {name} -> {link}")
+    # 成员已经在上面逐个校验过了，这里要的是「按原样解出来」：JDK 的
+    # bin/java 必须保住可执行位。Python 3.14 起 extractall 默认改用 data
+    # 过滤器，它会把普通文件的权限压成 rw-，解出来的 java 直接跑不起来。
+    try:
+        tf.extractall(dest, filter="fully_trusted")
+    except TypeError:            # Python < 3.11.4 没有 filter 参数
+        tf.extractall(dest)
+
+
 def _extract_and_rename_jdk(archive: str, target_dir: str, os_name: str) -> Optional[str]:
     """Extract JDK archive and move the extracted root to target_dir."""
     try:
+        tmp = os.path.join(os.path.dirname(target_dir), ".jdk_extract_tmp")
+        if os.path.isdir(tmp):
+            shutil.rmtree(tmp)
+        os.makedirs(tmp, exist_ok=True)
         if os_name == "windows":
             with zipfile.ZipFile(archive, "r") as zf:
                 roots = set()
@@ -413,17 +481,7 @@ def _extract_and_rename_jdk(archive: str, target_dir: str, os_name: str) -> Opti
                     p = m.filename.split("/")[0]
                     if p:
                         roots.add(p)
-                tmp = os.path.join(os.path.dirname(target_dir), ".jdk_extract_tmp")
-                if os.path.isdir(tmp):
-                    shutil.rmtree(tmp)
                 zf.extractall(tmp)
-                if roots:
-                    # 按字母序取第一个根目录，避免 set 无序导致随机选择
-                    root_dir = sorted(roots)[0]
-                    src = os.path.join(tmp, root_dir)
-                    if os.path.isdir(src):
-                        shutil.move(src, target_dir)
-                shutil.rmtree(tmp, ignore_errors=True)
         else:
             with tarfile.open(archive, "r:gz") as tf:
                 roots = set()
@@ -431,16 +489,14 @@ def _extract_and_rename_jdk(archive: str, target_dir: str, os_name: str) -> Opti
                     p = m.name.split("/")[0]
                     if p:
                         roots.add(p)
-                tmp = os.path.join(os.path.dirname(target_dir), ".jdk_extract_tmp")
-                if os.path.isdir(tmp):
-                    shutil.rmtree(tmp)
-                tf.extractall(tmp)
-                if roots:
-                    root_dir = sorted(roots)[0]
-                    src = os.path.join(tmp, root_dir)
-                    if os.path.isdir(src):
-                        shutil.move(src, target_dir)
-                shutil.rmtree(tmp, ignore_errors=True)
+                _safe_extract_tar(tf, tmp)
+        if roots:
+            # 按字母序取第一个根目录，避免 set 无序导致随机选择
+            root_dir = sorted(roots)[0]
+            src = os.path.join(tmp, root_dir)
+            if os.path.isdir(src):
+                shutil.move(src, target_dir)
+        shutil.rmtree(tmp, ignore_errors=True)
     except Exception as e:
         print(t("jdk.extract_failed", msg=str(e)))
         return None
@@ -468,12 +524,14 @@ def _download_jdk(java_version: str, project_dir: str) -> Optional[str]:
     ext = ".zip" if os_name == "windows" else ".tar.gz"
     dl = os.path.join(project_dir, f"jdk-{java_version}{ext}")
     if not _download_with_progress(url, dl, desc=f"JDK {java_version}"):
+        # 下载失败也要清掉残片。以前只有成功路径删归档，而「是否已有 JDK」
+        # 只按解压后的目录判断，所以 150–200MB 的半截归档会一直堆在项目目录里。
+        _remove_quietly(dl)
         return None
 
     print(t("jdk.extracting"))
     java_exe = _extract_and_rename_jdk(dl, jdk_dir, os_name)
-    if os.path.isfile(dl):
-        os.remove(dl)
+    _remove_quietly(dl)
 
     if not java_exe or not os.path.isfile(java_exe):
         print(t("jdk.java_not_found")); return None

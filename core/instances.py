@@ -87,8 +87,21 @@ def set_jar_enabled(directory: str, filename: str, enabled: bool) -> str:
             raise CoreError("menu.plugin.state_unrecognized")
         new_name = filename + DISABLED_SUFFIX
 
+    new_path = os.path.join(directory, new_name)
+    # 重名保护。以前这里直接 os.rename，而 Foo.jar 与 Foo.jar.disabled 是
+    # 可以同时存在的（重新导入插件只按原名落盘，不会去看有没有禁用副本），
+    # 于是同一个 jar 的两个状态文件撞在一起：POSIX 上 os.rename 静默覆盖，
+    # 用户禁用插件就把那份启用的 jar 直接抹掉了；Windows 上抛
+    # FileExistsError，被下面的 OSError 分支翻译成「切换失败」，错误信息
+    # 指着一个根本不是原因的原因。两边都不对，所以先查重再改名。
+    # 只放行「同一个文件仅改大小写」——那种情况两个路径指向同一个文件。
+    if os.path.exists(new_path) and (
+            os.path.normcase(os.path.abspath(new_path))
+            != os.path.normcase(os.path.abspath(full_path))):
+        raise CoreError("menu.plugin.toggle_conflict", path=new_name)
+
     try:
-        os.rename(full_path, os.path.join(directory, new_name))
+        os.rename(full_path, new_path)
     except OSError as e:
         raise CoreError("menu.plugin.toggle_failed", msg=str(e)) from e
     return new_name

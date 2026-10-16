@@ -207,7 +207,8 @@ def install_core(server_dir: str, core_type: str, core_version: str,
     target = os.path.join(server_dir, jar_name)
     reporter.progress(label=_server_display_name(core_type))
     if not multithreaded_download(url, target, desc=_server_display_name(core_type),
-                                  quiet=True, on_progress=on_progress):
+                                  quiet=True, on_progress=on_progress,
+                                  expected_sha256=info.get("sha256")):
         raise CoreError("web.error.core_download_failed", name=core_type)
     if not os.path.isfile(target) or os.path.getsize(target) == 0:
         raise CoreError("web.error.core_download_failed", name=core_type)

@@ -196,6 +196,20 @@ def list_servers(servers_dir: str) -> list[dict[str, Any]]:
     return servers
 
 
+def _as_bool(value: Any) -> bool:
+    """把 JSON 里读到的值收敛成真布尔。
+
+    bool("false") 是 True——手改过 .server.json、或者配置文件是别的工具生成
+    的（那边把布尔写成了字符串），都会让「随软件自启」在用户明确写了 false
+    的情况下被打开。所以字符串要按字面意思认，不能按「非空即真」认。
+    """
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return value != 0
+    return str(value or "").strip().lower() in ("1", "true", "yes", "on", "y")
+
+
 def _normalize_server_config(cfg: dict[str, Any]) -> dict[str, Any]:
     """把外部读进来的配置收敛成可信的类型。就地修改并返回同一个 dict。"""
     for key in _LIST_FIELDS:
@@ -211,7 +225,7 @@ def _normalize_server_config(cfg: dict[str, Any]) -> dict[str, Any]:
 
     kind = str(cfg.get("kind") or KIND_MINECRAFT).strip().lower()
     cfg["kind"] = kind if kind in INSTANCE_KINDS else KIND_MINECRAFT
-    cfg["auto_start"] = bool(cfg.get("auto_start"))
+    cfg["auto_start"] = _as_bool(cfg.get("auto_start"))
 
     launch = cfg.get("launch")
     if not isinstance(launch, dict):
@@ -243,7 +257,7 @@ def _normalize_server_config(cfg: dict[str, Any]) -> dict[str, Any]:
         except (TypeError, ValueError):
             openfrp["proxy_id"] = 0
         openfrp["token"] = str(openfrp.get("token") or "")
-        openfrp["auto_start"] = bool(openfrp.get("auto_start"))
+        openfrp["auto_start"] = _as_bool(openfrp.get("auto_start"))
     cfg["openfrp"] = openfrp
     return cfg
 
@@ -279,8 +293,21 @@ def save_server_config(config: dict[str, Any], server_dir: str) -> None:
     _normalize_server_config(merged)
     config_path = os.path.join(server_dir, ".server.json")
     os.makedirs(server_dir, exist_ok=True)
-    with open(config_path, "w", encoding="utf-8") as f:
-        json.dump(merged, f, ensure_ascii=False, indent=2)
+    # 原子写。以前是直接 open(path, "w") 截断再写：写到一半断电、或者写入
+    # 抛异常，留下的就是个残缺的 JSON。load_server_config 遇到解析失败会
+    # 静默回退到默认配置，于是实例在界面上「消失」成一份空白配置——比报错
+    # 难查得多。写临时文件再 os.replace 就不会出现中间态。
+    tmp_path = config_path + ".mstl-tmp"
+    try:
+        with open(tmp_path, "w", encoding="utf-8") as f:
+            json.dump(merged, f, ensure_ascii=False, indent=2)
+        os.replace(tmp_path, config_path)
+    except OSError:
+        try:
+            os.remove(tmp_path)
+        except OSError:
+            pass
+        raise
     # 写盘之后必须让缓存失效，否则紧接着的 list_servers() 会拿回旧值
     invalidate_server_cache(server_dir)
 

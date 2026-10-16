@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import os
 import shutil
+import tempfile
 from typing import NamedTuple
 
 from .errors import CoreError
@@ -208,16 +209,23 @@ def write_text(root: str, rel: str, content: str,
     if os.path.isdir(target):
         raise CoreError("web.error.is_a_directory", path=clean)
 
-    tmp = target + ".mstl-tmp"
+    tmp = None
     try:
-        with open(tmp, "wb") as f:
+        # 临时文件名必须唯一。以前是固定的 target + ".mstl-tmp"：两个请求同时
+        # 写同一个文件（面板保存撞上另一个标签页保存，或者上传和编辑撞车）时，
+        # 后开的那个会把前一个的内容截断，先收工的一方再 os.replace 上去，
+        # 落盘的其实是别人的半个文件。mkstemp 保证唯一，并且落在同一个目录里
+        # ——os.replace 要求源和目标在同一个文件系统上。
+        fd, tmp = tempfile.mkstemp(prefix=".mstl-", suffix=".mstl-tmp", dir=parent)
+        with os.fdopen(fd, "wb") as f:
             f.write(data)
         os.replace(tmp, target)
     except OSError as e:
-        try:
-            os.remove(tmp)
-        except OSError:
-            pass
+        if tmp:
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
         raise CoreError("web.error.write_failed", msg=str(e)) from e
     return len(data)
 
@@ -248,8 +256,18 @@ def rename_entry(root: str, rel: str, new_name: str) -> str:
 
     parent = os.path.dirname(target)
     new_target = os.path.join(parent, clean_name)
+    # 只有「真的是另一个文件」才算重名。Windows 与 macOS 的文件系统不区分
+    # 大小写，os.path.exists("Foo.txt") 在只有 foo.txt 时也为真，于是想把
+    # foo.txt 改成 Foo.txt 会被这里拦下来、报「已存在」——用户完全没法改
+    # 大小写。samefile 能认出两个路径指的是同一个文件，那种情况放行。
     if os.path.exists(new_target):
-        raise CoreError("web.error.already_exists", path=clean_name)
+        same_file = False
+        try:
+            same_file = os.path.samefile(target, new_target)
+        except OSError:
+            same_file = False
+        if not same_file:
+            raise CoreError("web.error.already_exists", path=clean_name)
     try:
         os.rename(target, new_target)
     except OSError as e:
@@ -304,9 +322,13 @@ def save_upload(root: str, rel: str, stream, content_length: int,
 
     written = 0
     remaining = content_length
-    tmp = target + ".mstl-upload"
+    tmp = None
     try:
-        with open(tmp, "wb") as f:
+        # 唯一临时名，理由同 write_text：固定名字在并发写同一个目标时会互相
+        # 截断，最后落盘的可能是对方写到一半的内容。
+        fd, tmp = tempfile.mkstemp(prefix=".mstl-", suffix=".mstl-upload",
+                                   dir=parent)
+        with os.fdopen(fd, "wb") as f:
             while remaining > 0:
                 chunk = stream.read(min(64 * 1024, remaining))
                 if not chunk:
@@ -318,16 +340,18 @@ def save_upload(root: str, rel: str, stream, content_length: int,
             raise CoreError("web.error.upload_incomplete")
         os.replace(tmp, target)
     except CoreError:
-        try:
-            os.remove(tmp)
-        except OSError:
-            pass
+        if tmp:
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
         raise
     except OSError as e:
-        try:
-            os.remove(tmp)
-        except OSError:
-            pass
+        if tmp:
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
         raise CoreError("web.error.write_failed", msg=str(e)) from e
     return written
 

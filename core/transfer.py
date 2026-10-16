@@ -16,14 +16,21 @@ from __future__ import annotations
 
 import os
 import shutil
+import tempfile
+import time
 import zipfile
 from typing import NamedTuple, Optional
 
+from .archive import MAX_MEMBERS, MAX_TOTAL_BYTES, _zip_is_dir, _zip_is_symlink
 from .errors import CoreError
 from .report import NULL, Reporter, as_reporter
 from server_manager import EXPORT_CATEGORIES, collect_export_files, save_server_config
 
 TEMP_DIR_NAME = ".import_temp"
+
+# 导入临时目录的保留时长。每次导入用独立目录，进程被杀时会留下垃圾，
+# 所以超过这个岁数的就顺手清掉（正在进行的导入不可能有这么老）。
+_STALE_TEMP_AGE = 24 * 3600
 
 
 class ExportResult(NamedTuple):
@@ -49,23 +56,74 @@ class ImportPlan(NamedTuple):
         return self.candidates[0] if len(self.candidates) == 1 else None
 
 
+def _sweep_stale_temp_dirs(project_dir: str) -> None:
+    """清掉以前崩溃留下的导入临时目录。"""
+    try:
+        entries = os.listdir(project_dir)
+    except OSError:
+        return
+    now = time.time()
+    for entry in entries:
+        if not entry.startswith(TEMP_DIR_NAME):
+            continue
+        full = os.path.join(project_dir, entry)
+        try:
+            if now - os.path.getmtime(full) > _STALE_TEMP_AGE:
+                shutil.rmtree(full, ignore_errors=True)
+        except OSError:
+            continue
+
+
 def _safe_extract(zip_path: str, target_dir: str, reporter: Reporter) -> None:
-    """解压并挡住 zip slip，同时按字节数汇报进度。"""
+    """解压并挡住 zip slip 与压缩炸弹，同时按字节数汇报进度。
+
+    闸门与 core/archive.py 用同一套常量。导入这条路以前一道闸都没有，可它
+    处理的正是用户从网上下回来的整合包——最需要防的就是这类输入。
+    """
     target_abs = os.path.abspath(target_dir)
+    prefix = target_abs + os.sep
     with zipfile.ZipFile(zip_path, "r") as zf:
         members = zf.infolist()
-        total = sum(m.file_size for m in members if not m.is_dir())
+        if len(members) > MAX_MEMBERS:
+            raise CoreError("web.error.extract_too_many", max=MAX_MEMBERS)
+        declared = sum(m.file_size for m in members if not m.is_dir())
+        if declared > MAX_TOTAL_BYTES:
+            raise CoreError("web.error.extract_too_large",
+                            max=round(MAX_TOTAL_BYTES / 1024 / 1024 / 1024))
+        total = declared
         extracted = 0
         for member in members:
             member_path = os.path.abspath(os.path.join(target_abs, member.filename))
-            if not member_path.startswith(target_abs + os.sep):
+            if not member_path.startswith(prefix):
                 reporter.warn("import.path_traversal", name=member.filename)
                 continue
-            zf.extract(member, target_abs)
-            if not member.is_dir():
-                extracted += member.file_size
+            # 符号链接一律不建。zipfile 在 POSIX 上会照着成员的 unix 权限位
+            # 建出软链，而越界检查只看成员名：先建一个指向 /etc 的链，再用
+            # 后面的 "link/passwd" 成员写穿它，成员名本身完全合法。archive.py
+            # 早就这么防了，这里同样处理。
+            if _zip_is_symlink(member):
+                reporter.warn("import.path_traversal", name=member.filename)
+                continue
+            if _zip_is_dir(member):
+                os.makedirs(member_path, exist_ok=True)
+                continue
+            os.makedirs(os.path.dirname(member_path), exist_ok=True)
+            # 自己流式读，不用 zf.extract：成员头里声明的 file_size 可以撒谎，
+            # 只有真正写下去的字节数才算数。
+            with zf.open(member) as src, open(member_path, "wb") as dst:
+                while True:
+                    chunk = src.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    extracted += len(chunk)
+                    if extracted > MAX_TOTAL_BYTES:
+                        raise CoreError(
+                            "web.error.extract_too_large",
+                            max=round(MAX_TOTAL_BYTES / 1024 / 1024 / 1024))
+                    dst.write(chunk)
             if total > 0:
-                reporter.progress(ratio=extracted / total, current=extracted, total=total)
+                reporter.progress(ratio=min(1.0, extracted / total),
+                                  current=extracted, total=total)
         reporter.progress(ratio=1.0, done=True)
 
 
@@ -114,10 +172,15 @@ def plan_import(
     if not os.path.isfile(zip_path):
         raise CoreError("import.file_missing", path=zip_path)
 
-    temp_dir = os.path.join(project_dir, TEMP_DIR_NAME)
-    if os.path.isdir(temp_dir):
-        shutil.rmtree(temp_dir, ignore_errors=True)
-    os.makedirs(temp_dir)
+    _sweep_stale_temp_dirs(project_dir)
+
+    # 每次导入用独立的临时目录。以前是一个固定的 .import_temp，开头先
+    # rmtree 再 makedirs——两个并发的导入会互相把对方正在解压的东西删掉，
+    # 而 web 那边的 _IMPORT_PLANS_LOCK 只保护 plan 字典，管不到目录。
+    try:
+        temp_dir = tempfile.mkdtemp(prefix=TEMP_DIR_NAME + "-", dir=project_dir)
+    except OSError as e:
+        raise CoreError("web.error.mkdir_failed", msg=str(e)) from e
 
     reporter.log("import.extracting", name=os.path.basename(zip_path))
     try:
@@ -126,8 +189,14 @@ def plan_import(
         shutil.rmtree(temp_dir, ignore_errors=True)
         raise CoreError("import.bad_zip", name=os.path.basename(zip_path)) from e
     except OSError as e:
+        # 落盘失败（磁盘满、没权限、父路径被占用）和「压缩包坏了」是两回事。
+        # 以前两者都报 import.bad_zip，用户拿着一个完好的整合包去反复重下，
+        # 而真正的问题是磁盘满了。
         shutil.rmtree(temp_dir, ignore_errors=True)
-        raise CoreError("import.bad_zip", name=os.path.basename(zip_path)) from e
+        raise CoreError("web.error.write_failed", msg=str(e)) from e
+    except CoreError:
+        shutil.rmtree(temp_dir, ignore_errors=True)
+        raise
 
     candidates = find_core_jars(temp_dir)
     if not candidates:
@@ -214,12 +283,21 @@ def export_instance(
     os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
 
     total = len(files)
+    # 先写临时文件，成功再换名。就地写的话，中途抛异常时 ZipFile.__exit__
+    # 仍会把中央目录写出去，留下一个「打得开、内容却缺了一半」的备份——
+    # 用户看到文件在那儿，会以为备份是好的。
+    tmp = output_path + ".mstl-export"
     try:
-        with zipfile.ZipFile(output_path, "w", zipfile.ZIP_DEFLATED) as zf:
+        with zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED) as zf:
             for i, (arcname, abs_path) in enumerate(files, 1):
                 zf.write(abs_path, arcname)
                 reporter.progress(current=i, total=total, ratio=i / total, done=i == total)
+        os.replace(tmp, output_path)
     except (OSError, zipfile.BadZipFile) as e:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
         raise CoreError("export.failed", msg=str(e)) from e
 
     return ExportResult(

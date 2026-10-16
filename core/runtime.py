@@ -273,6 +273,16 @@ class ServerRuntime:
     # -- 控制 --------------------------------------------------------------
 
     def start(self) -> None:
+        # 锁序规则（全文件唯一一条，改动前请先读）：事件回调最终会走到
+        # RuntimeManager._broadcast 去取 manager 锁，而 RuntimeManager.start
+        # 是「持 manager 锁 → 调 runtime.start() → 取 runtime 锁」。
+        # 于是只要在持 runtime 锁的情况下发事件，就会出现
+        #   A: 持 manager 锁，等 runtime 锁
+        #   B: 持 runtime 锁，等 manager 锁
+        # 的 ABBA 死锁——Web 面板用的是 ThreadingHTTPServer + daemon_threads，
+        # 两个请求真并发，一次「启动」撞上一次「停止」就够把两个请求线程
+        # 一起挂死（面板随后整个失去响应）。所以：**绝不在持 self._lock 时
+        # 调用 _push / _emit / _emit_state / _note**。
         with self._lock:
             if self._proc is not None and self._proc.poll() is None:
                 raise CoreError("web.error.already_running", name=self.plan.name)
@@ -286,16 +296,23 @@ class ServerRuntime:
                     text=True, encoding="utf-8", errors="replace", bufsize=1,
                 )
             except OSError as e:
+                # spawn 失败时 pump 线程根本没起来，_close_log 的唯一调用点
+                # （_pump 的 finally）永远不会执行。不在这里补一次，日志句柄
+                # 会一直留到进程结束 —— Windows 上就是实例目录「文件被占用」，
+                # 删不掉，而且每次失败启动都泄漏一个。
+                self._close_log()
                 raise CoreError("web.error.spawn_failed", msg=str(e)) from e
 
             self._state = STATE_RUNNING
             self._exit_code = None
             self._started_at = time.time()
-            self._note("web.console.started", pid=self._proc.pid)
-            self._emit_state()
+            pid = self._proc.pid
             self._reader = threading.Thread(
                 target=self._pump, args=(self._proc,), daemon=True)
             self._reader.start()
+
+        self._note("web.console.started", pid=pid)
+        self._emit_state()
 
     def send(self, command: str) -> None:
         command = (command or "").strip()
@@ -318,15 +335,18 @@ class ServerRuntime:
             if self._proc is None or self._proc.poll() is not None:
                 raise CoreError("web.error.not_running", name=self.plan.name)
             proc = self._proc
+            reader = self._reader
             self._state = STATE_STOPPING
-            self._note("web.console.stop_sent")
-            self._emit_state()
             try:
                 if proc.stdin:
                     proc.stdin.write("stop\n")
                     proc.stdin.flush()
             except (OSError, ValueError):
                 pass
+
+        # 事件在锁外发，理由见 start() 顶部的锁序说明。
+        self._note("web.console.stop_sent")
+        self._emit_state()
         try:
             proc.wait(timeout=timeout)
         except subprocess.TimeoutExpired:
@@ -335,6 +355,19 @@ class ServerRuntime:
                 proc.wait(timeout=10)
             except subprocess.TimeoutExpired:
                 proc.kill()
+                try:
+                    proc.wait(timeout=10)
+                except subprocess.TimeoutExpired:
+                    pass
+        # 进程确实退出了，但状态还是 stopping：把状态改成 stopped、记下退出码
+        # 的是 _pump 线程，它要先读完 stdout 里剩下的内容、再 proc.wait() 一遍。
+        # 不等它，stop() 刚返回时 state() 就还是 "stopping"——面板显示成
+        # 「正在停止」，调用方也拿不到退出码（实测约每六次复现一次）。
+        # 读线程是 daemon 且此时进程已死、管道马上 EOF，所以给个上限就够，
+        # 真有意外也不会把调用方挂在这里。注意必须在锁外 join：_pump 自己
+        # 要拿这把锁才能把状态改成 stopped。
+        if reader is not None and reader is not threading.current_thread():
+            reader.join(timeout=5.0)
 
     def kill(self) -> None:
         with self._lock:
