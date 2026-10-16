@@ -547,8 +547,12 @@ def multithreaded_download(url: str, target_path: str, desc: str = "",
             start, end = chunks[i]
             for attempt in range(1, _CHUNK_RETRIES + 1):
                 _forget_chunk_progress(shared, lock, start)
-                say(f"  {t('download.chunk_retry', index=i + 1,
-                            attempt=attempt, total=_CHUNK_RETRIES)}")
+                # 别把这条 t(...) 直接塞进 f-string 的花括号里跨行写：3.12 之前
+                # 的 f-string 是单个字符串 token，花括号里换行就是语法错误
+                # （3.12 的 PEP 701 才允许）。CI 的打包解释器正是 3.11。
+                message = t('download.chunk_retry', index=i + 1,
+                            attempt=attempt, total=_CHUNK_RETRIES)
+                say(f"  {message}")
                 if _download_chunk(url, start, end, target_path,
                                    shared, lock, headers):
                     failed_indices.remove(i)
