@@ -677,28 +677,62 @@ function baseName(path) {
   return String(path || "").split(/[\\/]/).pop();
 }
 
+// 鉴权失败后就不再自动重试了：token 不会自己变对，继续轮询只会一直报错。
+let authFailed = false;
+
+function showAuthNotice() {
+  if (authFailed) return;
+  authFailed = true;
+  // 光说「token 无效」用户只能干瞪眼：最常见的三种原因（旧 cookie、
+  // localhost 与 127.0.0.1 不通用、刚换过 token）都列出来
+  const hints = ["web.auth.hint_cookie", "web.auth.hint_host",
+    "web.auth.hint_regenerate"]
+    .map((k) => strings[k]).filter(Boolean)
+    .map((s) => "<li>" + esc(s) + "</li>").join("");
+  // 以前这里是直接把 document.body.innerHTML 整个换掉。页面里所有按钮的
+  // 监听都挂在 body 内的元素上，一换就等于把界面拆了：之后 applyStrings()
+  // 和 refresh() 拿到的全是 null，抛出的 TypeError 又被各处 .catch(() => {})
+  // 吞掉，页面彻底成死胡同，刷新也救不回来。改成盖一层遮罩，原界面留在
+  // 下面，用户清掉 cookie 或换个地址重进就能继续用。
+  const box = document.createElement("div");
+  box.id = "auth-notice";
+  box.style.cssText = "position:fixed;inset:0;z-index:9999;overflow:auto;" +
+    "background:#fff;font:14px system-ui;color:#1f2430;padding:28px";
+  box.innerHTML =
+    "<h3>" + esc(strings["web.auth.invalid"] || "401") + "</h3>" +
+    '<p style="color:#6b7480">' + esc(strings["web.auth.help"] || "") + "</p>" +
+    (hints ? '<ul style="color:#6b7480;line-height:1.9">' + hints + "</ul>" : "");
+  document.body.appendChild(box);
+}
+
+async function readJson(res) {
+  // 响应不一定是 JSON：401 时服务端回的是那张 HTML 鉴权页，反向代理和
+  // 网关错误页也不是 JSON。原来直接 res.json()，用户看到的是
+  // "SyntaxError: Unexpected token '<'" —— 一个和真正原因毫无关系的报错。
+  if (res.status === 401) {
+    showAuthNotice();
+    throw new Error(strings["web.auth.invalid"] || "unauthorized");
+  }
+  let text = "";
+  try {
+    text = await res.text();
+  } catch (e) {
+    text = "";
+  }
+  try {
+    return JSON.parse(text);
+  } catch (e) {
+    throw new Error("HTTP " + res.status + ": " + text.slice(0, 120));
+  }
+}
+
 async function api(path, body) {
   const options = { method: body ? "POST" : "GET", headers: {} };
   if (body) {
     options.headers["Content-Type"] = "application/json";
     options.body = JSON.stringify(body);
   }
-  const res = await fetch(path, options);
-  if (res.status === 401) {
-    // 光说「token 无效」用户只能干瞪眼：最常见的三种原因（旧 cookie、
-    // localhost 与 127.0.0.1 不通用、刚换过 token）都列出来
-    const hints = ["web.auth.hint_cookie", "web.auth.hint_host",
-      "web.auth.hint_regenerate"]
-      .map((k) => strings[k]).filter(Boolean)
-      .map((s) => "<li>" + esc(s) + "</li>").join("");
-    document.body.innerHTML =
-      '<div style="padding:28px"><h3>' + esc(strings["web.auth.invalid"] || "401") +
-      '</h3><p style="color:#6b7480">' + esc(strings["web.auth.help"] || "") + "</p>" +
-      (hints ? '<ul style="color:#6b7480;line-height:1.9">' + hints + "</ul>" : "") +
-      "</div>";
-    throw new Error("unauthorized");
-  }
-  return res.json();
+  return readJson(await fetch(path, options));
 }
 
 /* ---------------------------------------------------------------- 连接状态 */
@@ -776,8 +810,16 @@ function handle(event) {
 
 /* ---------------------------------------------------------------- 实例列表 */
 
+// refresh() 的在途序号。它会被 15 秒定时器、点实例、点启动/停止同时调用，
+// 两个请求乱序返回时旧的那份会把新状态盖回去（刚启动的服务器又显示成
+// stopped，最长要等下一个 15 秒才纠正）。每次调用领一个号，回来时号不是
+// 最新的就直接丢掉。
+let refreshSeq = 0;
+
 async function refresh() {
+  const mine = ++refreshSeq;
   const data = await api("/api/state");
+  if (mine !== refreshSeq) return;
   if (data.strings) strings = data.strings;
   instances = data.instances || [];
   if (selected && !instances.some(x => x.name === selected)) selected = null;
@@ -861,11 +903,11 @@ function applyStrings() {
   $("l-setinstauto").textContent = strings["web.settings.auto_start_instance"] || "";
   $("set-instauto-hint").textContent = strings["web.settings.auto_start_instance_hint"] || "";
   $("l-setmcver").textContent = strings["web.new.mc_version"] || "";
-  $("l-setjar").textContent = strings["web.settings.mc"] ? "Jar" : "Jar";
+  $("l-setjar").textContent = strings["web.settings.jar"] || "Jar";
   $("l-setminmem").textContent = strings["web.new.min_mem"] || "";
   $("l-setmaxmem").textContent = strings["web.new.max_mem"] || "";
-  $("l-setjvm").textContent = strings["web.settings.mc"] || "";
-  $("l-setsrv").textContent = strings["web.settings.mc"] || "";
+  $("l-setjvm").textContent = strings["web.settings.jvm_args"] || "";
+  $("l-setsrv").textContent = strings["web.settings.server_args"] || "";
   $("l-setgmode").textContent = strings["web.new.launch_mode"] || "";
   $("setgmode").options[0].textContent = strings["web.new.launch_exec"] || "exec";
   $("setgmode").options[1].textContent = strings["web.new.launch_cmd"] || "cmd";
@@ -1335,8 +1377,15 @@ function buildFileRow(entry, isUp) {
   return tr;
 }
 
+// loadFiles() 的在途序号，理由同 refresh()：点 Files 标签会同时触发
+// select() 和 switchTab("files") 两次加载，旧响应后到就会把新目录的列表
+// 盖掉，而且 filesPath 与实际显示的内容对不上，之后的上移/重命名/删除
+// 会作用到错误的路径上。
+let filesSeq = 0;
+
 async function loadFiles(path) {
   if (path !== undefined && path !== null) filesPath = path;
+  const mine = ++filesSeq;
   if (!selected) {
     filesPath = "";
     filesParent = "";
@@ -1346,10 +1395,12 @@ async function loadFiles(path) {
   try {
     const data = await apiOk("/api/files?name=" + encodeURIComponent(selected) +
                              "&path=" + encodeURIComponent(filesPath));
+    if (mine !== filesSeq) return;
     filesPath = data.path || "";
     filesParent = data.parent || "";
     renderFiles(data.entries || [], filesParent);
   } catch (err) {
+    if (mine !== filesSeq) return;
     fail(err);
     renderFiles([], "");
   }
@@ -1474,6 +1525,9 @@ async function uploadFolder(fileList) {
   const total = items.length;
   let done = 0;
   let failed = 0;
+  // 进度要按「处理完的个数」算，成功失败都算：以前用 done（只数成功的），
+  // 10 个文件失败 1 个时进度条就停在 90%，而标签已经写着 10/10。
+  let finished = 0;
   const progressLabel = (n) => fmt(strings["web.files.uploading_folder"] || "{done}/{total}",
                                    { done: n, total: total });
 
@@ -1485,14 +1539,15 @@ async function uploadFolder(fileList) {
       await uploadWithProgress(
         "/api/file/upload?name=" + encodeURIComponent(selected) +
         "&path=" + encodeURIComponent(path), item.file,
-        (ratio) => showJob({ label: progressLabel(done), ratio: (done + ratio) / total }));
+        (ratio) => showJob({ label: progressLabel(finished), ratio: (finished + ratio) / total }));
       done += 1;
     } catch (err) {
       failed += 1;
     }
-    showJob({ label: progressLabel(done), ratio: done / total });
+    finished += 1;
+    showJob({ label: progressLabel(finished), ratio: finished / total });
   }
-  showJob({ label: progressLabel(done), ratio: 1, done: true });
+  showJob({ label: progressLabel(finished), ratio: 1, done: true });
 
   if (failed) {
     toast(fmt(strings["web.files.folder_partial"] || "{done} ok, {failed} failed",
@@ -1684,7 +1739,7 @@ async function createWithJar() {
       headers: { "Content-Type": "application/octet-stream" },
       body: file
     });
-    const uploaded = await res.json();
+    const uploaded = await readJson(res);
     if (!uploaded.ok) throw new Error(uploaded.message || "upload failed");
     await afterCreate(created);
   } catch (err) {
@@ -1986,13 +2041,22 @@ function closeFrp() {
   $("frpmodal").hidden = true;
 }
 
+function frpFormSettings() {
+  // renderFrp() 会用传进来的 settings 覆盖这三个输入框。增量操作（起停、
+  // 增删代理）以前传的是 {}，等于把用户刚填、还没点保存的服务器地址/端口/
+  // token 静默清空——触发点击的按钮自己持有焦点，renderFrp 里那道
+  // activeElement 守卫拦不住。所以这些调用改成把「输入框当前的值」当成
+  // settings 传回去，写回去的还是原样。
+  return {
+    serverAddr: $("frpaddr").value.trim(),
+    serverPort: parseInt($("frpport").value, 10) || 7000,
+    token: $("frptoken").value.trim()
+  };
+}
+
 async function frpSave() {
   try {
-    const data = await apiOk("/api/frp/settings", {
-      serverAddr: $("frpaddr").value.trim(),
-      serverPort: parseInt($("frpport").value, 10) || 7000,
-      token: $("frptoken").value.trim()
-    });
+    const data = await apiOk("/api/frp/settings", frpFormSettings());
     toast(data.message || "");
     loadFrp();
   } catch (err) {
@@ -2004,7 +2068,7 @@ async function frpStart() {
   try {
     const data = await apiOk("/api/frp/start", {});
     toast(data.message || "");
-    renderFrp({ status: data.status, settings: {}, proxies: [] });
+    renderFrp({ status: data.status, settings: frpFormSettings(), proxies: [] });
     loadFrp();
   } catch (err) {
     fail(err);
@@ -2068,7 +2132,7 @@ async function frpAddProxy() {
     $("frpremoteport").value = "";
     $("frpdomains").value = "";
     renderFrp({ status: { running: !$("frpstop").disabled, binary: true },
-                settings: {}, proxies: data.proxies || [] });
+                settings: frpFormSettings(), proxies: data.proxies || [] });
     loadFrp();
   } catch (err) {
     fail(err);
@@ -2081,7 +2145,7 @@ async function frpRemoveProxy(index, name) {
   try {
     const data = await apiOk("/api/frp/proxy/delete", { index: index });
     renderFrp({ status: { running: !$("frpstop").disabled, binary: true },
-                settings: {}, proxies: data.proxies || [] });
+                settings: frpFormSettings(), proxies: data.proxies || [] });
     loadFrp();
   } catch (err) {
     fail(err);
@@ -2183,8 +2247,15 @@ try {
   if (saved) selected = saved;
 } catch (e) {}
 
-refresh().then(connect).catch(() => { connect(); });
-setInterval(() => refresh().catch(() => {}), 15000);
+refresh().then(connect).catch(() => {
+  // 鉴权失败时别再连 SSE：EventSource 不带 token，服务端只会回那张 401 的
+  // HTML 页，onmessage 永远不触发、readyState 停在 0，指示灯就永久卡在琥珀色
+  // 的「连接中」。原因已经由 showAuthNotice() 摊在用户面前了。
+  if (!authFailed) connect();
+});
+setInterval(() => {
+  if (!authFailed) refresh().catch(() => {});
+}, 15000);
 </script>
 </body>
 </html>

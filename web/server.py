@@ -50,12 +50,30 @@ from server_manager import (
     LAUNCH_EXEC,
     ensure_servers_folder,
     list_servers,
+    load_server_config,
 )
 
 COOKIE_NAME = "mstl_token"
 
 # 通过面板上传单个文件的大小上限（服务端 jar 通常 40~80 MB）
 MAX_UPLOAD_BYTES = 512 * 1024 * 1024
+
+# JSON 接口请求体上限。
+#
+# _body() 以前直接按 Content-Length 读进内存，没有上限：一个 Content-Length:
+# 9999999999 的请求就足以让面板吃掉几个 G 内存（而且长度是客户端说了算的，
+# 读不到那么多字节还会一直阻塞在那条连接上）。JSON 接口里最大的一份是
+# /api/file/write 的正文，受 fileops.MAX_EDIT_BYTES（2 MiB）约束，再加上
+# 转义与其余字段，8 MiB 已经很宽裕。
+MAX_JSON_BODY_BYTES = 8 * 1024 * 1024
+
+# 下载响应头里的文件名要塞进 Content-Disposition，而文件名是用户可控的：
+# Linux 上 \r 和 \n 都是合法文件名字符，直接拼进响应头就是一次头注入。
+# 顺带把引号和反斜杠也换掉，免得把 filename="..." 提前闭合。
+_UNSAFE_HEADER_CHARS = {code: "_" for code in range(0x20)}
+_UNSAFE_HEADER_CHARS[0x7F] = "_"
+_UNSAFE_HEADER_CHARS[ord('"')] = "_"
+_UNSAFE_HEADER_CHARS[ord("\\")] = "_"
 
 # 前端需要的那几句文案，由服务端统一下发，前端只负责摆放
 WEB_STRINGS = (
@@ -175,6 +193,9 @@ WEB_STRINGS = (
     "web.settings.priority",
     "web.settings.mc",
     "web.settings.generic",
+    "web.settings.jar",
+    "web.settings.jvm_args",
+    "web.settings.server_args",
     "web.settings.openfrp",
     "web.settings.openfrp_hint",
     "web.settings.token",
@@ -348,10 +369,29 @@ def _render_event(event: dict) -> dict:
     return event
 
 
+_INDEX_CACHE: dict[str, Any] = {}
+_INDEX_CACHE_LOCK = threading.Lock()
+
+
 def _index_html() -> str:
+    """读 webui/index.html。
+
+    每次请求都重读一遍 78 KB 是白费力气（面板刷得很勤），但也不能一直缓存
+    不放——开发时改了页面、刷新一下就该看到新内容。所以按 (mtime, size)
+    记住上一次的结果：文件没动就直接复用，动了就重读。
+    """
     path = os.path.join(bundled_dir(), "webui", "index.html")
+    stat = os.stat(path)
+    key = (path, stat.st_mtime_ns, stat.st_size)
+    with _INDEX_CACHE_LOCK:
+        if _INDEX_CACHE.get("key") == key:
+            return _INDEX_CACHE["html"]
     with open(path, "r", encoding="utf-8") as f:
-        return f.read()
+        html = f.read()
+    with _INDEX_CACHE_LOCK:
+        _INDEX_CACHE["key"] = key
+        _INDEX_CACHE["html"] = html
+    return html
 
 
 # 运行时要读的随包资源。打包脚本漏了 include-data-dir 时，界面上的表现是
@@ -423,6 +463,17 @@ def _make_handler(manager: RuntimeManager, servers_dir: str, token: str,
         server_version = "MSTL"
         protocol_version = "HTTP/1.1"
         _body_read = 0
+
+        def handle_one_request(self) -> None:
+            """一个 TCP 连接上会连着处理多个请求，_body_read 必须按请求归零。
+
+            它记的是「这个请求的请求体已经读走了多少」，_drain() 拿它算还剩
+            多少没读。以前只在第一个请求里是 0：第二个请求时它还是上一个请求
+            的累计值，于是 _drain 要么少读（残留字节把下一个请求顶歪，整条
+            连接错位），要么多读（阻塞在下一个请求上，长连接直接卡死）。
+            """
+            self._body_read = 0
+            super().handle_one_request()
 
         # -- 基础设施 ------------------------------------------------------
 
@@ -529,6 +580,17 @@ def _make_handler(manager: RuntimeManager, servers_dir: str, token: str,
                 HTTPStatus.UNAUTHORIZED,
             )
 
+        def _reject_unauthorized(self) -> None:
+            """回 401 之前先把请求体读掉。
+
+            HTTP/1.1 上是长连接：请求体没读完就回响应，下一个请求会从残留
+            的字节开始解析。而 401 恰恰是最容易被反复触发的一条路径（换了
+            token、cookie 还是旧的、用 localhost 开的而 cookie 存在 127.0.0.1
+            名下），不排空的话每被拒一次那条连接就错位一次。
+            """
+            self._drain(self._content_length())
+            self._unauthorized()
+
         def _body(self) -> dict:
             try:
                 length = int(self.headers.get("Content-Length") or 0)
@@ -536,6 +598,12 @@ def _make_handler(manager: RuntimeManager, servers_dir: str, token: str,
                 return {}
             if length <= 0:
                 return {}
+            if length > MAX_JSON_BODY_BYTES:
+                # 同样要先把请求体读掉再报错，否则长连接上的下一个请求会
+                # 从这一大坨请求体中间开始解析。
+                self._drain(length)
+                raise CoreError("web.error.body_too_large",
+                                max=round(MAX_JSON_BODY_BYTES / 1024 / 1024))
             raw = _BodyStream(self).read(length)
             try:
                 parsed = json.loads(raw.decode("utf-8"))
@@ -575,10 +643,28 @@ def _make_handler(manager: RuntimeManager, servers_dir: str, token: str,
                        HTTPStatus.INTERNAL_SERVER_ERROR)
 
         def _instance_dir(self, name: str) -> str:
-            """按实例名解析实例目录。只认 servers/ 下真实存在的实例。"""
+            """按实例名解析实例目录。只认 servers/ 下真实存在的实例。
+
+            实例名通常就等于目录名（create_instance 就是拿实例名当目录名，
+            而且 name 不在 _PATCH_FIELDS 里，建好之后改不了）。所以先按目录
+            名直接试一次，命中就不必再扫整个 servers/ ——文件管理器的每个
+            操作都要走这里，实例一多，那次全量扫描就是白花的钱。目录名和
+            配置里的 name 对不上（用户手工改过目录或 .server.json）时会走
+            下面的全量查找，结果一样。
+            """
             wanted = str(name or "")
             if not wanted:
                 raise CoreError("web.error.unknown_instance", name=wanted)
+            if wanted not in (".", "..") and not any(
+                    sep in wanted for sep in ("/", "\\")):
+                direct = os.path.join(servers_dir, wanted)
+                if os.path.isfile(os.path.join(direct, ".server.json")):
+                    try:
+                        cfg = load_server_config(direct)
+                    except OSError:
+                        cfg = {}
+                    if str(cfg.get("name") or wanted) == wanted:
+                        return direct
             for entry in list_servers(servers_dir):
                 entry_name = entry.get("name") or os.path.basename(
                     os.path.normpath(entry["_path"]))
@@ -619,7 +705,7 @@ def _make_handler(manager: RuntimeManager, servers_dir: str, token: str,
             path, query = self._query()
             if path in ("/", "/index.html"):
                 if not self._authed(query):
-                    return self._unauthorized()
+                    return self._reject_unauthorized()
                 headers = []
                 expected = self._expected_token()
                 if query.get("token") and expected:
@@ -632,11 +718,11 @@ def _make_handler(manager: RuntimeManager, servers_dir: str, token: str,
                 except OSError:
                     return self._page("webui/index.html missing", HTTPStatus.INTERNAL_SERVER_ERROR)
             if not self._authed(query):
-                return self._unauthorized()
+                return self._reject_unauthorized()
             if path == "/api/state":
                 return self._state()
             if path == "/api/stream":
-                return self._stream(query)
+                return self._guard(lambda: self._stream(query))
             if path == "/api/files":
                 return self._guard(lambda: self._files_list(query))
             if path == "/api/file":
@@ -652,13 +738,16 @@ def _make_handler(manager: RuntimeManager, servers_dir: str, token: str,
         def do_POST(self) -> None:  # noqa: N802
             path, query = self._query()
             if not self._authed(query):
-                return self._unauthorized()
+                return self._reject_unauthorized()
             # 上传走原始请求体，不能按 JSON 解析
             if path == "/api/file/upload":
                 return self._guard(lambda: self._file_upload(query))
             if path == "/api/frp/upload":
                 return self._guard(lambda: self._frp_upload(query))
-            body = self._body()
+            try:
+                body = self._body()
+            except CoreError as err:
+                return self._core_error(err)
             name = str(body.get("name") or "")
             try:
                 if path == "/api/start":
@@ -786,7 +875,13 @@ def _make_handler(manager: RuntimeManager, servers_dir: str, token: str,
             size = os.path.getsize(target)
             base = os.path.basename(target)
             # 文件名可能带中文，两种形式都给：老浏览器认 filename，新的认 filename*
-            ascii_name = base.encode("ascii", "replace").decode("ascii").replace('"', "_")
+            #
+            # 但 filename="..." 这一份是原样拼进响应头的，而文件名在 Linux 上
+            # 可以含 \r 和 \n —— 直接拼就是一次响应头注入。先把控制字符（以及
+            # 会提前闭合引号的那两个）换成下划线。filename* 那份走
+            # urllib.parse.quote，控制字符本来就会变成 %0D/%0A，不必额外处理。
+            ascii_name = base.encode("ascii", "replace").decode("ascii")
+            ascii_name = ascii_name.translate(_UNSAFE_HEADER_CHARS)
             disposition = (f'attachment; filename="{ascii_name}"; '
                            f"filename*=UTF-8''{urllib.parse.quote(base)}")
             self.send_response(HTTPStatus.OK)
@@ -1127,20 +1222,29 @@ def _make_handler(manager: RuntimeManager, servers_dir: str, token: str,
 
         def _stream(self, query: dict[str, str]) -> None:
             """name 为空表示订阅所有实例，前端默认就走这条：一次连接同时盯住
-            全部实例的状态，也不必在切实例时重连。"""
-            name = query.get("name") or ""
-            self.send_response(HTTPStatus.OK)
-            self.send_header("Content-Type", "text/event-stream; charset=utf-8")
-            self.send_header("Cache-Control", "no-cache")
-            self.send_header("Connection", "close")
-            self.end_headers()
-            self.close_connection = True
+            全部实例的状态，也不必在切实例时重连。
 
+            订阅放在发响应头**之前**：这一步失败时还一个字节都没写过，
+            _guard 的兜底 JSON 能正常送出去。反过来先发头再订阅，一旦订阅
+            抛异常就只剩往 SSE 流里塞状态行这一条路，前端拿到的是一条永远
+            连不上的流。发头之后的所有异常都自己吞掉——连接断了就安静收摊。
+            """
+            name = query.get("name") or ""
             inbox: "queue.Queue[dict]" = queue.Queue()
             unsubscribe = manager.subscribe(inbox.put)
-            # 下载进度这类与实例无关的事件也推给同一个客户端
-            unsubscribe_jobs = JOB_BUS.subscribe(inbox.put)
             try:
+                unsubscribe_jobs = JOB_BUS.subscribe(inbox.put)
+            except Exception:  # noqa: BLE001
+                unsubscribe()
+                raise
+            try:
+                self.send_response(HTTPStatus.OK)
+                self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+                self.send_header("Cache-Control", "no-cache")
+                self.send_header("Connection", "close")
+                self.end_headers()
+                self.close_connection = True
+
                 if name:
                     runtime = manager.get(name)
                     for event in (runtime.history() if runtime else []):
@@ -1227,11 +1331,16 @@ def build_server(project_dir: str, *, host: str = "127.0.0.1", port: int = 8765,
 # ---------------------------------------------------------------------------
 
 _background_server: Optional[ThreadingHTTPServer] = None
+# start_background 与 _stop_background（atexit）可能来自不同线程：前者在
+# 菜单线程，后者在解释器退出时。没有这把锁，「检查有没有起过」和「记下来」
+# 之间就有一段空窗。
+_background_lock = threading.Lock()
 
 
 def _stop_background() -> None:
     global _background_server
-    httpd, _background_server = _background_server, None
+    with _background_lock:
+        httpd, _background_server = _background_server, None
     if httpd is not None:
         try:
             httpd.shutdown()
@@ -1278,8 +1387,6 @@ def start_background(project_dir: str, host: Optional[str] = None,
     不要提示。
     """
     global _background_server
-    if _background_server is not None:
-        return _background_server      # 已经在跑了，别起第二个
 
     config = load_config(project_dir)
     load_language(config.get("language", "") or detect_os_language())
@@ -1291,12 +1398,22 @@ def start_background(project_dir: str, host: Optional[str] = None,
     bind_host = host or cfg_host
     bind_port = cfg_port if port is None else port
 
-    try:
-        httpd = build_server(project_dir, host=bind_host, port=bind_port, token=token,
-                             token_provider=_config_token_provider(project_dir))
-    except OSError as e:
-        print(t("web.cli.bind_failed", addr=f"{bind_host}:{bind_port}", msg=str(e)))
-        return None
+    with _background_lock:
+        if _background_server is not None:
+            return _background_server      # 已经在跑了，别起第二个
+
+        try:
+            httpd = build_server(project_dir, host=bind_host, port=bind_port, token=token,
+                                 token_provider=_config_token_provider(project_dir))
+        except OSError as e:
+            print(t("web.cli.bind_failed", addr=f"{bind_host}:{bind_port}", msg=str(e)))
+            return None
+
+        # 先把句柄记下来再起线程：反过来的话，线程已经在跑而
+        # _background_server 还是 None，这中间进来的 _stop_background()
+        # （atexit）会看不到它，面板永远不会被关掉；并发的第二次
+        # start_background 也会以为没人起过，再往同一个端口绑一次。
+        _background_server = httpd
 
     threading.Thread(target=httpd.serve_forever, name="mstl-web", daemon=True).start()
     atexit.register(_stop_background)
@@ -1307,7 +1424,6 @@ def start_background(project_dir: str, host: Optional[str] = None,
             url=f"http://{shown_host}:{httpd.server_address[1]}/?token={token}"))
     if bind_host in ("0.0.0.0", "::"):
         print(t("web.cli.external_warning"))
-    _background_server = httpd
     return httpd
 
 
