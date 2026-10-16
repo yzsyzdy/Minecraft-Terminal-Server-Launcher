@@ -4,6 +4,11 @@ on:
   push:
     tags:
       - 'v*'
+    branches:
+      # 临时的矩阵探测分支：验证 mac/linux 三条腿真能构建出可用的产物。
+      # release job 有 tag 守卫，所以推这个分支只产出 artifact，不会发版。
+      # 验证完就删掉这一段和远端分支。
+      - 'ci-matrix-probe'
   workflow_dispatch:
 
 permissions:
@@ -11,7 +16,40 @@ permissions:
 
 jobs:
   build:
-    runs-on: windows-latest
+    name: build (${{ matrix.label }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Windows 产物名保持 MSTL-v<版本>.zip 不变：README、更新检查、
+          # 老用户的下载链接都指着它。
+          - os: windows-latest
+            label: windows-x86_64
+            suffix: ''
+            binary: MSTL.exe
+            archive: zip
+          # Linux 选 22.04 而不是 ubuntu-latest：Nuitka 的 standalone 不打包
+          # glibc，二进制会要求「不低于构建机的 glibc」。22.04 是 glibc 2.35，
+          # 覆盖 Ubuntu 22.04+ / Debian 12+ / RHEL 9+；24.04 会把门槛抬到 2.39。
+          # 注意 GitHub 已从 2026-09-17 起弃用这个镜像（2027-04-17 彻底移除），
+          # 到时候要么换 24.04，要么改成在旧 glibc 的容器里构建。
+          - os: ubuntu-22.04
+            label: linux-x86_64
+            suffix: '-linux-x86_64'
+            binary: MSTL
+            archive: tar.gz
+          # macos-13 已退役，Intel 机器的标准标签是 macos-15-intel。
+          - os: macos-latest
+            label: macos-arm64
+            suffix: '-macos-arm64'
+            binary: MSTL
+            archive: tar.gz
+          - os: macos-15-intel
+            label: macos-x86_64
+            suffix: '-macos-x86_64'
+            binary: MSTL
+            archive: tar.gz
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -24,70 +62,140 @@ jobs:
       - name: Cache pip packages
         uses: actions/cache@v4
         with:
-          path: ~\AppData\Local\pip\Cache
-          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+          # 不能再写 ~\AppData\Local\pip\Cache：Linux/macOS 上没有这个路径
+          path: ${{ github.workspace }}/.pip-cache
+          key: ${{ runner.os }}-${{ matrix.label }}-pip-${{ hashFiles('**/requirements.txt') }}
           restore-keys: |
-            ${{ runner.os }}-pip-
+            ${{ runner.os }}-${{ matrix.label }}-pip-
 
       - name: Install dependencies
+        shell: pwsh
+        env:
+          PIP_CACHE_DIR: ${{ github.workspace }}/.pip-cache
         run: |
           pip install nuitka imageio
+          if ($LASTEXITCODE -ne 0) { Write-Host "::error::pip install failed"; exit 1 }
+          # 把 Nuitka 版本打进日志：CI 装的是最新版，本地装的可能是旧的，
+          # 出问题时要能一眼看出两边差在哪。
+          python -m nuitka --version
+
+      # Nuitka 的 standalone 在 Linux 上靠 patchelf 改 RPATH，缺了它会在参数
+      # 校验阶段直接报错退出（nuitka/options/Options.py 里的
+      # checkPatchElfPresenceAndUsability）。macOS 不需要。
+      - name: Install Linux build prerequisites
+        if: runner.os == 'Linux'
+        shell: pwsh
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y patchelf
+          if ($LASTEXITCODE -ne 0) { Write-Host "::error::apt-get install patchelf failed"; exit 1 }
+          patchelf --version
 
       # 发版前先跑测试：测试只用标准库，不需要额外装东西。
       # 单独的 tests.yml 会在每次 push/PR 上跑，这里再拦一道，
-      # 免得带着失败的测试发出去。
+      # 免得带着失败的测试发出去。顺带让测试套件在 Linux/macOS 上也过一遍。
       - name: Run tests
-        run: python -m unittest discover -s tests -t .
+        shell: pwsh
+        run: |
+          python -m unittest discover -s tests -t .
+          if ($LASTEXITCODE -ne 0) { Write-Host "::error::tests failed on ${{ matrix.label }}"; exit 1 }
 
       - name: Build with Nuitka
+        shell: pwsh
         run: |
           $version = "${{ github.ref_name }}" -replace '^v', ''
-          Write-Host "Building MSTL v$version (standalone)"
+          Write-Host "Building MSTL v$version for ${{ matrix.label }} (standalone)"
 
+          # --product-version/--file-version 只写进 exe 的版本资源，但 Nuitka 会严格
+          # 校验它们：必须是 1~4 段数字，否则直接报 Invalid version number 退出。
+          # 正式 tag（v1.2.3）永远是数字；探测分支的名字不是，所以这里退到占位版本，
+          # 免得只因为一个元数据参数就让整条腿红掉。
+          $exeVersion = if ($version -match '^\d+(\.\d+){0,3}$') { $version } else { '0.0.0' }
+
+          # 这两个选项只对 Windows 有意义：--windows-console-mode 决定双击时
+          # 有没有控制台窗口，--windows-icon-from-ico 是 exe 的图标。其它平台
+          # 给了也只是被 Nuitka 忽略（它只发一条 warning），但显式分开更清楚，
+          # 也免得将来把「无效果」升级成报错。
+          $platformArgs = @()
+          if ("${{ runner.os }}" -eq 'Windows') {
+            $platformArgs += '--windows-console-mode=force'
+            $platformArgs += '--windows-icon-from-ico=icon.png'
+          }
+
+          # 路径一律用正斜杠：Windows 的 API 也认正斜杠，而反斜杠在 Linux 的
+          # PowerShell 里只是普通字符，这样一套参数才能三个平台共用。
+          # 二进制名按平台给：Windows 是 MSTL.exe，POSIX 上是 MSTL——Nuitka 在
+          # 给了 --output-filename 时就原样用它，不会再自己补 .bin 后缀。
           python -m nuitka `
             --standalone `
             --assume-yes-for-downloads `
             --enable-plugin=anti-bloat `
-            --windows-console-mode=force `
-            --windows-icon-from-ico=icon.png `
-            --output-dir=build\MSTL `
+            --output-dir=build/MSTL `
             --product-name=MSTL `
             --file-description="Minecraft Terminal Server Launcher" `
-            --product-version=$version `
-            --file-version=$version `
+            --product-version=$exeVersion `
+            --file-version=$exeVersion `
             --copyright="MSTL" `
             --include-data-dir=locales=locales `
             --include-data-dir=webui=webui `
-            --output-filename=MSTL.exe `
+            --output-filename=${{ matrix.binary }} `
+            @platformArgs `
             start.py
+          if ($LASTEXITCODE -ne 0) { Write-Host "::error::Nuitka build failed on ${{ matrix.label }} (exit code $LASTEXITCODE)"; exit 1 }
+
+      # 打包出来的二进制必须真能启动：缺 so/dylib、参数用错平台、打包版
+      # 读不到随包资源，都会在这一步暴露，而不是等用户下载之后。
+      # 只跑 --help：它在 load_config 之后、写盘之前就返回（退出码 0），
+      # 不联网、不建目录、不读 stdin，是最小的一次「真的跑起来了」。
+      - name: Smoke test the binary
+        shell: pwsh
+        run: |
+          $dist = (Get-ChildItem -Path build/MSTL -Recurse -Directory -Filter '*.dist' -ErrorAction SilentlyContinue |
+                   Sort-Object LastWriteTime -Descending | Select-Object -First 1).FullName
+          if (-not $dist) { Write-Host "::error::no *.dist directory under build/MSTL"; exit 1 }
+          $bin = Join-Path $dist '${{ matrix.binary }}'
+          if (-not (Test-Path -LiteralPath $bin)) {
+            Write-Host "::error::built binary not found: $bin"
+            exit 1
+          }
+          # POSIX 上必须带可执行位，否则用户解压出来就是 Permission denied。
+          # Nuitka 一般会设好，这里补一道，让后面的 tar 一定带上这个位。
+          if ("${{ runner.os }}" -ne 'Windows') { chmod +x $bin }
+          & $bin --help
+          $code = $LASTEXITCODE
+          Write-Host "smoke test exit code: $code"
+          if ($code -ne 0) { Write-Host "::error::the built binary failed to run on ${{ matrix.label }} (exit code $code)"; exit 1 }
 
       - name: Verify bundled assets
-        shell: powershell
+        shell: pwsh
         run: |
           # 运行时要读的资源必须真的在 dist 里：漏一个，打包版的对应功能就是坏的
           # （webui 曾经就漏过，结果面板一打开就是 index.html missing）
           #
-          # 不硬编码 start.dist：Nuitka 的输出目录名随版本会变，直接找 build 下最新的 *.dist。
-          # 注意：下面给 ::error::/::warning:: 的文案一律用纯 ASCII——这个步骤是
-          # shell: powershell（5.1），它会按 ANSI 码页读这个无 BOM 的 UTF-8 脚本，
-          # 中文会变成乱码，而 annotation 是我们唯一能匿名看到的 CI 诊断通道。
-          $distDirs = @(Get-ChildItem -Path build -Recurse -Directory -Filter '*.dist' -ErrorAction SilentlyContinue)
+          # 不硬编码 start.dist：Nuitka 的输出目录名随版本会变，直接找
+          # build/MSTL 下最新的 *.dist（不从 build 根找，那里可能留着
+          # build.bat 产生的陈旧 start.dist）。
+          # 给 ::error::/::warning:: 的文案一律用纯 ASCII：CI 日志要登录才能看，
+          # annotation 却是公开可读的，这是我们唯一匿名可见的诊断通道，
+          # 不值得冒编码的险。
+          $distDirs = @(Get-ChildItem -Path build/MSTL -Recurse -Directory -Filter '*.dist' -ErrorAction SilentlyContinue)
           $distDir = $distDirs | Sort-Object LastWriteTime -Descending | Select-Object -First 1
           if (-not $distDir) {
             $tree = Get-ChildItem -Path build -Recurse -ErrorAction SilentlyContinue |
                     Select-Object -First 40 | ForEach-Object { $_.FullName }
-            Write-Host ("::error::no *.dist directory under build; Nuitka output path changed? || build tree: " + ($tree -join ' | '))
+            Write-Host ("::error::no *.dist directory under build/MSTL; Nuitka output path changed? || build tree: " + ($tree -join ' | '))
             exit 1
           }
           $dist = $distDir.FullName
           Write-Host "dist = $dist"
 
+          # 相对路径一律用正斜杠：Linux/macOS 的 PowerShell 不把反斜杠当分隔符
           $required = @(
-            "webui\index.html",
-            "locales\zh.json",
-            "locales\en.json",
-            "locales\ru.json",
-            "locales\neko.json"
+            "webui/index.html",
+            "locales/zh.json",
+            "locales/en.json",
+            "locales/ru.json",
+            "locales/neko.json"
           )
 
           # --include-data-dir 正常会把这些拷好，但它漏过，所以缺什么就从源码目录补拷一次，
@@ -96,11 +204,11 @@ jobs:
           $repaired = @()
           foreach ($rel in $required) {
             if (Test-Path -LiteralPath (Join-Path $dist $rel)) { continue }
-            $top = $rel.Split('\')[0]
+            $top = $rel.Split('/')[0]
             $destDir = Join-Path $dist $top
             try {
               New-Item -ItemType Directory -Force -Path $destDir | Out-Null
-              Copy-Item -Path (Join-Path $env:GITHUB_WORKSPACE "$top\*") -Destination $destDir -Recurse -Force
+              Copy-Item -Path (Join-Path $env:GITHUB_WORKSPACE "$top/*") -Destination $destDir -Recurse -Force
               $repaired += $rel
             } catch {
               Write-Host ("::error::copy from source failed for " + $rel + ": " + $_.Exception.Message)
@@ -127,27 +235,29 @@ jobs:
           }
 
       - name: List build output
+        shell: pwsh
         run: |
-          $dist = (Get-ChildItem -Path build -Recurse -Directory -Filter '*.dist' -ErrorAction SilentlyContinue |
+          $dist = (Get-ChildItem -Path build/MSTL -Recurse -Directory -Filter '*.dist' -ErrorAction SilentlyContinue |
                    Sort-Object LastWriteTime -Descending | Select-Object -First 1).FullName
           if (-not $dist) {
-            Write-Host "::error::no *.dist directory under build"
+            Write-Host "::error::no *.dist directory under build/MSTL"
             exit 1
           }
           Get-ChildItem -Path $dist | Select-Object FullName, Length
 
       - name: Compress build output
-        shell: powershell
+        shell: pwsh
         run: |
-          # 别硬编码 start.dist：Nuitka 的输出目录名可能随版本变，直接找 build 下最新的 *.dist。
-          $source = (Get-ChildItem -Path build -Recurse -Directory -Filter '*.dist' -ErrorAction SilentlyContinue |
+          # 别硬编码 start.dist：Nuitka 的输出目录名可能随版本变，
+          # 直接找 build/MSTL 下最新的 *.dist。
+          $source = (Get-ChildItem -Path build/MSTL -Recurse -Directory -Filter '*.dist' -ErrorAction SilentlyContinue |
                      Sort-Object LastWriteTime -Descending | Select-Object -First 1).FullName
           if (-not $source) {
-            Write-Host "::error::no *.dist directory under build, nothing to compress"
+            Write-Host "::error::no *.dist directory under build/MSTL, nothing to compress"
             exit 1
           }
 
-          # 写入版本信息文件（standalone 模式下 version.json 直接放在 exe 旁）
+          # 写入版本信息文件（standalone 模式下 version.json 直接放在可执行文件旁）
           $versionFile = Join-Path $source "version.json"
           $json = @{
             version = "${{ github.ref_name }}" -replace '^v', ''
@@ -163,29 +273,57 @@ jobs:
           $bytes = [IO.File]::ReadAllBytes($versionFile)
           if ($bytes.Length -ge 3 -and $bytes[0] -eq 0xEF -and
               $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF) {
-            Write-Error "version.json 带了 UTF-8 BOM，Python 侧读不出来"
+            Write-Host "::error::version.json has a UTF-8 BOM, Python side cannot read it"
             exit 1
           }
           if (([Text.Encoding]::UTF8.GetString($bytes)) -notmatch '"version"') {
-            Write-Error "version.json 内容里没有 version 字段"
+            Write-Host "::error::version.json has no version field"
             exit 1
           }
-          Write-Host "version.json 无 BOM，内容已校验"
+          Write-Host "version.json has no BOM and its content is valid"
 
-          $zipFile = "MSTL-${{ github.ref_name }}.zip"
-          Compress-Archive -Path "$source\*" -DestinationPath $zipFile -Force
-          Write-Host "Created $zipFile"
+          $archive = "MSTL-${{ github.ref_name }}${{ matrix.suffix }}.${{ matrix.archive }}"
+          if ("${{ matrix.archive }}" -eq 'zip') {
+            Compress-Archive -Path "$source/*" -DestinationPath $archive -Force
+          } else {
+            # POSIX 上用 tar.gz 而不是 zip：zip 不保存 Unix 可执行位，用户解压
+            # 出来直接就是 Permission denied，而 tar 会原样保留权限。
+            # COPYFILE_DISABLE 是给 macOS 的 bsdtar 用的：别打 ._* 影子文件。
+            $env:COPYFILE_DISABLE = '1'
+            tar -czf $archive -C $source .
+            if ($LASTEXITCODE -ne 0) { Write-Host "::error::tar failed with exit code $LASTEXITCODE"; exit 1 }
+          }
+          Write-Host "Created $archive"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: MSTL-${{ github.ref_name }}
-          path: MSTL-${{ github.ref_name }}.zip
+          name: MSTL-${{ github.ref_name }}${{ matrix.suffix }}
+          path: MSTL-${{ github.ref_name }}${{ matrix.suffix }}.${{ matrix.archive }}
 
-      - name: Create Release and Upload Asset
+  # 发版单独一个 job：四条腿各自上传 artifact，这里一次性收齐再建 release。
+  # 原来是每条腿都去建 release，多平台并行时会互相抢（谁先谁创建，其余报
+  # already exists）；而且那样 workflow_dispatch 也会误发版。
+  release:
+    name: create release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Show files to publish
+        shell: pwsh
+        run: Get-ChildItem -Path dist | Select-Object Name, Length
+
+      - name: Create Release and Upload Assets
         uses: softprops/action-gh-release@v1
         with:
-          files: MSTL-${{ github.ref_name }}.zip
+          files: dist/*
           tag_name: ${{ github.ref_name }}
           generate_release_notes: true
         env:
