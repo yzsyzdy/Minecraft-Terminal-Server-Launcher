@@ -94,11 +94,33 @@ jobs:
       # 发版前先跑测试：测试只用标准库，不需要额外装东西。
       # 单独的 tests.yml 会在每次 push/PR 上跑，这里再拦一道，
       # 免得带着失败的测试发出去。顺带让测试套件在 Linux/macOS 上也过一遍。
+      #
+      # 失败时把关键输出塞进 ::error:: annotation：CI 日志要登录才能看，
+      # annotation 在公开仓库上是匿名可读的（check-runs API），不然跨平台
+      # 挂了只能盲猜。unittest 的详细输出走的是 stderr，所以必须 2>&1。
       - name: Run tests
         shell: pwsh
         run: |
-          python -m unittest discover -s tests -t .
-          if ($LASTEXITCODE -ne 0) { Write-Host "::error::tests failed on ${{ matrix.label }}"; exit 1 }
+          python -m unittest discover -s tests -t . 2>&1 | Tee-Object -FilePath tests-output.txt
+          $code = $LASTEXITCODE
+          if ($code -eq 0) {
+            Write-Host "tests passed on ${{ matrix.label }}"
+            exit 0
+          }
+
+          $all = @(Get-Content -LiteralPath tests-output.txt -ErrorAction SilentlyContinue)
+          $report = @("tests failed on ${{ matrix.label }} (exit code $code)")
+          $report += @($all | Where-Object { $_ -match '^(FAIL|ERROR): ' } | Select-Object -First 25)
+          $report += '--- output tail ---'
+          $report += @($all | Select-Object -Last 25)
+
+          $clean = foreach ($line in $report) {
+            $s = ($line -replace '%', '%25') -replace "`r", ''
+            if ($s.Length -gt 320) { $s = $s.Substring(0, 320) + '...' }
+            $s
+          }
+          Write-Host ("::error::" + ($clean -join '%0A'))
+          exit 1
 
       - name: Build with Nuitka
         shell: pwsh
