@@ -4,15 +4,19 @@
 方法：6 路并行通读（core / 网络下载 / 隧道 / CLI 启动 / 前端 / Web 后端）+ 对高危结论做实证复现（临时脚本，未改动仓库）。
 标记说明：**[实证]** = 已在本机复现并观察到现象；**[读码]** = 逐行追踪调用链确认，未构造运行时复现。
 
-> **修复状态**：下表 57 条**已全部修复**，代码改动落在 24 个文件（+1356 / −235 行），
+> **修复状态**：下表 57 条**已全部修复**，代码改动落在 23 个文件（+1269 / −235 行），
 > 逐条对应关系见本文末尾的「十四、修复落地清单」。
 > 验证：`python -m pytest tests -q` → 281 passed, 1 skipped, 37 subtests passed；
 > `python -m unittest discover -s tests -t .`（CI 用的那条）→ 282 tests OK；
 > 50 个 Python 文件全部 `py_compile` 通过；`webui/index.html` 内联 JS 语法检查通过；
 > `t()` / `CoreError()` 字面量 key 在 zh / en / ru 三份语言文件里零缺口。
+> **三个解释器上都跑过**：3.11（CI 打包用的那个）、3.12、3.13。最初有一处跨行
+> f-string 只在 3.13 上合法（3.12 的 PEP 701 才允许花括号里换行），是 3.11 那轮
+> CI 抓出来的——开发机是 3.13，本地怎么跑都是绿的。
 > 修复同时补上了 `tests/test_java_tools.py`、`tests/test_transfer.py`（共 408 行），
 > 并扩展 `tests/test_frp_toml.py`（+105 行），把 `_safe_extract_tar`、`_safe_extract`
 > 的两个闸门、`_toml_logical_lines`、`_java_major_version` 从「探针验证」搬进回归测试。
+> 连同测试与文档、版本号同步，本次合计改动 32 个文件（+2534 / −246 行）。
 > 下面各节保留的是**修复前**的原始记录，行号对应当时的版本。
 
 ---
