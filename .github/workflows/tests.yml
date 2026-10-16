@@ -10,12 +10,18 @@ permissions:
 
 jobs:
   test:
-    runs-on: windows-latest
+    name: test (${{ matrix.os }}, ${{ matrix.python-version }})
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         # 3.11 是发版打包用的解释器，3.13 是开发机上的；两个都跑一遍
         python-version: ['3.11', '3.13']
+        # 三个平台都要跑。只在 Windows 上跑过的用例会把平台假设藏起来——
+        # 隧道解压那两条用例拿 PE 的 MZ 当合法可执行文件，Windows 上永远绿，
+        # Linux/macOS 上会被判成「拿错平台的包」而失败；而打包工作流现在
+        # 三个平台都发产物，测试也得跟上。
+        os: [windows-latest, ubuntu-latest, macos-latest]
     steps:
       - name: Checkout code
         uses: actions/checkout@v4

@@ -25,6 +25,10 @@
   免得打出一个启动就崩的二进制还照发不误。
 - 发版拆成独立的 `release` job，收齐所有平台的 artifact 后一次性建 Release；
   手动触发（`workflow_dispatch`）只产出 artifact，不再误发版。
+- `Tests` 工作流改成 Windows / Linux / macOS 三平台矩阵（每个平台跑 3.11 与 3.13）。
+  只在 Windows 上跑过的用例会把平台假设藏起来：隧道解压的两条用例拿 PE 的 `MZ`
+  当合法可执行文件，Windows 上永远是绿的，Linux/macOS 上会被判成「拿错平台的包」
+  而失败——加平台矩阵就是为了让这类问题在 PR 阶段就暴露。
 
 ### 说明
 
