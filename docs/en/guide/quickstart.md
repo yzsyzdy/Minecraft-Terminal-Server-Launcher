@@ -8,7 +8,7 @@
 | Third-party packages | None. Everything uses the standard library |
 | Java | Optional. MSTL can download a JDK automatically when Java is missing or the version does not match |
 
-If you use the prebuilt `MSTL.exe` from a release, you do not even need Python installed.
+If you use a prebuilt archive from a release (the Windows `MSTL.exe`, or the Linux / macOS binary), you do not even need Python installed.
 
 ## Install
 
@@ -22,7 +22,32 @@ If you use the prebuilt `MSTL.exe` from a release, you do not even need Python i
 
 === "Use a packaged build"
 
-    Download `MSTL-v*.zip` from [Releases](https://github.com/yzsyzdy/Minecraft-Terminal-Server-Launcher/releases), unzip it, and double-click `MSTL.exe`.
+    Grab the archive for your platform from
+    [Releases](https://github.com/yzsyzdy/Minecraft-Terminal-Server-Launcher/releases) — no Python required.
+
+    **Windows**: `MSTL-v*.zip`, unzip it and double-click `MSTL.exe`.
+
+    **Linux (x86_64)**:
+
+    ```bash
+    mkdir mstl && tar xzf MSTL-v*-linux-x86_64.tar.gz -C mstl
+    cd mstl && ./MSTL
+    ```
+
+    **macOS**: use `-macos-arm64` on Apple silicon, `-macos-x86_64` on Intel.
+
+    ```bash
+    mkdir mstl && tar xzf MSTL-v*-macos-arm64.tar.gz -C mstl
+    cd mstl && ./MSTL
+    ```
+
+    !!! warning "Two limits on the non-Windows builds"
+
+        - **The macOS build is not code-signed** (that needs an Apple developer certificate).
+          If Gatekeeper blocks the first launch, right-click → *Open*, or run
+          `xattr -d com.apple.quarantine ./MSTL`.
+        - **The Linux build needs glibc 2.35 or newer** (it is built on Ubuntu 22.04).
+          On older distributions, use the *Run from source* tab above.
 
 ## First run
 

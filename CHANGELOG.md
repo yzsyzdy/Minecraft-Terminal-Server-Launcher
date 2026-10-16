@@ -5,6 +5,36 @@
 
 `v1.1.35` 及更早版本的说明见 [GitHub Releases](https://github.com/yzsyzdy/Minecraft-Terminal-Server-Launcher/releases)。
 
+## [未发布]
+
+### 新增
+
+- **多平台打包**：CI 不再只出 Windows 产物，现在一次打出四个：
+
+  | 平台 | 产物 |
+  |---|---|
+  | Windows (x86_64) | `MSTL-v<版本>.zip`（与旧版同名） |
+  | Linux (x86_64) | `MSTL-v<版本>-linux-x86_64.tar.gz` |
+  | macOS (Apple 芯片) | `MSTL-v<版本>-macos-arm64.tar.gz` |
+  | macOS (Intel) | `MSTL-v<版本>-macos-x86_64.tar.gz` |
+
+  非 Windows 平台用 **tar.gz** 而不是 zip：zip 不保存 Unix 可执行位，解压出来直接是
+  `Permission denied`。
+
+- 每条腿构建完会**冒烟测试**一次产物（跑 `./MSTL --help`，退出码非 0 即失败），
+  免得打出一个启动就崩的二进制还照发不误。
+- 发版拆成独立的 `release` job，收齐所有平台的 artifact 后一次性建 Release；
+  手动触发（`workflow_dispatch`）只产出 artifact，不再误发版。
+
+### 说明
+
+- **macOS 产物没有签名**（签名需要 Apple 开发者证书）。首次运行若被 Gatekeeper 拦下，
+  右键 →「打开」，或 `xattr -d com.apple.quarantine ./MSTL`。
+- **Linux 产物要求 glibc ≥ 2.35**（构建机是 Ubuntu 22.04）。Nuitka 的 standalone 产物
+  不打包 glibc，更老的发行版请从源码运行。
+- macOS 上暂时**不会自动扫描系统 JDK，也没有 JDK 自动下载**：请设置 `JAVA_HOME`，
+  或在实例设置里直接填 `java_path`。
+
 ## [1.1.37] - 2026-10-16
 
 本次跨度较大：新增**网页面板**（含文件管理器与新建实例）与**业务核心层**两块新东西，

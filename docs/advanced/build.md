@@ -71,6 +71,10 @@ python -m nuitka --standalone ^
 
 产物在 `build/start.dist/MSTL.exe`。整个 `start.dist/` 目录需要一起分发，不能只给 exe。
 
+> `build.bat` 是 Windows 专用的。在 Linux / macOS 上从源码打包时，把
+> `--windows-console-mode`、`--windows-icon-from-ico` 两项去掉，`--output-filename` 写成
+> `MSTL`（不带 `.exe`），Linux 上还要先 `sudo apt install patchelf`。其余参数一样。
+
 ### 运行时资源清单
 
 exe 里硬编码要读这些随包资源，**打包时缺一个，对应功能就是坏的**：
@@ -109,15 +113,40 @@ CI 的 `build.yml` 里有一道 `Verify bundled assets` 步骤专门检查前两
 
 ## CI 发布
 
-`.github/workflows/build.yml` 在推送 `v*` 标签时触发，也可以在 Actions 页面手动跑：
+`.github/workflows/build.yml` 在推送 `v*` 标签时触发，也可以在 Actions 页面手动跑。
+它用一个四腿矩阵同时打出四个平台 / 架构的产物：
 
-1. checkout 代码，装 Python 3.11 与 nuitka、imageio
-2. 用 tag 推导版本号（去掉开头的 `v`）执行上面的 Nuitka 命令
+| 运行器 | 产物 |
+|---|---|
+| `windows-latest` | `MSTL-v<版本>.zip`（与旧版同名，老链接不会失效） |
+| `ubuntu-22.04` | `MSTL-v<版本>-linux-x86_64.tar.gz` |
+| `macos-latest`（arm64） | `MSTL-v<版本>-macos-arm64.tar.gz` |
+| `macos-15-intel` | `MSTL-v<版本>-macos-x86_64.tar.gz` |
+
+每条腿做的事：
+
+1. checkout 代码，装 Python 3.11 与 nuitka、imageio。Linux 那条腿还要
+   `apt-get install patchelf`——**Nuitka 在 Linux 上做 standalone 打包必须有它**，缺了直接报错退出
+2. 用 tag 推导版本号，执行上面的 Nuitka 命令。Windows 额外带
+   `--windows-console-mode` 与图标参数，其余平台不带；产物名也按平台给，
+   Windows 是 `MSTL.exe`，Linux / macOS 是 `MSTL`
 3. 在产物目录写入 `version.json`
-4. 打包成 `MSTL-<tag>.zip`
-5. 上传 artifact，并创建 / 更新对应的 GitHub Release 附上 zip
+4. **冒烟测试**：直接跑一次 `./MSTL --help`，退出码非 0 就让这条腿失败——证明打出来的二进制真能启动
+5. 校验随包资源（`webui/index.html`、`locales/*.json`），缺了就从源码补拷并给出 `::warning::`
+6. 打包：Windows 用 zip，其余平台用 **tar.gz**（zip 不保存可执行位，解压出来跑不了）
+7. 上传 artifact
 
-所以发版的完整动作就是：改好版本、提交，然后
+全部腿跑完后，单独的 `release` job 收齐所有 artifact，一次性创建 / 更新 GitHub Release。
+它只在 tag 上跑，所以手动触发（`workflow_dispatch`）只产出 artifact、不会发版。
+
+### 两个平台限制
+
+- **macOS 产物没有签名**：签名需要 Apple 开发者证书，CI 里没有。用户首次运行需要
+  右键 →「打开」，或 `xattr -d com.apple.quarantine ./MSTL`。
+- **Linux 产物的 glibc 下限就是构建机的版本**（Ubuntu 22.04 → glibc 2.35）。Nuitka 的
+  standalone 产物**不会**把 glibc 一起打包，想要更宽的兼容面就得用更老的构建机。
+
+所以发版的完整动作还是：改好版本、提交，然后
 
 ```bash
 git tag v1.1.0

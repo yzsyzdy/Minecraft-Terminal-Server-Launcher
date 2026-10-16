@@ -8,7 +8,7 @@
 | 第三方依赖 | 无，全部使用标准库 |
 | Java | 可选。缺 Java 或版本不匹配时，MSTL 可以自动下载 JDK |
 
-如果使用 release 里打包好的 `MSTL.exe`，机器上连 Python 都不用装。
+如果使用 release 里打包好的产物（Windows 的 `MSTL.exe`，或 Linux / macOS 的可执行文件），机器上连 Python 都不用装。
 
 ## 安装
 
@@ -22,7 +22,30 @@
 
 === "使用打包版本"
 
-    从 [Releases](https://github.com/yzsyzdy/Minecraft-Terminal-Server-Launcher/releases) 下载 `MSTL-v*.zip`，解压后双击 `MSTL.exe`。
+    从 [Releases](https://github.com/yzsyzdy/Minecraft-Terminal-Server-Launcher/releases) 下载对应平台的包。
+
+    **Windows**：`MSTL-v*.zip`，解压后双击 `MSTL.exe`。
+
+    **Linux（x86_64）**：
+
+    ```bash
+    mkdir mstl && tar xzf MSTL-v*-linux-x86_64.tar.gz -C mstl
+    cd mstl && ./MSTL
+    ```
+
+    **macOS**：Apple 芯片用 `-macos-arm64`，Intel 机器用 `-macos-x86_64`。
+
+    ```bash
+    mkdir mstl && tar xzf MSTL-v*-macos-arm64.tar.gz -C mstl
+    cd mstl && ./MSTL
+    ```
+
+    !!! warning "非 Windows 平台的两点限制"
+
+        - **macOS 产物没有签名**（签名需要 Apple 开发者证书）。首次运行如果被 Gatekeeper
+          拦下，右键 →「打开」，或者执行 `xattr -d com.apple.quarantine ./MSTL`。
+        - **Linux 产物要求 glibc 不低于 2.35**（构建机是 Ubuntu 22.04）。更老的发行版请
+          按上面的「从源码运行」跑。
 
 ## 首次运行
 

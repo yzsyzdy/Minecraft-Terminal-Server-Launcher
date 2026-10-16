@@ -1,6 +1,6 @@
 # Minecraft Server Launcher
 
-A lightweight, zero-dependency Minecraft server manager. Manage multiple server instances with version isolation, automatic Java detection and download, plugin and mod management. Supports Windows and Linux.
+A lightweight, zero-dependency Minecraft server manager. Manage multiple server instances with version isolation, automatic Java detection and download, plugin and mod management. Supports Windows, Linux and macOS.
 
 ## Features
 
@@ -18,7 +18,7 @@ A lightweight, zero-dependency Minecraft server manager. Manage multiple server 
 - **Run on startup** — Registers a `Run` key so the launcher starts on Windows logon
 - **Update check** — Reads the bundled version file and compares against the latest GitHub Release
 - **Localized UI** — Built-in 中文 / English / Русский translations, can follow the OS language
-- **Cross-platform** — Runs on both Windows and Linux
+- **Cross-platform** — Runs on Windows, Linux and macOS (prebuilt binaries for all three)
 
 ### Plugin Management
 
