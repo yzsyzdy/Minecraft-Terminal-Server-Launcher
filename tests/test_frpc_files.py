@@ -193,7 +193,12 @@ class ExtractTest(unittest.TestCase):
     def test_zip_with_nested_binary(self):
         p = self._src("a.zip")
         make_zip(p, [("frp_0.61.0/frpc.exe", MZ), ("frp_0.61.0/frps.exe", MZ)])
-        out = ff.extract_binary(p, self.dest, base_name="frpc.exe")
+        # MZ 是 PE 头，只有在「Windows」这个前提下才是合法可执行文件：
+        # looks_like_executable 按 platform.system() 判魔数，Linux/macOS 上
+        # 会认成拿错平台的包而拒收。这里断言的就是 Windows 包的解压路径，
+        # 所以必须把平台钉住，否则用例只在 Windows 上绿。
+        with mock.patch.object(ff.platform, "system", lambda: "Windows"):
+            out = ff.extract_binary(p, self.dest, base_name="frpc.exe")
         self.assertTrue(out)
         self.assertEqual(os.path.basename(out), "frpc.exe")
         self.assertTrue(os.path.isfile(out))
@@ -227,7 +232,9 @@ class ExtractTest(unittest.TestCase):
         p = self._src("a.zip")
         make_zip(p, [("frpc.exe", MZ)])
         deeper = os.path.join(self.root, "x", "y")
-        out = ff.extract_binary(p, deeper, base_name="frpc.exe")
+        # 同上：MZ 只有按 Windows 判才算可执行文件
+        with mock.patch.object(ff.platform, "system", lambda: "Windows"):
+            out = ff.extract_binary(p, deeper, base_name="frpc.exe")
         self.assertTrue(out)
         self.assertTrue(os.path.isdir(deeper))
 
