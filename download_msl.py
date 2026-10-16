@@ -9,6 +9,7 @@ import os
 import json
 import re
 import shutil
+import hashlib
 import threading
 import concurrent.futures
 import urllib.request
@@ -17,6 +18,7 @@ from datetime import datetime, timezone
 from typing import Any, Optional
 
 from server_manager import save_server_config
+from http_utils import open_url
 from i18n import t
 from constants import MSL_API_BASE, USER_AGENT
 
@@ -107,8 +109,19 @@ def _msl_load_cache(project_dir: str) -> dict:
 def _msl_save_cache(cache: dict, project_dir: str) -> None:
     p = _msl_cache_path(project_dir)
     os.makedirs(os.path.dirname(p) or ".", exist_ok=True)
-    with open(p, "w", encoding="utf-8") as f:
-        json.dump(cache, f, ensure_ascii=False, indent=2)
+    # 先写临时文件再 os.replace：open(p, "w") 是就地截断，写到一半崩掉会留下
+    # 半截 JSON，下次读缓存时 json.JSONDecodeError 直接让当天所有接口回退成
+    # 「没有数据」。
+    tmp = p + ".tmp"
+    try:
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(cache, f, ensure_ascii=False, indent=2)
+        os.replace(tmp, p)
+    except OSError:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
 
 
 def _msl_cache_prune(cache: dict) -> dict:
@@ -136,13 +149,19 @@ def _msl_cache_fetch(cache_key: str, path: str, project_dir: str) -> Any:
     entry = cache.get(cache_key)
     today = _today_str()
     if entry and isinstance(entry, dict) and entry.get("cached_at") == today:
-        print(t("cache.hit", date=today))
-        return entry.get("data")
+        cached = entry.get("data")
+        # 只有真正拿到数据才认命中。MSL 偶尔会回 200 + {"code":200,"data":null}，
+        # 旧版本会把这个 null 连当天日期一起写进缓存，于是接下来一整天每次调用
+        # 都命中这条空缓存、连网络请求都不发，服务端类型/版本列表全空——而且
+        # 落盘了，重启进程也救不回来，只能等 UTC 午夜。空条目当未命中重取。
+        if cached is not None:
+            print(t("cache.hit", date=today))
+            return cached
 
     url = f"{MSL_API_BASE}{path}"
     try:
         req = urllib.request.Request(url, headers={"User-Agent": MSL_USER_AGENT})
-        with urllib.request.urlopen(req, timeout=30) as resp:
+        with open_url(req, timeout=30) as resp:
             data = json.loads(resp.read().decode("utf-8"))
     except urllib.error.HTTPError as e:
         print(t("app.error", msg=f"MSL API HTTP {e.code}: {e.reason}")); return None
@@ -157,9 +176,10 @@ def _msl_cache_fetch(cache_key: str, path: str, project_dir: str) -> Any:
         message = data.get("message", "Abnormal") if isinstance(data, dict) else "Unexpected API response"
         print(t("app.error", msg=message)); return None
     result = data.get("data")
-    cache[cache_key] = {"cached_at": today, "data": result}
-    cache = _msl_cache_prune(cache)
-    _msl_save_cache(cache, project_dir)
+    if result is not None:
+        cache[cache_key] = {"cached_at": today, "data": result}
+        cache = _msl_cache_prune(cache)
+        _msl_save_cache(cache, project_dir)
     return result
 
 
@@ -210,7 +230,9 @@ def msl_get_download_url(server_type: str, version: str) -> Optional[dict]:
     """获取指定服务端和版本的下载地址。
 
     注意: 下载 URL 不缓存，因为 MSL API 的限速按请求计（非按响应缓存）。
-    返回的 dict 包含 url、sha256、size 等字段。
+    返回的 dict 里目前稳定提供 url 与 sha256；size 字段在实测响应中并不存在
+    （v4 /download/server/paper/1.21.8 只回了这两个键），所以不要依赖它，
+    需要文件大小时用 HEAD 探测。
     """
     return _msl_request(f"/download/server/{server_type}/{version}")
 
@@ -221,6 +243,48 @@ def msl_get_download_url(server_type: str, version: str) -> Optional[dict]:
 
 _DEFAULT_DOWNLOAD_THREADS = 16
 _MIN_CHUNK_SIZE = 1 * 1024 * 1024
+# 线程数上限。分片大小固定 1MiB，4GiB 的文件能算出 4096 个分片，若照单全收
+# 就是 4096 个线程 —— ThreadPoolExecutor 会直接 "can't start new thread"。
+# 64 对家用带宽已经远超收益，再往上只是让服务器和本机都更难受。
+MAX_DOWNLOAD_THREADS = 64
+# 单个分片失败后单独重试的次数，用完才退回单线程整文件重下
+_CHUNK_RETRIES = 3
+
+
+def file_sha256(path: str) -> str:
+    """流式算文件的 sha256，不把整个文件读进内存。"""
+    digest = hashlib.sha256()
+    with open(path, "rb") as f:
+        for block in iter(lambda: f.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def _verify_sha256(path: str, expected: str, quiet: bool = False) -> bool:
+    """校验下载结果的 sha256，不匹配就删掉文件并返回 False。
+
+    MSL 的 /download/server/{type}/{version} 响应里带着 sha256，而这是它唯一
+    提供的完整性信息（没有 size 字段）。以前这个值只被打印出来给用户看，从不
+    参与判断，于是截断、CDN 损坏、在途篡改都要等服务器启动失败才暴露。
+    """
+    expected = str(expected or "").strip().lower()
+    if not expected:
+        return True
+    try:
+        actual = file_sha256(path)
+    except OSError as e:
+        if not quiet:
+            print(f"\n  {t('app.error', msg=f'Cannot hash downloaded file: {e}')}")
+        return False
+    if actual == expected:
+        return True
+    try:
+        os.remove(path)
+    except OSError:
+        pass
+    if not quiet:
+        print(f"\n  {t('download.sha256_mismatch', expected=expected, actual=actual)}")
+    return False
 
 
 def _check_range_support(url: str, headers: Optional[dict] = None) -> tuple[bool, int]:
@@ -230,7 +294,7 @@ def _check_range_support(url: str, headers: Optional[dict] = None) -> tuple[bool
         req_headers.update(headers)
     try:
         req = urllib.request.Request(url, method="HEAD", headers=req_headers)
-        with urllib.request.urlopen(req, timeout=30) as resp:
+        with open_url(req, timeout=30) as resp:
             accept_ranges = resp.headers.get("Accept-Ranges", "")
             content_length = resp.headers.get("Content-Length")
             size = int(content_length) if content_length else 0
@@ -250,7 +314,7 @@ def _download_chunk(url: str, start: int, end: int, target_path: str,
         req_headers.update(headers)
     req = urllib.request.Request(url, headers=req_headers)
     try:
-        with urllib.request.urlopen(req, timeout=300) as resp:
+        with open_url(req, timeout=300) as resp:
             # 必须确认服务器真的按 Range 回了 206。某些 CDN 会照样回 200 +
             # 整个文件，那时每个线程都会把自己的 offset 当成文件开头，最终
             # 拼出一个长度对得上、内容全错的文件，而且不会报任何错。
@@ -265,17 +329,30 @@ def _download_chunk(url: str, start: int, end: int, target_path: str,
                         break
                     f.write(chunk)
                     written += len(chunk)
+                    # 按分片分别记账：重试某个分片时要能把它上一次已经写进去
+                    # 的字节数扣掉，否则进度会重复累加、冲到 100% 以上。
                     with lock:
                         shared["downloaded"] += len(chunk)
+                        shared["chunks"][start] = \
+                            shared["chunks"].get(start, 0) + len(chunk)
         return written == expected
     except Exception:
         return False
 
 
+def _forget_chunk_progress(shared: dict, lock: threading.Lock, start: int) -> None:
+    """把某个分片之前记进进度里的字节数扣掉（重试前调用）。"""
+    with lock:
+        previous = shared["chunks"].pop(start, 0)
+        if previous:
+            shared["downloaded"] = max(0, shared["downloaded"] - previous)
+
+
 def download_file_with_progress(url: str, target_path: str, desc: str = "",
                                 headers: Optional[dict] = None,
                                 quiet: bool = False,
-                                on_progress=None) -> bool:
+                                on_progress=None,
+                                expected_sha256: Optional[str] = None) -> bool:
     """单线程文件下载（带进度条）。
 
     Args:
@@ -286,6 +363,7 @@ def download_file_with_progress(url: str, target_path: str, desc: str = "",
         quiet: 不往 stdout 画进度，供不需要终端的调用方使用
         on_progress: 进度回调 on_progress(ratio, downloaded, total)，
                      供网页面板把进度推给浏览器
+        expected_sha256: 期望的 sha256，给了就校验，不匹配则删除文件并失败
 
     Returns:
         成功返回 True，失败返回 False
@@ -295,7 +373,7 @@ def download_file_with_progress(url: str, target_path: str, desc: str = "",
         req_headers.update(headers)
     try:
         req = urllib.request.Request(url, headers=req_headers)
-        with urllib.request.urlopen(req, timeout=300) as resp:
+        with open_url(req, timeout=300) as resp:
             total = resp.length
             downloaded = 0
             bar_width = 30
@@ -310,18 +388,32 @@ def download_file_with_progress(url: str, target_path: str, desc: str = "",
                     downloaded += len(chunk)
                     if on_progress is not None and total:
                         try:
-                            on_progress(downloaded / total, downloaded, total)
+                            on_progress(min(1.0, downloaded / total),
+                                        downloaded, total)
                         except Exception:  # noqa: BLE001
                             pass
                     if quiet:
                         continue
                     if total and total > 0:
-                        pct = downloaded / total
+                        pct = min(1.0, downloaded / total)
                         filled = int(bar_width * pct)
                         bar = "\u2588" * filled + "\u2591" * (bar_width - filled)
                         print(f"    {desc} [{bar}] {pct * 100:5.1f}%", end="\r", flush=True)
                     else:
                         print(f"    {desc} {downloaded/1024/1024:.1f} MB...", end="\r", flush=True)
+        # 服务器声明了 Content-Length 却提前收尾时，http.client 把短 body 当成
+        # 正常 EOF，不抛任何异常——于是这里会安静地留下一个截断的文件，上层看到
+        # True 就当安装成功。必须自己比对字节数。
+        if total is not None and downloaded != total:
+            try:
+                os.remove(target_path)
+            except OSError:
+                pass
+            if not quiet:
+                print(f"\n  {t('download.truncated', got=downloaded, want=total)}")
+            return False
+        if expected_sha256 and not _verify_sha256(target_path, expected_sha256, quiet):
+            return False
         if not quiet:
             print()
         return True
@@ -339,18 +431,21 @@ def multithreaded_download(url: str, target_path: str, desc: str = "",
                            num_threads: Optional[int] = None,
                            headers: Optional[dict] = None,
                            quiet: bool = False,
-                           on_progress=None) -> bool:
+                           on_progress=None,
+                           expected_sha256: Optional[str] = None) -> bool:
     """
     Multi-threaded file download.
 
     Automatically detects if the server supports Range requests.
     Falls back to single-thread if not supported or file is too small.
-    On chunk failure, retries with single-thread download.
+    On chunk failure, retries the failed chunks alone before falling back.
 
     headers 会带给探测、分片和单线程回退三条路径。CurseForge 从 2026-07-16
     起要求下载也带 x-api-key，缺了它整个下载路径都只会拿到 401。
     quiet 供网页面板这类没有终端的调用方使用；on_progress 同理，用来把
     进度推给浏览器。
+    expected_sha256 是完整性校验值，会一路传到单线程回退路径，保证任何一条
+    分支下载完都会验一次。
 
     num_threads 默认 None = 「用当前设置」。以前这里写的是
     `num_threads: int = _DEFAULT_DOWNLOAD_THREADS`，默认值在函数定义时就被
@@ -377,17 +472,20 @@ def multithreaded_download(url: str, target_path: str, desc: str = "",
 
     if file_size < _MIN_CHUNK_SIZE or file_size <= 0:
         return download_file_with_progress(url, target_path, desc, headers,
-                                           quiet, on_progress)
+                                           quiet, on_progress, expected_sha256)
 
     # 如果服务器明确不支持 Range 请求，直接使用单线程下载
     if not range_supported:
         return download_file_with_progress(url, target_path, desc, headers,
-                                           quiet, on_progress)
+                                           quiet, on_progress, expected_sha256)
 
-    actual_threads = min(num_threads, max(1, file_size // _MIN_CHUNK_SIZE))
+    # 这里再夹一次上限：set_download_threads 会挡，但 num_threads 是显式传进来的
+    # 参数，调用方可以绕过设置直接给个大数。
+    actual_threads = min(num_threads, MAX_DOWNLOAD_THREADS,
+                         max(1, file_size // _MIN_CHUNK_SIZE))
     if actual_threads <= 1:
         return download_file_with_progress(url, target_path, desc, headers,
-                                           quiet, on_progress)
+                                           quiet, on_progress, expected_sha256)
 
     chunk_size = file_size // actual_threads
 
@@ -401,7 +499,9 @@ def multithreaded_download(url: str, target_path: str, desc: str = "",
         end = start + chunk_size - 1 if i < actual_threads - 1 else file_size - 1
         chunks.append((start, end))
 
-    shared: dict[str, Any] = {"downloaded": 0}
+    # chunks 记录每个分片已写入的字节数，重试某个分片时才能把它上一次的
+    # 残留计入量扣掉（分片是先写文件、再校验长度，失败的写入也占了计数）。
+    shared: dict[str, Any] = {"downloaded": 0, "chunks": {}}
     lock = threading.Lock()
     bar_width = 30
 
@@ -421,11 +521,11 @@ def multithreaded_download(url: str, target_path: str, desc: str = "",
             with lock:
                 downloaded = shared["downloaded"]
             if file_size > 0:
-                report(downloaded / file_size, downloaded, file_size)
+                report(min(1.0, downloaded / file_size), downloaded, file_size)
             if quiet:
                 continue
             if file_size > 0:
-                pct = downloaded / file_size
+                pct = min(1.0, downloaded / file_size)
                 filled = int(bar_width * pct)
                 bar = "\u2588" * filled + "\u2591" * (bar_width - filled)
                 print(f"    {desc} [{bar}] {pct * 100:5.1f}%  "
@@ -439,15 +539,41 @@ def multithreaded_download(url: str, target_path: str, desc: str = "",
             i for i, f in enumerate(futures)
             if f.exception() or f.result() is False
         ]
+
+        # 只重试失败的那几个分片。以前一有分片失败就删掉整个文件、串行重下，
+        # 一个分片抖动就扔掉已经下好的几十上百 MB，用户只看到一句
+        # 「回退到单线程下载」。
+        for i in list(failed_indices):
+            start, end = chunks[i]
+            for attempt in range(1, _CHUNK_RETRIES + 1):
+                _forget_chunk_progress(shared, lock, start)
+                say(f"  {t('download.chunk_retry', index=i + 1,
+                            attempt=attempt, total=_CHUNK_RETRIES)}")
+                if _download_chunk(url, start, end, target_path,
+                                   shared, lock, headers):
+                    failed_indices.remove(i)
+                    with lock:
+                        downloaded = shared["downloaded"]
+                    report(min(1.0, downloaded / file_size), downloaded, file_size)
+                    break
+
         if failed_indices:
             try:
                 os.remove(target_path)
             except OSError:
                 pass
+            # 整文件重下，进度必须从 0 重新算；否则回调会把上一次的字节数
+            # 继续加上去，进度条直接冲到 100% 以上再跳回 0。
+            with lock:
+                shared["downloaded"] = 0
+            report(0.0, 0, file_size)
             say(f"\n  {t('download.retry_fallback')}")
             return download_file_with_progress(url, target_path, desc, headers,
-                                               quiet, on_progress)
+                                               quiet, on_progress,
+                                               expected_sha256)
 
+    if expected_sha256 and not _verify_sha256(target_path, expected_sha256, quiet):
+        return False
     final_bar = "\u2588" * bar_width
     say(f"    {desc} [{final_bar}] 100.0%  "
         f"({file_size/1024/1024:.1f}/{file_size/1024/1024:.1f} MB)")
@@ -459,6 +585,8 @@ def set_download_threads(count: int) -> None:
     global _DEFAULT_DOWNLOAD_THREADS
     if count < 1:
         count = 1
+    elif count > MAX_DOWNLOAD_THREADS:
+        count = MAX_DOWNLOAD_THREADS
     _DEFAULT_DOWNLOAD_THREADS = count
 
 
@@ -597,7 +725,8 @@ def show_download_server_menu(servers_dir: str, project_dir: str) -> Optional[st
 
     print(t("download.downloading", name=_server_display_name(server_id), ver=selected_version))
     print(t("download.saving_to", path=jar_path))
-    if not multithreaded_download(url, jar_path, desc=_server_display_name(server_id)):
+    if not multithreaded_download(url, jar_path, desc=_server_display_name(server_id),
+                                  expected_sha256=download_info.get("sha256")):
         shutil.rmtree(server_dir, ignore_errors=True); return None
     if not os.path.isfile(jar_path) or os.path.getsize(jar_path) == 0:
         print(t("download.invalid_file"))
