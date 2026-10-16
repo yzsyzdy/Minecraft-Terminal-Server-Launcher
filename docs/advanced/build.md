@@ -9,8 +9,16 @@
 python -m unittest discover -s tests -t . -v
 ```
 
-CI（`.github/workflows/tests.yml`）在每次 push / PR 上会用 Python 3.11 与 3.13
-各跑一遍；`build.yml` 在打包前也会跑一次，免得带着失败的测试发版。
+CI（`.github/workflows/tests.yml`）在每次 push / PR 上会在 Windows / Linux / macOS
+三个平台上各用 Python 3.11 与 3.13 跑一遍；`build.yml` 在打包前也会在每个平台各跑一次，
+免得带着失败的测试发版。
+
+平台矩阵不是铺张，是必需：只在 Windows 上跑过的用例会把平台假设藏起来。
+`test_frpc_files.py` 里就有两条用例拿 PE 的 `MZ` 当「合法可执行文件」，而
+`frp/frpc_files.py` 的 `looks_like_executable()` 是按平台判魔数的（Windows 认 PE、
+Linux 认 ELF、macOS 认 Mach-O）——它们在 Windows 上永远绿，一到 Linux/macOS
+就会被判成「拿错平台的包」。写这类用例时要像同文件的其他用例那样把平台钉住
+（`mock.patch.object(frpc_files.platform, "system", ...)`）。
 
 测试盯的是「契约」而不是实现细节，重点在这些容易悄悄坏掉的地方：
 
