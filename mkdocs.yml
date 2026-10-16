@@ -104,6 +104,7 @@ plugins:
             进阶: Advanced
             项目架构: Architecture
             从源码构建: Building from source
+            代码审计报告: Code review
             常见问题: FAQ
   - tags
   - git-revision-date-localized:
@@ -156,4 +157,5 @@ nav:
     - advanced/index.md
     - 项目架构: advanced/architecture.md
     - 从源码构建: advanced/build.md
+    - 代码审计报告: advanced/code-review.md
   - 常见问题: faq.md

@@ -5,17 +5,18 @@
 
 `v1.1.35` 及更早版本的说明见 [GitHub Releases](https://github.com/yzsyzdy/Minecraft-Terminal-Server-Launcher/releases)。
 
-## [未发布]
+## [1.1.37] - 2026-10-16
 
-下一个版本号计划为 `v1.1.36`。本次跨度较大：新增**网页面板**（含文件管理器与新建实例）
-与**业务核心层**两块新东西，另有一批会直接影响正常使用的修复。配置文件向后兼容，覆盖安装即可。
+本次跨度较大：新增**网页面板**（含文件管理器与新建实例）与**业务核心层**两块新东西，
+另有一批会直接影响正常使用的修复，以及一次覆盖全部 57 条的代码审计。
+配置文件向后兼容，覆盖安装即可。
 
 ### 新增
 
 #### 测试与 CI
 
 项目此前**一个测试都没有**，CI 只负责打包——上面那一堆「存得下、看得见、却没生效」
-的问题全靠手工复现才发现。现在有了 `tests/`（231 个用例，只用标准库 `unittest`，
+的问题全靠手工复现才发现。现在有了 `tests/`（282 个用例，只用标准库 `unittest`，
 不需要装任何依赖）：
 
 ```bash
@@ -31,8 +32,16 @@ python -m unittest discover -s tests -t . -v
 面板元素 id 与文案 key 的前后端一致性、JS 语法、语言文件覆盖。这几项各自都
 在这次审计里抓到过真问题。
 
+代码审计补上的几处防御原本只有临时探针验证过，现在都进了回归测试：
+`tests/test_java_tools.py`（JDK 版本号解析与排序、tar 解压的路径穿越与
+「先校验完再落地」）、`tests/test_transfer.py`（zip 越界与软链、成员数/总大小
+两个压缩炸弹闸门、Windows 风格目录项）、`tests/test_frp_toml.py` 新增的
+逻辑行合并用例（行尾注释、多行数组、转义引号）。
+
 - 新增 `.github/workflows/tests.yml`：每次 push / PR 在 Python 3.11 与 3.13 上跑测试
 - `build.yml` 里加了一道测试，发版前先跑，免得带着失败的测试发出去
+- 代码审计报告落在 [`docs/advanced/code-review.md`](docs/advanced/code-review.md)，
+  并接进文档站的「进阶」目录
 
 #### 网页面板
 
@@ -338,6 +347,148 @@ Nuitka 的 `--standalone` **不设置 `sys.frozen`**（实测），而项目里�
 - CI 的「校验打包资源」补上 `locales\ru.json` 与 `locales\neko.json`：运行时真的会读
   它们，缺了就是俄语/猫语用户看到一串 i18n key（原来只查 zh 与 en）
 
+#### 代码审计：静默失败、并发与安全边界
+
+对全部 48 个 Python 文件（11249 行）与网页面板做了一次逐行审计，结果与逐条证据见
+[`docs/advanced/code-review.md`](docs/advanced/code-review.md)（57 条）。这一批修完了全部 57 条，
+下面按「用户实际会撞上什么」归类。
+
+**下载与安装（以前会安静地给你一个坏文件）**
+
+- 修复**截断的下载被当成成功**：`download_file_with_progress` 读了 `Content-Length`
+  却从不比对实际字节数，服务器声明长度后干净地提前收尾时 `http.client` 把短 body
+  当成正常 EOF、不抛任何异常，于是残缺的 jar 一路装到位，直到服务端起不来才暴露。
+  现在读完先比字节数，不匹配就删文件并报 `download.truncated`
+- 修复**sha256 只打印不校验**：MSL 的下载接口是唯一提供完整性信息的地方，这个值
+  以前只拿来显示。现在真的会校验，不匹配就删文件
+- 修复**单个分片抖动就丢掉整个已下载文件**：多线程下载以前一有分片失败就删掉整个
+  文件、退回单线程从头再来，几十上百 MB 白下。现在先单独重试失败的分片（最多 3 次），
+  都不行才回退
+- 修复分片重试时进度重复累加（进度条冲到 100% 以上再跳回 0），以及
+  `on_progress` 与进度条可能算出大于 1 的比例
+- 修复**`data: null` 毒化当天缓存**：MSL 偶尔回 `{"code":200,"data":null}`，旧版本把
+  这个 `null` 连当天日期一起写进缓存，于是接下来一整天每次调用都命中空缓存、连网络
+  请求都不发，服务端类型/版本列表全空，而且已经落盘、重启进程也救不回来
+- 修复 MSL 缓存**非原子写**（写到一半崩掉留下半截 JSON，之后当天所有接口回退成「没有数据」）
+- 修复**带凭据的请求跟着重定向跨站**：`x-api-key` / `Authorization` / `Cookie` 现在
+  只在同站重定向时保留（CurseForge 的 `x-api-key` 就是这么漏出去的）
+- 修复**下载线程数无上限**：4 GiB 的文件按 1 MiB 分片能算出 4096 个线程，
+  `ThreadPoolExecutor` 直接 `can't start new thread`。现在上限 64
+- 修复 JDK 解压残留（下载失败与成功两条路径都漏下归档文件）
+
+**内网穿透**
+
+- 修复**`frpc.toml` 里的行尾注释会把配置弄坏**：`serverPort = 7000  # the frps port`
+  被解析成字符串 `"7000  # the frps port"`，保存时再被加引号写回去，frpc 无法把字符串
+  解码进 int 字段、直接退出——而这份配置正是本工具刚弄坏的
+- 修复**多行数组被整个丢掉**：官方文档风格的多行 `customDomains` 只剩首行的 `[`，
+  被当成字面字符串存下来，续行直接跳过，保存后写成 `customDomains = "["`
+- 修复单行数组里 `\"` 转义引号被误判为闭合，元素被逗号切碎
+- 修复 `frpc.toml` **权限 0644**（里面有 `auth.token`，同一台机器上任何本地用户都能
+  读到），改为 0600 且原子写
+- 修复**上一次遗留的 frpc 占着远端端口**时误报「请检查 frpc.toml」（配置其实完全正确）：
+  启动前先按可执行文件路径找到孤儿进程并停掉
+- 修复 `quiet=True` 时进度条照画（网页面板调用时那些 `\r` 直接糊进服务端日志）
+- 修复 OpenFrp 的 **GitHub 兜底是个死链**（`OpenFrp/frpc-release` 已不存在，
+  实测 404），手动下载地址改为 `console.openfrp.net/download`
+- 修复 OpenFrp 在 Linux 上**接受 HTML 错误页当 frpc 二进制**（原来只对 `.zip` 做魔数校验）
+- `启动frpc.bat` 不再 `taskkill /f /im frpc.exe` **杀掉机器上所有 frpc**（包括用户为
+  别的隧道起的、以及面板自己管着的那份），只停路径匹配的那个；token 也补上了引号
+
+**网页面板**
+
+- 修复**长连接上的请求错位**：`_body_read` 是类属性、按 handler 实例跨请求累积，
+  `_drain()` 拿它算剩余字节，于是第二个请求起要么少读（残留字节把下一个请求顶歪）
+  要么多读（阻塞在下一个请求上，连接卡死）。现在每个请求归零
+- 修复 **401 不排空请求体**（换 token、cookie 过期、`localhost` 与 `127.0.0.1`
+  主机名不一致时会反复触发，每被拒一次那条连接就错位一次）
+- 修复 `_body()` **按 `Content-Length` 无上限读进内存**（客户端声称 9999999999
+  就足以吃掉几个 G），JSON 接口现在限 8 MB
+- 修复 `Content-Disposition` 的**响应头注入**：文件名在 Linux 上可含 `\r`/`\n`，
+  现在统一把控制字符与引号替换掉
+- 修复 **401 时前端把 `document.body.innerHTML` 整个换掉**，连带拆掉 body 内所有
+  按钮的监听，之后 `applyStrings()` / `refresh()` 拿到 null 抛 `TypeError` 又被
+  各处 `.catch(() => {})` 吞掉，页面成死胡同。现在改成覆盖一层提示层
+- 修复**非 JSON 错误体被当 JSON 解析**：`createWithJar()` 遇 401 时 body 是 HTML
+  鉴权页，用户看到的是 `SyntaxError: Unexpected token '<'`，而实例已经建好却缺 jar，
+  重试只会撞「实例已存在」
+- 修复 `refresh()` / `loadFiles()` **无在途保护**：15 秒轮询、切实例、动作回调与 SSE
+  并发改同一份状态，旧响应乱序返回会覆盖新状态（刚启动的服务器可能回退显示成
+  stopped 达 15 秒，`filesPath` 与实际显示目录不一致时上移/重命名/删除会作用到错路径）
+- 修复 cookie 没存下时**面板永久卡在琥珀色「连接中」**（`EventSource` 不带 token，
+  服务端只回 401 的 HTML 页，`onmessage` 永不触发而 `readyState` 停在 0）
+- 修复增删 frp 代理会**静默清空未保存的服务器地址/端口/token**（触发点击的按钮
+  自己持有焦点，`activeElement` 守卫拦不住）
+- 修复文件夹上传**进度条永远到不了 100%**（只数成功数，失败一个就停在 90% 而标签
+  已显示 10/10）
+- 修复 `/api/stream` 未包 `_guard`（订阅失败时只剩往 SSE 流里塞状态行）、
+  `/api/stream` 先发响应头再订阅（订阅抛异常时一个字节都送不出去）
+- 修复实例设置里三个字段标签**全渲染成小节标题「Minecraft 设置」**（其中一个是
+  死三元 `x ? "Jar" : "Jar"`）
+- 每次请求重读 78 KB 的 `index.html` 改为按 `(mtime, size)` 缓存；文件管理器的每个
+  操作不再全量扫描 `servers/`；`start_background` 的「检查是否起过」与「记下句柄」
+  之间补上锁（原来是先起线程后赋值，空窗里的 `atexit` 关不掉面板、并发第二次调用
+  会再绑一次同一端口）
+
+**实例、文件与进程**
+
+- 修复**锁序反转死锁**（`RuntimeManager.start()` 持 manager 锁求 runtime 锁，
+  `ServerRuntime.stop()` 持 runtime 锁经事件回调求 manager 锁）：面板用的是
+  `ThreadingHTTPServer` + `daemon_threads`，一次「启动」撞上一次「停止」就够把两个
+  请求线程一起挂死。规则固化为「绝不在持 `self._lock` 时发事件」，并用
+  `threading.Barrier` 写了一个确定性复现 ABBA 的探针
+- 修复**启用/禁用插件会静默覆盖同名文件**：`Foo.jar` 与 `Foo.jar.disabled` 可以
+  同时存在，POSIX 上 `os.rename` 静默覆盖（禁用插件反而把启用的 jar 抹掉），
+  Windows 上抛 `FileExistsError` 却被翻译成「切换失败」——错误信息指着一个根本不是
+  原因的原因
+- 修复 Windows 制作的 zip（目录项写成 `sub\`）解压时报**「压缩包损坏」**：`ZipInfo.is_dir()`
+  只认结尾的 `/`，`sub\` 被当成零字节普通文件建出来，紧接着 `sub\file.txt` 建不动
+  父目录，`FileExistsError` 逃出 `_write` 被翻译成 `web.error.bad_archive`
+- 修复导入整合包**没有任何压缩炸弹闸门**（`core/transfer.py` 的 `_safe_extract` 从不
+  引用 `core/archive.py` 已有的 `MAX_MEMBERS` / `MAX_TOTAL_BYTES`），并补上拒绝 zip 内
+  符号链接（越界检查只看成员名，先建一个指向 `/etc` 的链再写 `link/passwd` 即可逃逸）；
+  解压改为流式读、按真实写入字节数计数（成员头声明的 `file_size` 可以撒谎）
+- 修复导入临时目录**固定为 `.import_temp`**：开头先 `rmtree` 再 `makedirs`，两个并发
+  导入会互相删掉对方正在解压的东西（`_IMPORT_PLANS_LOCK` 只保护 plan 字典）。现在
+  每次导入用 `tempfile.mkdtemp`，超过 24 小时的陈旧目录顺手清掉
+- 修复导出**就地写 zip**：中途抛异常时 `ZipFile.__exit__` 仍会写出中央目录，留下一个
+  「打得开、内容却缺了一半」的备份——用户看到文件在那儿，会以为备份是好的
+- 修复 `save_server_config` **非原子写**（写一半失败留下残缺 JSON，`load_server_config`
+  解析失败会静默回退默认配置，实例在 UI 上「消失」成空白配置）
+- 修复 `auto_start` 的 `bool("false") is True`（字符串 `"false"` 会被当成开启，
+  实例意外自启），改为统一的 `_as_bool()` 解析
+- 修复 `core/files.py` 的**固定临时文件名**（`.mstl-tmp` / `.mstl-upload`）在并发写
+  同一文件时互相覆盖，改用 `tempfile.mkstemp`
+- 修复 Windows/macOS 上**无法仅改文件名大小写**（大小写不敏感的文件系统里
+  `os.path.exists("Foo.txt")` 在只有 `foo.txt` 时也为真），改用 `os.path.samefile` 区分
+- 修复 spawn 失败时**泄漏日志句柄**（`_pump` 没启动，`_close_log()` 的唯一调用点永远
+  到不了；Windows 上就是实例目录「文件被占用」删不掉）
+
+**菜单与命令行**
+
+- 修复 frp 端口输入非数字时**一路冒到 `main()` 打一屏 traceback 把启动器杀掉**，
+  刚填的内容全丢（姊妹函数反而有守卫）
+- 修复 `menu.py` **全文件零个 `KeyboardInterrupt` 处理器**：菜单树里任何提示符上按
+  Ctrl+C 都是 traceback，现在统一当成「取消当前操作，退回主菜单」
+- 修复语言菜单**越界无 else**（输入 9 也会落到 `save_config` + 提示「已保存」）
+- 修复 OpenFrp 节点选择**只显示前 20 个却按全量校验**（输入 25 会静默选中一个用户
+  从未见过的节点并据此建隧道）
+- 修复导入 jar 选择器**没有返回出口**（Ctrl+C 会跳过 `abort_import(plan)`，
+  留下解压临时目录）
+- 修复 Java 版本解析崩溃与误判：`_version_sort_key` 把 `int` 与 `str` 直接比较会
+  `TypeError`；`_java_major_version("21-ea")` 返回 0（`-ea` 版本被当成未知 Java，
+  选不到任何实例）
+- 修复 `java_tools.py` 的 **tar 解压路径穿越**（`extractall` 未校验成员名，
+  符号链接与硬链接也没查 `linkname`），并让 JDK 残片在两条路径上都被清掉
+- 修复 `server_launcher.py` 的 stdout **缺 `errors=`**：Windows + JDK ≤ 17 下 Java
+  按 ANSI 代码页（中文系统 cp936）写管道，插件里任何中文即非法 UTF-8，
+  `UnicodeDecodeError` 直达 `main()`；且 `_sigint_handler` 的 finally **从不终止子进程**，
+  Java 成孤儿占着世界目录和 `session.lock`。现在按 `errors="replace"` 解码，
+  Ctrl+C 先写 `stop` 走优雅停止（再按一次才强杀）
+- 修复 `clear.py` 在旧版 Windows 控制台上把 ANSI 转义序列**原样打出来**（没清屏还
+  多一行乱码），且不 flush 导致清屏压在缓冲区里
+- 修复 `.gitignore` 未覆盖 Linux/macOS 产物与本次新增的原子写中间文件
+
 ### 升级提示
 
 - `config.json` 与 `.server.json` 均向后兼容，缺失字段会自动补默认值，直接覆盖安装即可
@@ -351,4 +502,4 @@ Nuitka 的 `--standalone` **不设置 `sys.frozen`**（实测），而项目里�
 - 通用实例可以配置成执行任意命令，这是功能本身；它的信任边界和「面板能发控制台指令」
   「能改 `.server.json`」是同一条——拿到面板 token 的人本来就能在这台机器上跑东西。
 
-[未发布]: https://github.com/yzsyzdy/Minecraft-Terminal-Server-Launcher/compare/v1.1.35...HEAD
+[1.1.37]: https://github.com/yzsyzdy/Minecraft-Terminal-Server-Launcher/compare/v1.1.36...v1.1.37
