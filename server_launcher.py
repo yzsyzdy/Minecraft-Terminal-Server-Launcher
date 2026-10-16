@@ -207,20 +207,49 @@ from contextlib import contextmanager
 
 
 @contextmanager
-def _sigint_handler(process: subprocess.Popen):
+def _sigint_handler(process: subprocess.Popen, *, graceful_stdin: bool = False):
     """上下文管理器：注册 SIGINT 处理器，退出时自动恢复。
 
-    在 with 块内，Ctrl+C 会优雅终止子进程并抛出 KeyboardInterrupt。
+    在 with 块内，Ctrl+C 会尝试停止子进程并抛出 KeyboardInterrupt。
     退出 with 块后自动恢复原有的 SIGINT 处理器。
+
+    graceful_stdin=True 表示子进程的 stdin 是 PIPE 且它会读控制台命令
+    （MC 服务端就是这种）。此时先写一行 stop 等它自己退出，世界才能正常
+    落盘。Windows 上没有可用的 SIGTERM —— terminate() 直接就是
+    TerminateProcess，等于拔电源，所以能走优雅路径就必须走；只有在超时
+    之后才退回 terminate()/kill()。交互模式做不到这一点：那里子进程直接
+    继承了终端的 stdin，父进程没有可写的管道，用户自己敲 stop 即可。
+
+    优雅等待期间再按一次 Ctrl+C 会跳过等待直接 kill。
     """
+    stopping = {"again": False}
+
     def _handle_sigint(sig, frame):
+        if stopping["again"]:
+            # 再按一次 Ctrl+C：不等了，直接硬杀。优雅停止最多要等 60 秒，
+            # 总得给用户一个立刻脱身的办法。
+            process.kill()
+            raise KeyboardInterrupt()
+        stopping["again"] = True
         print(t("launch.sigint"))
         if process.poll() is None:
-            process.terminate()
+            if graceful_stdin and process.stdin is not None:
+                try:
+                    process.stdin.write("stop\n")
+                    process.stdin.flush()
+                    process.stdin.close()
+                except (OSError, ValueError):
+                    pass
             try:
-                process.wait(timeout=10)
+                # 走优雅路径时多给一点时间：服务端要把区块刷盘再退出
+                process.wait(timeout=60 if graceful_stdin else 10)
             except subprocess.TimeoutExpired:
-                process.kill()
+                process.terminate()
+                try:
+                    process.wait(timeout=10)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    process.wait()
         raise KeyboardInterrupt()
 
     original_sigint = signal.getsignal(signal.SIGINT)
@@ -272,11 +301,16 @@ def start_minecraft_server(
 
     process = _start_priority_process(
         cmd, workdir, process_priority,
+        stdin=subprocess.PIPE,
         stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-        text=True, encoding="utf-8", bufsize=1,
+        # errors="replace" 不能省：JDK 17 及更早的 Java 在 Windows 上往管道
+        # 写的是 ANSI 代码页（中文系统为 cp936），插件里任何一句中文都不是
+        # 合法 UTF-8。没有它就会抛 UnicodeDecodeError，而那时进程已经起来、
+        # 没人管，Java 会变成占着 session.lock 的孤儿进程。
+        text=True, encoding="utf-8", errors="replace", bufsize=1,
     )
 
-    with _sigint_handler(process):
+    with _sigint_handler(process, graceful_stdin=True):
         try:
             for line in process.stdout:
                 print(line, end="")
@@ -367,7 +401,8 @@ def start_command(
     process = _start_priority_process(
         cmd, workdir, process_priority,
         stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-        text=True, encoding="utf-8", bufsize=1,
+        # 同 start_minecraft_server：缺 errors= 会因非 UTF-8 输出直接崩
+        text=True, encoding="utf-8", errors="replace", bufsize=1,
     )
     with _sigint_handler(process):
         try:

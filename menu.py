@@ -964,16 +964,28 @@ def _frp_add_proxy(project_dir: str) -> None:
         input(t("app.press_enter"))
         return
 
+    # 端口以前是直接 int() 转换的：输入 "abc" 抛 ValueError 后一路冒到
+    # main()，打一屏 traceback 把启动器杀掉，刚填的内容全丢。这里统一校验。
+    try:
+        local_port_num = int(local_port)
+        remote_port_num = int(remote_port)
+    except ValueError:
+        print(t("frp.config_port_invalid"))
+        input(t("app.press_enter"))
+        return
+    if not (0 < local_port_num <= 65535 and 0 < remote_port_num <= 65535):
+        print(t("frp.port_range_invalid"))
+        input(t("app.press_enter"))
+        return
+
     proxy = {
         "name": name,
         "type": ptype,
         "localIP": local_ip,
-        "localPort": int(local_port),
+        "localPort": local_port_num,
     }
-    if ptype == "tcp" and remote_port:
-        proxy["remotePort"] = int(remote_port)
-    elif ptype == "udp" and remote_port:
-        proxy["remotePort"] = int(remote_port)
+    if ptype in ("tcp", "udp"):
+        proxy["remotePort"] = remote_port_num
     elif ptype == "http":
         # frp 里 customDomains 是字符串数组，写成裸字符串 frpc 会解析失败
         proxy["customDomains"] = [name]
@@ -1103,22 +1115,30 @@ def _openfrp_create_tunnel(project_dir: str) -> None:
     print()
     print(t("openfrp.select_node"))
     print()
-    for i, n in enumerate(tcp_nodes[:20], 1):
+    # 只列前 20 个，所以校验也必须以「显示出来的数量」为界
+    shown = min(len(tcp_nodes), 20)
+    for i, n in enumerate(tcp_nodes[:shown], 1):
         region = {1: "\u4e2d\u56fd\u5927\u9646", 2: "\u6e2f\u6fb3\u53f0", 3: "\u6d77\u5916"}.get(n.classify, "?")
         tag = "" if not n.need_realname else t("openfrp.realname_tag")
         print(f"  [{i}] {n.name} ({region}){tag}")
     print(t("openfrp.select_back", n=0))
     print()
     try:
-        c = input(t("openfrp.select_node_prompt", max=min(len(tcp_nodes), 20))).strip()
+        c = input(t("openfrp.select_node_prompt", max=shown)).strip()
         if c == "0":
             return
         idx = int(c) - 1
-        if 0 <= idx < len(tcp_nodes):
+        # 以前这里校验的是 len(tcp_nodes)，于是输入 25 会静默选中一个用户
+        # 从没见过的节点（可能在别的地区、可能要求实名），再照它建隧道。
+        if 0 <= idx < shown:
             selected_node = tcp_nodes[idx]
         else:
+            print(t("app.invalid_choice_short"))
+            input(t("app.press_enter"))
             return
     except ValueError:
+        print(t("app.invalid_choice_short"))
+        input(t("app.press_enter"))
         return
 
     print()
@@ -1213,7 +1233,7 @@ def _openfrp_bind_tunnel(servers: list[dict], servers_dir: str, project_dir: str
 
 def _settings_menu(project_dir: str) -> None:
     """Settings: language, download threads, update, auto-start."""
-    from download_msl import set_download_threads
+    from download_msl import MAX_DOWNLOAD_THREADS, set_download_threads
 
     while True:
         config = load_config(project_dir)
@@ -1261,6 +1281,11 @@ def _settings_menu(project_dir: str) -> None:
                     idx = int(c) - 1
                     if 0 <= idx < len(langs):
                         config["language"] = langs[idx][0]
+                    else:
+                        # 以前这里没有 else，越界索引会直接落到下面的 save_config，
+                        # 用户输入 9（一共才 4 种语言）也会被告知「已保存」。
+                        print(t("app.invalid_choice_short"))
+                        continue
                 except ValueError:
                     print(t("app.invalid_choice_short"))
                     continue
@@ -1279,6 +1304,11 @@ def _settings_menu(project_dir: str) -> None:
                     n = int(c)
                     if n < 1:
                         n = 1
+                    elif n > MAX_DOWNLOAD_THREADS:
+                        # 以前只挡下限。4GiB 的文件按 1MiB 分片能算出 4096 个线程，
+                        # ThreadPoolExecutor 直接 "can't start new thread" 崩掉。
+                        print(t("settings.threads_clamped", max=MAX_DOWNLOAD_THREADS))
+                        n = MAX_DOWNLOAD_THREADS
                     config["download_threads"] = n
                     save_config(config, project_dir)
                     set_download_threads(n)
@@ -1449,16 +1479,27 @@ def _new_instance_menu(servers_dir: str, project_dir: str) -> None:
 
 
 def _pick_jar_interactive(jars: list[str]) -> Optional[str]:
-    """候选核心 jar 多于一个时，让用户挑一个。"""
+    """候选核心 jar 多于一个时，让用户挑一个。返回 None 表示取消导入。"""
     print()
     print(t("import.select_jar", count=len(jars)))
     print()
     for i, j in enumerate(jars, 1):
         print(f"  [{i}] {j}")
+    print(t("settings.back", n=0))
     print()
     while True:
         try:
             choice = input(t("import.pick_prompt", max=len(jars))).strip()
+        except (EOFError, KeyboardInterrupt):
+            # 输入流结束或 Ctrl+C：当作取消。以前 Ctrl+C 会直接冒出去，
+            # 跳过 abort_import，把解压好的临时目录留在磁盘上。
+            print()
+            return None
+        if choice == "0":
+            # 以前这里没有出口：输入 0 永远只打印「无效选择」，只能靠 Ctrl+C 逃，
+            # 而 Ctrl+C 又会跳过清理。
+            return None
+        try:
             idx = int(choice) - 1
             if 0 <= idx < len(jars):
                 return jars[idx]
@@ -1605,7 +1646,22 @@ def _web_menu(project_dir: str) -> None:
 def show_main_menu(servers_dir: str, project_dir: str) -> Optional[dict[str, Any]]:
     """
     Main menu. Returns selected server config for launching, or None to exit.
+
+    菜单树里任何一处提示符上按 Ctrl+C 都会冒到这里。以前 menu.py 里一个
+    KeyboardInterrupt 处理器都没有（start.py 里有，但菜单根本走不到那儿），
+    用户看到的是原始 traceback，启动器直接退出。现在统一当成「取消当前操作、
+    退回主菜单」——子菜单都嵌在这一层里面，所以选服器、设置、导入流程按
+    Ctrl+C 也都是回到主菜单。
     """
+    while True:
+        try:
+            return _main_menu_loop(servers_dir, project_dir)
+        except KeyboardInterrupt:
+            print()
+            print(t("app.interrupted"))
+
+
+def _main_menu_loop(servers_dir: str, project_dir: str) -> Optional[dict[str, Any]]:
     while True:
         servers = list_servers(servers_dir)
         server_count = len(servers)
