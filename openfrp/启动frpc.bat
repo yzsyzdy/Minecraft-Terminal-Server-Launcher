@@ -66,16 +66,28 @@ echo   按 Ctrl+C 停止
 echo ============================================
 echo.
 
-rem 检查是否有 frpc 残留进程并停止
-tasklist | findstr /i "frpc.exe" >nul 2>nul
-if not errorlevel 1 (
-    echo [提示] 检测到已有 frpc 进程, 正在停止...
-    taskkill /f /im frpc.exe >nul 2>nul
+rem 结束同一个 frpc.exe 的残留进程。
+rem 以前是 taskkill /f /im frpc.exe —— 那会把整台机器上所有 frpc 进程一起
+rem 杀掉，包括用户为别的隧道单独起的那份，以及 MSTL 面板自己管着的那份。
+rem 这里先取到 frpc.exe 的完整路径，只停路径完全一致的那些进程。
+set "FRPC_FULL="
+for /f "delims=" %%W in ('where "%FRPC_EXE%" 2^>nul') do (
+    if not defined FRPC_FULL set "FRPC_FULL=%%W"
+)
+if not defined FRPC_FULL set "FRPC_FULL=%FRPC_EXE%"
+if defined FRPC_FULL (
+    for /f "delims=" %%P in ('powershell -NoProfile -Command "Get-Process frpc -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $env:FRPC_FULL } | ForEach-Object { $_.Id }" 2^>nul') do (
+        echo [提示] 停止残留进程 PID %%P
+        taskkill /f /pid %%P >nul 2>nul
+    )
     timeout /t 1 /nobreak >nul
 )
 
 rem 启动 frpc
-"%FRPC_EXE%" -u %USER_TOKEN% -p %PROXY_IDS%
+rem 注意: Token 只能走命令行参数 (frpc 的 -u), 而命令行在本机对同机其它用户
+rem 可见。这里是单用户桌面脚本, 风险可接受; 但值必须加引号 —— 以前没加,
+rem Token 里只要出现空格或 & 就会把命令行截断, 甚至被当成第二条命令执行。
+"%FRPC_EXE%" -u "%USER_TOKEN%" -p "%PROXY_IDS%"
 
 echo.
 echo [提示] frpc 已退出 (退出码: %errorlevel%)

@@ -218,9 +218,8 @@ def get_frpc_release_info() -> Optional[dict[str, Any]]:
 def get_frpc_download_urls() -> Optional[tuple[str, list[str], str]]:
     """生成所有可用的 frpc 下载 URL。
 
-    优先级:
-      [0] OpenFrp API 返回的官方 CDN 源
-      [1] GitHub Releases (最后兜底)
+    优先级: OpenFrp API 返回的官方 CDN 源，按 API 给出的顺序逐个尝试。
+    没有第二梯队了——曾经的那个 GitHub 兜底仓库并不存在（见下）。
 
     Returns:
         (version_full, [url1, url2, ...], file_name)
@@ -229,7 +228,6 @@ def get_frpc_download_urls() -> Optional[tuple[str, list[str], str]]:
     if not data:
         return None
 
-    latest_ver = data.get("latest_ver", "")
     latest_full = data.get("latest_full", "")
     sources = data.get("source") or []
     if not latest_full:
@@ -245,13 +243,12 @@ def get_frpc_download_urls() -> Optional[tuple[str, list[str], str]]:
             url = f"{base}/{latest_full}/{file_name}"
             urls.append(url)
 
-    # GitHub Releases 兜底（OpenFrp 的 frpc 在 GitHub 有发布）
-    tag = latest_full or f"v{latest_ver}"
-    github_url = (
-        f"https://github.com/OpenFrp/frpc-release/releases/download/"
-        f"{tag}/{file_name}"
-    )
-    urls.append(github_url)
+    # 这里曾经还有一个 GitHub 兜底：
+    #   https://github.com/OpenFrp/frpc-release/releases/download/{tag}/{file_name}
+    # 那个仓库并不存在（api.github.com/repos/OpenFrp/frpc-release → 404，
+    # OpenFrp 组织下只有 Depoly_templates），所以每一次走到兜底都必然多花
+    # 一次超时、拿一个 404。OpenFrp 的 frpc 只发在自己的 CDN 上，官方下载
+    # 页见 OPENFRP_RELEASES_URL。
 
     if not urls:
         return None
@@ -273,8 +270,9 @@ def get_frpc_local_path(project_dir: str) -> str:
     return os.path.join(project_dir, "openfrp", file_name)
 
 
-# OpenFrp 的 frpc 发布在它自己的 GitHub 仓库里，官方 CDN 全挂时可以手动去下
-OPENFRP_RELEASES_URL = "https://github.com/OpenFrp/frpc-release/releases"
+# OpenFrp 的 frpc 不在 GitHub 上发布（曾指向的 OpenFrp/frpc-release 是 404），
+# 官方下载入口在控制台的下载页。自动下载全挂时把这个地址给用户。
+OPENFRP_RELEASES_URL = "https://console.openfrp.net/download"
 
 
 def expected_asset_name() -> str:
@@ -288,16 +286,23 @@ def _download_frpc_file(url: str, target_path: str) -> bool:
 
     校验点:
       1. 使用 Chrome User-Agent 避免 CDN 拦截
-      2. Content-Type 排除 HTML（OneDrive 等误返回网页）
-      3. zip 魔数 PK\\x03\\x04 确保文件合法
+      2. 按内容嗅探：必须是本平台期望的压缩包，或者本身就是可执行文件
+      3. 内容不对就删掉，不留残片
+
+    第 2 点是后补的：以前只对 `.zip` 校验魔数，于是 Linux/macOS 上镜像回
+    一个 HTTP 200 的 HTML 错误页（OneDrive 之类，正是本函数 docstring 声称
+    已排除的情况）会被原样存成 `.tar.gz`；`download_frpc` 看到文件非空就
+    当成功，解压时才失败，而这份垃圾会永久留在缓存里，每次启动都先重试它。
+    Windows 上同样的页面会被正确拒绝，于是问题只在 Linux 出现。
     """
     headers = {"User-Agent": _FRPC_USER_AGENT}
     if not download_file_with_progress(url, target_path, desc="frpc", headers=headers):
         return False
 
-    # zip 文件必须以 PK\x03\x04 开头（判断方式与 frpc_files 保持一致）
-    if target_path.endswith(".zip") and frpc_files.archive_kind(target_path) != "zip":
-        print(f"\n  [错误] 下载的文件不是有效的 zip 文件")
+    expected = "zip" if target_path.endswith(".zip") else "tar"
+    if (frpc_files.archive_kind(target_path) != expected
+            and not frpc_files.looks_like_executable(target_path)):
+        print(f"\n  {t('openfrp.frpc_bad_download', name=os.path.basename(target_path))}")
         frpc_files.remove_quietly(target_path)
         return False
 

@@ -23,7 +23,9 @@
 """
 
 import os
+import signal
 import subprocess
+import sys
 import time
 from typing import Any, Optional
 
@@ -121,11 +123,16 @@ def get_frpc_toml_path(project_dir: str) -> str:
 # 下载与解压
 # ---------------------------------------------------------------------------
 
-def _download_file(url: str, target_path: str, on_progress=None) -> bool:
+def _download_file(url: str, target_path: str, on_progress=None,
+                   quiet: bool = False) -> bool:
     """下载单个文件（带进度条），成功后返回 True。
 
     校验: 拒绝 text/html 响应（防镜像返回错误页面）。
     复用 download_msl 的进度条实现，保持全项目风格一致。
+
+    quiet=True 时把进度条也一起关掉。以前只把 say() 静音了，进度条却照画
+    ——网页面板调用时没有终端，那些 \r 会直接糊进服务端 stdout 的日志里，
+    正是这个参数本来要防的事。
     """
     from download_msl import download_file_with_progress
 
@@ -143,7 +150,7 @@ def _download_file(url: str, target_path: str, on_progress=None) -> bool:
 
     # 正式下载（带进度条）
     return download_file_with_progress(
-        url, target_path, desc="frpc",
+        url, target_path, desc="frpc", quiet=quiet,
         headers={"User-Agent": USER_AGENT}, on_progress=on_progress)
 
 
@@ -247,7 +254,8 @@ def download_frpc(project_dir: str, version: str = "",
         say()
         say(f"  [frp] 正在下载 frpc v{version} ...")
         say(f"  [frp] 源 {i}/{len(urls)}: {url}")
-        if _download_file(url, archive_path, on_progress=on_progress):
+        if _download_file(url, archive_path, on_progress=on_progress,
+                          quiet=quiet):
             break
         say("  [frp] 该源下载失败，尝试下一个...")
         try:
@@ -282,6 +290,91 @@ def download_frpc(project_dir: str, version: str = "",
 # frpc.toml 极简 TOML 解析/生成
 # ---------------------------------------------------------------------------
 
+def _strip_toml_comment(line: str) -> str:
+    """去掉行尾注释，引号内的 # 不算注释起点。
+
+    frpc.toml 是给人手写的，官方文档的示例就带注释。以前直接把整行按 "="
+    切开、值原样交给标量解析器，于是 `serverPort = 7000  # the frps port`
+    被解析成字符串 "7000  # the frps port"，保存时再被加引号写成
+    `serverPort = "7000  # the frps port"`。frpc（BurntSushi TOML）无法把
+    字符串解码进 int 字段，直接退出——而这份配置正是本工具刚弄坏的。
+    """
+    quote = ""
+    i = 0
+    while i < len(line):
+        ch = line[i]
+        if quote:
+            if quote == '"' and ch == "\\":
+                i += 2
+                continue
+            if ch == quote:
+                quote = ""
+        elif ch in "\"'":
+            quote = ch
+        elif ch == "#":
+            return line[:i]
+        i += 1
+    return line
+
+
+def _bracket_state(text: str) -> tuple:
+    """返回 (方括号净深度, 未闭合的引号)。用于判断一行 TOML 是否写完。"""
+    depth = 0
+    quote = ""
+    i = 0
+    while i < len(text):
+        ch = text[i]
+        if quote:
+            if quote == '"' and ch == "\\":
+                i += 2
+                continue
+            if ch == quote:
+                quote = ""
+        elif ch in "\"'":
+            quote = ch
+        elif ch == "[":
+            depth += 1
+        elif ch == "]":
+            depth -= 1
+        i += 1
+    return depth, quote
+
+
+def _toml_logical_lines(text: str) -> list[str]:
+    """把物理行合并成逻辑行：多行数组、跨行字符串都归成一行。
+
+    手写的 frpc.toml 常按官方文档的风格写多行数组：
+
+        customDomains = [
+          "a.example.com",
+          "b.example.com",
+        ]
+
+    旧实现按物理行处理，首行的值只剩一个 "["——既不以 "]" 结尾也不是合法
+    标量，于是被当成字面字符串存下来；续行没有 "=" 被直接跳过。整个数组就
+    此消失，面板上还会显示一个名为 "[" 的域名，保存后写成
+    customDomains = "["。单行数组能正常往返，所以测试没发现。
+    """
+    lines: list[str] = []
+    buf = ""
+    for raw in text.splitlines():
+        part = _strip_toml_comment(raw)
+        if not buf:
+            part = part.strip()
+            if not part:
+                continue
+            buf = part
+        else:
+            buf = f"{buf} {part.strip()}"
+        depth, quote = _bracket_state(buf)
+        if depth <= 0 and not quote:
+            lines.append(buf.strip())
+            buf = ""
+    if buf.strip():
+        lines.append(buf.strip())
+    return lines
+
+
 def _parse_toml_scalar(text: str) -> Any:
     """解析一个 TOML 值（只覆盖本项目用到的子集：字符串/整数/浮点/布尔/数组）。"""
     text = text.strip()
@@ -314,21 +407,34 @@ def _split_toml_array(inner: str) -> list[str]:
     parts: list[str] = []
     buf: list[str] = []
     quote = ""
-    for ch in inner:
+    i = 0
+    while i < len(inner):
+        ch = inner[i]
         if quote:
             buf.append(ch)
+            # 双引号串里的 \" 是转义的引号，不能当成闭合——否则
+            # ["a\"b", "c"] 会在 \" 处提前结束引号状态，后面的逗号被当成
+            # 分隔符，元素被切碎。
+            if quote == '"' and ch == "\\" and i + 1 < len(inner):
+                buf.append(inner[i + 1])
+                i += 2
+                continue
             if ch == quote:
                 quote = ""
+            i += 1
             continue
         if ch in "\"'":
             quote = ch
             buf.append(ch)
+            i += 1
             continue
         if ch == ",":
             parts.append("".join(buf).strip())
             buf = []
+            i += 1
             continue
         buf.append(ch)
+        i += 1
     parts.append("".join(buf).strip())
     return [p for p in parts if p]
 
@@ -353,15 +459,18 @@ def _parse_toml(text: str) -> dict[str, Any]:
       - 子表:     [proxies.transport]  →  挂到最后一个代理上
 
     值类型: 字符串 / 整数 / 浮点 / 布尔 / 数组。
+
+    解析前先把物理行合并成逻辑行（见 _toml_logical_lines），并剥掉行尾
+    注释——两者都是手写 frpc.toml 的常态，而以前的实现会把注释吃进值里、
+    把多行数组整个丢掉。
     """
     cfg: dict[str, Any] = {}
     proxies: list[dict] = []
     current_proxy: Optional[dict] = None
     target: dict = cfg  # 当前键值该写进哪个表
 
-    for raw in text.splitlines():
-        line = raw.strip()
-        if not line or line.startswith("#"):
+    for line in _toml_logical_lines(text):
+        if not line:
             continue
         if line.startswith("[[") and line.endswith("]]"):
             # 数组表：每遇到一次就新开一个元素
@@ -490,14 +599,32 @@ def load_frp_config(project_dir: str) -> dict[str, Any]:
 
 
 def save_frp_config(project_dir: str, cfg: dict[str, Any]) -> bool:
-    """保存 frpc.toml。成功返回 True。"""
+    """保存 frpc.toml。成功返回 True。
+
+    这个文件里有 auth.token，也就是整个 frp 服务器账号的凭据。以前用
+    open(path, "w") 建文件，Linux/macOS 在默认 umask 022 下会得到 0644，
+    同一台机器上任何本地用户都能读到它（相邻的 frpc 二进制反而被刻意
+    chmod 0755）。这里显式建成 0600，并且先写临时文件再 os.replace：
+    open(..., "w") 是就地截断，写到一半失败会留下半截 TOML 让 frpc 起不来。
+    """
     path = get_frpc_toml_path(project_dir)
+    tmp = path + ".tmp"
     try:
         os.makedirs(os.path.dirname(path), exist_ok=True)
-        with open(path, "w", encoding="utf-8") as f:
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
             f.write(_build_toml(cfg))
+        # os.open 的 mode 只在新建时生效，已存在的临时文件会保留旧权限，
+        # 所以创建之后统一再收紧一次。
+        if os.name != "nt":
+            os.chmod(tmp, 0o600)
+        os.replace(tmp, path)
         return True
     except OSError:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
         return False
 
 
@@ -521,6 +648,15 @@ def launch_frpc(project_dir: str, quiet: bool = False) -> Optional[subprocess.Po
     if is_frpc_running():
         say("  [frp] frpc 已在运行，忽略本次启动")
         return _frpc_process
+
+    # 上一次 MSTL 被强杀或自己崩了的时候，它拉起来的 frpc 会活下来继续占着
+    # 远程端口。这时再起一个，新的 frpc 会因为端口被占而立刻退出，而下面那句
+    # 「请检查 frpc.toml」会把用户引向一份完全正确的配置文件——白折腾半天。
+    # 只按可执行文件路径匹配，所以不会误伤用户为别的隧道单独起的 frpc。
+    orphan = find_orphan_frpc(project_dir)
+    if orphan is not None:
+        say(f"  [frp] 发现上次遗留的 frpc 进程 (PID {orphan})，先停掉它")
+        _terminate_pid(orphan)
 
     bin_path = get_frpc_bin_path(project_dir)
     toml_path = get_frpc_toml_path(project_dir)
@@ -573,5 +709,86 @@ def stop_frpc(quiet: bool = False) -> None:
 
 
 def is_frpc_running() -> bool:
-    """frpc 是否在运行。"""
+    """frpc 是否在运行（只认本进程自己拉起来的那一个）。"""
     return _frpc_process is not None and _frpc_process.poll() is None
+
+
+def _find_process_by_binary(binary_path: str) -> Optional[int]:
+    """找一个可执行文件正好是 binary_path 的进程，返回它的 PID。
+
+    只用标准库。Windows 用 PowerShell 的 Get-Process（wmic 在新版 Windows 上
+    已经被移除），Linux 读 /proc/<pid>/exe 符号链接。其它平台直接返回 None：
+    查不了就当作没发现，宁可漏报也不误报、更不会误杀。
+    """
+    target = os.path.abspath(binary_path)
+    if os.name == "nt":
+        # 用环境变量把路径传进 PowerShell，省掉嵌套引号的转义地狱
+        script = (
+            "Get-Process -Name '{name}' -ErrorAction SilentlyContinue | "
+            "Where-Object {{ $_.Path -eq $env:MSTL_FRPC_TARGET }} | "
+            "Select-Object -First 1 -ExpandProperty Id".format(
+                name=os.path.splitext(os.path.basename(target))[0])
+        )
+        env = dict(os.environ)
+        env["MSTL_FRPC_TARGET"] = target
+        try:
+            done = subprocess.run(
+                ["powershell", "-NoProfile", "-NonInteractive",
+                 "-Command", script],
+                capture_output=True, text=True, timeout=20, env=env,
+            )
+        except (OSError, subprocess.SubprocessError):
+            return None
+        out = (done.stdout or "").strip()
+        return int(out) if out.isdigit() else None
+
+    if sys.platform.startswith("linux"):
+        try:
+            entries = [p for p in os.listdir("/proc") if p.isdigit()]
+        except OSError:
+            return None
+        for entry in entries:
+            try:
+                if os.path.realpath(f"/proc/{entry}/exe") == target:
+                    return int(entry)
+            except OSError:
+                continue
+    return None
+
+
+def find_orphan_frpc(project_dir: str) -> Optional[int]:
+    """找上一次 MSTL 没来得及停掉、还留在系统里的 frpc 进程。
+
+    只匹配可执行文件路径和我们准备启动的那个完全一致的进程，所以不会误伤
+    用户为别的隧道、别的工具单独起的 frpc。
+    """
+    bin_path = get_frpc_bin_path(project_dir)
+    if not os.path.isfile(bin_path):
+        return None
+    return _find_process_by_binary(bin_path)
+
+
+def _terminate_pid(pid: int) -> None:
+    """结束一个进程：先好好说，等两秒，再硬杀。
+
+    Windows 上 os.kill(pid, SIGTERM) 落到 TerminateProcess（没有优雅一说），
+    所以那边不用再等。
+    """
+    try:
+        os.kill(pid, signal.SIGTERM)
+    except OSError:
+        return
+    if os.name == "nt":
+        return
+    time.sleep(2.0)
+    # 先确认它还在。POSIX 上 os.kill(pid, 0) 是探活（Windows 上不是——那边
+    # 会真的 TerminateProcess，所以这段只在非 Windows 走）。不探活就硬杀，
+    # 万一这两秒里进程自己退了、PID 又被系统分给了别人，就是误杀无辜。
+    try:
+        os.kill(pid, 0)
+    except OSError:
+        return
+    try:
+        os.kill(pid, getattr(signal, "SIGKILL", signal.SIGTERM))
+    except OSError:
+        pass

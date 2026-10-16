@@ -100,6 +100,111 @@ class RoundTripTest(unittest.TestCase):
         self.assertEqual(loaded["port"], 7000)
 
 
+class LogicalLinesTest(unittest.TestCase):
+    """行尾注释与多行数组。
+
+    frpc.toml 是给人手写的，官方文档的示例两样都有。旧实现按物理行处理：
+    `serverPort = 7000  # 端口` 被当成字符串存回去，frpc 解不进 int 字段
+    直接退出；多行数组则只剩一个 "["，整个数组消失。
+    """
+
+    # -- 剥注释 ------------------------------------------------------------
+
+    def test_trailing_comment_is_stripped(self):
+        self.assertEqual(
+            TM._strip_toml_comment("serverPort = 7000  # the frps port").strip(),
+            "serverPort = 7000")
+
+    def test_hash_inside_quotes_is_not_a_comment(self):
+        line = 'auth.token = "a#b#c"'
+        self.assertEqual(TM._strip_toml_comment(line), line)
+
+    def test_escaped_quote_does_not_end_the_string(self):
+        """`\\"` 之后仍在字符串里，后面的 # 不是注释。"""
+        line = 'x = "a\\"#b"'
+        self.assertEqual(TM._strip_toml_comment(line), line)
+
+    def test_comment_only_line_becomes_empty(self):
+        self.assertEqual(TM._strip_toml_comment("  # nothing here").strip(), "")
+
+    # -- 合并逻辑行 --------------------------------------------------------
+
+    def test_multiline_array_becomes_one_logical_line(self):
+        text = ('customDomains = [\n'
+                '  "a.example.com",\n'
+                '  "b.example.com",\n'
+                ']\n')
+        self.assertEqual(TM._toml_logical_lines(text),
+                         ['customDomains = [ "a.example.com", "b.example.com", ]'])
+
+    def test_blank_and_comment_lines_are_dropped(self):
+        self.assertEqual(TM._toml_logical_lines("# c\n\n   \n"), [])
+
+    def test_scalars_stay_one_line_each(self):
+        self.assertEqual(TM._toml_logical_lines('a = 1\nb = "x"\n'),
+                         ['a = 1', 'b = "x"'])
+
+    def test_bracket_state_ignores_brackets_inside_strings(self):
+        self.assertEqual(TM._bracket_state('x = "["'), (0, ""))
+        self.assertEqual(TM._bracket_state("x = ["), (1, ""))
+        self.assertEqual(TM._bracket_state('x = "abc'), (0, '"'))
+
+    # -- 解析结果 ----------------------------------------------------------
+
+    def test_parse_reads_int_through_trailing_comment(self):
+        cfg = TM._parse_toml("serverPort = 7000  # the frps port\n")
+        self.assertEqual(cfg["serverPort"], 7000)
+        self.assertIsInstance(cfg["serverPort"], int)
+
+    def test_parse_keeps_table_header_with_comment(self):
+        cfg = TM._parse_toml('[log]  # logging section\n'
+                             'to = "console"\n'
+                             'level = "info"\n')
+        self.assertEqual(cfg["log"], {"to": "console", "level": "info"})
+
+    def test_parse_keeps_multiline_array(self):
+        cfg = TM._parse_toml('customDomains = [\n'
+                             '  "a.example.com",\n'
+                             '  "b.example.com",\n'
+                             ']\n')
+        self.assertEqual(cfg["customDomains"],
+                         ["a.example.com", "b.example.com"])
+
+    def test_parse_keeps_array_of_tables_after_a_comment(self):
+        cfg = TM._parse_toml('[[visitors]]  # 访问者\n'
+                             'name = "v1"\n'
+                             'bindPort = 25565\n')
+        self.assertEqual(cfg["visitors"], [{"name": "v1", "bindPort": 25565}])
+
+    def test_escaped_quote_inside_a_single_line_array(self):
+        """单行数组里的 `\\"` 不能被当成字符串结束。"""
+        cfg = TM._parse_toml('customDomains = ["a\\"b.example.com", "c.example.com"]\n')
+        self.assertEqual(cfg["customDomains"],
+                         ['a"b.example.com', "c.example.com"])
+
+    def test_comment_after_a_quoted_value_is_stripped(self):
+        cfg = TM._parse_toml('auth.token = "tk"  # 别外传\n')
+        self.assertEqual(cfg["auth"]["token"], "tk")
+
+    def test_documented_style_file_round_trips(self):
+        """整份「官方文档风格」的文件读进来、写回去，tomllib 要认，内容不丢。"""
+        text = ('serverAddr = "1.2.3.4"  # 主控地址\n'
+                'serverPort = 7000  # 端口\n'
+                '\n'
+                'auth.token = "a#b"  # 值里有 #\n'
+                '\n'
+                'customDomains = [\n'
+                '  "a.example.com",\n'
+                '  "b.example.com",\n'
+                ']\n')
+        parsed = TM._parse_toml(text)
+        out = TM._build_toml(parsed)
+        self.assertEqual(tomllib.loads(out), parsed)
+        self.assertEqual(parsed["serverAddr"], "1.2.3.4")
+        self.assertEqual(parsed["serverPort"], 7000)
+        self.assertEqual(parsed["auth"]["token"], "a#b")
+
+
 class FileApiTest(unittest.TestCase):
     def setUp(self):
         self.dir = tempfile.mkdtemp(prefix="mstl-test-frp-")
