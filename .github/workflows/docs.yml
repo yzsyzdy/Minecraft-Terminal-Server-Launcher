@@ -10,18 +10,18 @@ on:
       - '.github/workflows/docs.yml'
   workflow_dispatch:
 
+# 站点是由 gh-pages 分支发布的，所以要 contents: write 才能把构建结果推上去。
+# 不再需要 pages: write / id-token: write —— 那是走 actions/deploy-pages 时才要的。
 permissions:
-  contents: read
-  pages: write
-  id-token: write
+  contents: write
 
-# 同一时刻只允许一个 Pages 部署，队列中的等待而不是取消
+# 同一时刻只允许一个部署，队列中的等待而不是取消
 concurrency:
   group: pages
   cancel-in-progress: false
 
 jobs:
-  build:
+  deploy:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -42,24 +42,13 @@ jobs:
           pip install mkdocs-minify-plugin
           pip install mkdocs-git-revision-date-localized-plugin
 
-      - name: Build site
-        run: mkdocs build
-
-      - name: Setup Pages
-        uses: actions/configure-pages@v5
-
-      - name: Upload Pages artifact
-        uses: actions/upload-pages-artifact@v3
-        with:
-          path: site
-
-  deploy:
-    needs: build
-    runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    steps:
-      - name: Deploy to GitHub Pages
-        id: deployment
-        uses: actions/deploy-pages@v4
+      # 这里刻意不用 actions/configure-pages + upload-pages-artifact + deploy-pages：
+      # 那条路要求仓库的 Pages 源设成 "GitHub Actions"，而本站的 Pages 源是 gh-pages
+      # 分支，deploy-pages 会被环境规则拒掉（Branch "main" is not allowed to deploy
+      # to github-pages due to environment protection rules）。mkdocs gh-deploy 直接
+      # 把 site/ 推到 gh-pages，和手工部署走的是同一条路。
+      - name: Deploy to gh-pages
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          mkdocs gh-deploy --force
