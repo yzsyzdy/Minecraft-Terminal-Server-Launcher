@@ -4,11 +4,6 @@ on:
   push:
     tags:
       - 'v*'
-    branches:
-      # 临时的矩阵探测分支：验证 mac/linux 三条腿真能构建出可用的产物。
-      # release job 有 tag 守卫，所以推这个分支只产出 artifact，不会发版。
-      # 验证完就删掉这一段和远端分支。
-      - 'ci-matrix-probe'
   workflow_dispatch:
 
 permissions:
