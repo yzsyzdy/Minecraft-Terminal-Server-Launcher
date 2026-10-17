@@ -32,5 +32,27 @@ jobs:
           python-version: ${{ matrix.python-version }}
 
       # 测试只用标准库，不需要装任何依赖——项目本身也是零运行时依赖
+      #
+      # 失败时把关键输出写进 annotation：Actions 的日志要登录才能看，而
+      # check-run 的 annotation 是公开可读的（匿名也能取），跨平台失败时
+      # 这是唯一能把真实 FAIL/ERROR 拿出来的通道。
+      # 用 pwsh 是为了三个平台共用同一段脚本（ubuntu/macos runner 都预装 pwsh 7）。
       - name: Run tests
-        run: python -m unittest discover -s tests -t . -v
+        shell: pwsh
+        run: |
+          python -m unittest discover -s tests -t . 2>&1 | Tee-Object -FilePath tests-output.txt
+          $code = $LASTEXITCODE
+          if ($code -eq 0) { Write-Host "tests passed on ${{ matrix.os }} py${{ matrix.python-version }}"; exit 0 }
+          $all = @(Get-Content -LiteralPath tests-output.txt -ErrorAction SilentlyContinue)
+          $report = @("tests failed on ${{ matrix.os }} py${{ matrix.python-version }} (exit code $code)")
+          $report += @($all | Where-Object { $_ -match '^(FAIL|ERROR): ' } | Select-Object -First 25)
+          $report += '--- output tail ---'
+          $report += @($all | Select-Object -Last 25)
+          # workflow command 里的换行要写成 %0A，百分号要转义成 %25
+          $clean = foreach ($line in $report) {
+            $s = ($line -replace '%', '%25') -replace "`r", ''
+            if ($s.Length -gt 320) { $s = $s.Substring(0, 320) + '...' }
+            $s
+          }
+          Write-Host ("::error::" + ($clean -join '%0A'))
+          exit 1
