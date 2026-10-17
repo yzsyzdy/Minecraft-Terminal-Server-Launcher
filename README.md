@@ -1,5 +1,7 @@
 # MSTL — Minecraft Terminal Server Launcher
 
+**简体中文** | [English](README_EN.md)
+
 一个轻量级、零外部依赖的 Minecraft 服务端管理器。支持多服务器实例、版本隔离、自动 Java 检测与下载、插件和模组管理，兼容 Windows、Linux 和 macOS。
 
 ## 功能一览

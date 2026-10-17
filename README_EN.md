@@ -1,5 +1,7 @@
 # Minecraft Server Launcher
 
+**English** | [简体中文](README.md)
+
 A lightweight, zero-dependency Minecraft server manager. Manage multiple server instances with version isolation, automatic Java detection and download, plugin and mod management. Supports Windows, Linux and macOS.
 
 ## Features
