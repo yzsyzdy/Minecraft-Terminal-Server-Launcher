@@ -1,17 +1,648 @@
-/* MSTL Wiki 自定义样式 */
+/* ==========================================================================
+   MSTL Wiki — 视觉规范
+   --------------------------------------------------------------------------
+   和宣传片共用同一套语言：暖中性深色舞台 + 一个品牌蓝 + 等宽字体做标注。
+   两条纪律（改之前先读一遍）：
+     1. 层次用 1px 的线（--mstl-line）和底色差（bg / surface）做，不用阴影；
+     2. 品牌蓝只出现在「链接、当前项、按钮、焦点」这四类地方，不当装饰色用。
+   ========================================================================== */
+
+/* ── 1. 色板与变量 ─────────────────────────────────────────────────────── */
 
 :root {
-  --md-primary-fg-color: #4c5bd4;
+  --mstl-brand: #4c5bd4;
+  --mstl-brand-2: #6b78e6;
+  --mstl-brand-3: #8a95f0;
+
+  --mstl-font: "Microsoft YaHei UI", "Segoe UI", system-ui, -apple-system,
+    "Helvetica Neue", Arial, sans-serif;
+  --mstl-mono: "Cascadia Code", "Consolas", "SFMono-Regular", "Menlo",
+    "DejaVu Sans Mono", monospace;
+
+  --mstl-radius: 8px;
 }
 
-/* 表格在窄屏下允许横向滚动，避免列被压扁 */
+/* 浅色 = 宣传片里的「纸」：暖白，不是纯白 */
+[data-md-color-scheme="default"] {
+  --mstl-bg: #f7f5f0;
+  --mstl-surface: #ffffff;
+  --mstl-sunken: #f2efe9;
+  --mstl-line: #e4e2dc;
+  --mstl-line-strong: #cfccc4;
+  --mstl-fg: #1f2430;
+  --mstl-dim: #6b7480;
+  --mstl-faint: #9aa0a6;
+
+  --mstl-ok: #1a7f37;
+  --mstl-warn: #9a6700;
+  --mstl-err: #cf222e;
+  --mstl-info: #4c5bd4;
+}
+
+/* 暗色 = 宣传片里的「舞台」：暖黑，不是纯黑 */
+[data-md-color-scheme="slate"] {
+  --mstl-bg: #0b0a09;
+  --mstl-surface: #15130f;
+  --mstl-sunken: #100e0c;
+  --mstl-line: #2a2620;
+  --mstl-line-strong: #3a352d;
+  --mstl-fg: #f4f0e8;
+  --mstl-dim: #a9a399;
+  --mstl-faint: #7d786f;
+
+  --mstl-ok: #3fb950;
+  --mstl-warn: #d29922;
+  --mstl-err: #f85149;
+  --mstl-info: #8a95f0;
+}
+
+/* ── 2. 把 Material 的变量接到自己的色板上 ────────────────────────────── */
+
+:root,
+[data-md-color-scheme="default"],
+[data-md-color-scheme="slate"] {
+  --md-primary-fg-color: var(--mstl-brand);
+  --md-primary-fg-color--light: var(--mstl-brand-2);
+  --md-primary-fg-color--dark: var(--mstl-brand);
+  --md-primary-bg-color: var(--mstl-fg);
+  --md-primary-bg-color--light: var(--mstl-dim);
+  --md-accent-fg-color: var(--mstl-brand-2);
+  --md-accent-fg-color--transparent: rgba(76, 91, 212, 0.1);
+
+  --md-default-bg-color: var(--mstl-bg);
+  --md-default-fg-color: var(--mstl-fg);
+  --md-default-fg-color--light: var(--mstl-dim);
+  --md-default-fg-color--lighter: var(--mstl-faint);
+  --md-default-fg-color--lightest: var(--mstl-line);
+
+  --md-typeset-color: var(--mstl-fg);
+  --md-typeset-a-color: var(--mstl-brand);
+
+  --md-code-bg-color: var(--mstl-sunken);
+  --md-code-fg-color: var(--mstl-fg);
+
+  --md-footer-bg-color: var(--mstl-surface);
+  --md-footer-bg-color--dark: var(--mstl-sunken);
+  --md-footer-fg-color: var(--mstl-dim);
+  --md-footer-fg-color--light: var(--mstl-dim);
+  --md-footer-fg-color--lighter: var(--mstl-faint);
+
+  /* 全站不用投影：Material 的 z1–z3 全部压平，层次交给 1px 线 */
+  --md-shadow-z1: 0 0 transparent;
+  --md-shadow-z2: 0 0 transparent;
+  --md-shadow-z3: 0 0 transparent;
+}
+
+/* ── 3. 骨架：字体、正文、选中、滚动条 ────────────────────────────────── */
+
+body,
+input,
+button {
+  font-family: var(--mstl-font);
+}
+
+.md-typeset {
+  font-size: 0.76rem;
+  line-height: 1.75;
+}
+
+::selection {
+  background: rgba(76, 91, 212, 0.24);
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--mstl-line-strong) transparent;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--mstl-line-strong);
+  border: 3px solid transparent;
+  border-radius: 8px;
+  background-clip: padding-box;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* ── 4. 顶栏与标签栏 ──────────────────────────────────────────────────── */
+
+.md-header {
+  background: var(--mstl-surface);
+  color: var(--mstl-fg);
+  border-bottom: 1px solid var(--mstl-line);
+  box-shadow: none;
+}
+
+.md-header[data-md-state="shadow"] {
+  box-shadow: none;
+  border-bottom-color: var(--mstl-line-strong);
+}
+
+.md-header__title {
+  font-family: var(--mstl-mono);
+  font-size: 0.82rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+}
+
+.md-header__button {
+  color: var(--mstl-dim);
+}
+
+.md-header__button:hover {
+  color: var(--mstl-fg);
+  opacity: 1;
+}
+
+.md-source__repository {
+  font-family: var(--mstl-mono);
+  font-size: 0.62rem;
+}
+
+/* 标签栏：当前页用一条 2px 的品牌色下划线，不用底色块 */
+.md-tabs {
+  background: var(--mstl-surface);
+  border-bottom: 1px solid var(--mstl-line);
+  color: var(--mstl-dim);
+}
+
+.md-tabs__link {
+  font-size: 0.68rem;
+  opacity: 1;
+  color: var(--mstl-dim);
+  border-bottom: 2px solid transparent;
+}
+
+.md-tabs__link:hover {
+  color: var(--mstl-fg);
+  opacity: 1;
+}
+
+.md-tabs__item--active .md-tabs__link,
+.md-tabs__link--active {
+  color: var(--mstl-fg);
+  border-bottom-color: var(--mstl-brand);
+}
+
+/* ── 5. 侧边导航 ──────────────────────────────────────────────────────── */
+
+.md-nav {
+  font-size: 0.7rem;
+}
+
+.md-nav__title {
+  font-family: var(--mstl-mono);
+  font-size: 0.6rem;
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--mstl-faint);
+}
+
+.md-nav__link {
+  border-left: 2px solid transparent;
+  padding-left: 0.5rem;
+  margin-left: -0.5rem;
+  color: var(--mstl-dim);
+  transition: color 0.12s, border-color 0.12s;
+}
+
+.md-nav__link:hover {
+  color: var(--mstl-fg);
+}
+
+.md-nav__link--active,
+.md-nav__item--active > .md-nav__link {
+  color: var(--mstl-fg);
+  font-weight: 600;
+  border-left-color: var(--mstl-brand);
+}
+
+.md-nav--secondary .md-nav__title {
+  padding-left: 0.5rem;
+}
+
+.md-nav--secondary .md-nav__link {
+  font-size: 0.66rem;
+}
+
+/* ── 6. 正文排版 ──────────────────────────────────────────────────────── */
+
+.md-typeset h1 {
+  font-size: 1.9rem;
+  font-weight: 700;
+  letter-spacing: -0.015em;
+  color: var(--mstl-fg);
+  margin-bottom: 0.6rem;
+}
+
+.md-typeset h2 {
+  font-size: 1.06rem;
+  font-weight: 600;
+  letter-spacing: -0.005em;
+  padding-top: 1.1rem;
+  border-top: 1px solid var(--mstl-line);
+  color: var(--mstl-fg);
+}
+
+.md-typeset h3 {
+  font-size: 0.86rem;
+  font-weight: 600;
+  color: var(--mstl-fg);
+}
+
+.md-typeset h4 {
+  font-family: var(--mstl-mono);
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--mstl-dim);
+}
+
+/* 标题锚点：默认只在悬停时淡入，别让 # 挤在标题里 */
+.md-typeset .headerlink {
+  color: var(--mstl-line-strong);
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+
+.md-typeset h1:hover .headerlink,
+.md-typeset h2:hover .headerlink,
+.md-typeset h3:hover .headerlink {
+  opacity: 1;
+}
+
+.md-typeset a {
+  color: var(--mstl-brand);
+  text-decoration: none;
+  border-bottom: 1px solid rgba(76, 91, 212, 0.32);
+  transition: border-color 0.12s, color 0.12s;
+}
+
+.md-typeset a:hover {
+  color: var(--mstl-brand-2);
+  border-bottom-color: var(--mstl-brand-2);
+}
+
+.md-typeset a:focus {
+  outline: 2px solid var(--mstl-brand-2);
+  outline-offset: 2px;
+}
+
+.md-typeset hr {
+  border-bottom: 1px solid var(--mstl-line);
+}
+
+.md-typeset blockquote {
+  color: var(--mstl-dim);
+  border-left: 2px solid var(--mstl-brand);
+  padding-left: 1rem;
+}
+
+.md-typeset ul li::marker,
+.md-typeset ol li::marker {
+  color: var(--mstl-faint);
+}
+
+/* ── 7. 代码 ──────────────────────────────────────────────────────────── */
+
+.md-typeset code {
+  font-family: var(--mstl-mono);
+  font-size: 0.82em;
+  padding: 0.12em 0.36em;
+  border: 1px solid var(--mstl-line);
+  border-radius: 4px;
+  background: var(--mstl-surface);
+  color: var(--mstl-fg);
+  box-shadow: none;
+}
+
+.md-typeset pre > code {
+  border: 1px solid var(--mstl-line);
+  border-radius: var(--mstl-radius);
+  padding: 0.9rem 1rem;
+  background: var(--mstl-sunken);
+  font-size: 0.72rem;
+  line-height: 1.7;
+}
+
+.md-typeset .highlight {
+  border-radius: var(--mstl-radius);
+}
+
+.md-typeset .highlight pre {
+  margin: 0;
+}
+
+/* 复制按钮：平时不打扰 */
+.md-clipboard {
+  color: var(--mstl-faint);
+}
+
+.md-clipboard:hover {
+  color: var(--mstl-brand-2);
+}
+
+/* ── 8. 表格：用线，不用斑马纹 ────────────────────────────────────────── */
+
 .md-typeset table:not([class]) {
   display: block;
   overflow-x: auto;
+  border: 1px solid var(--mstl-line);
+  border-radius: var(--mstl-radius);
+  font-size: 0.72rem;
+  box-shadow: none;
+}
+
+.md-typeset table:not([class]) th {
+  font-family: var(--mstl-mono);
+  font-size: 0.6rem;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--mstl-faint);
+  background: var(--mstl-sunken);
+  border-bottom: 1px solid var(--mstl-line);
+  padding: 0.6rem 0.8rem;
+}
+
+.md-typeset table:not([class]) td {
+  border-top: 1px solid var(--mstl-line);
+  padding: 0.6rem 0.8rem;
+  vertical-align: top;
+}
+
+.md-typeset table:not([class]) tr:first-child td {
+  border-top: none;
 }
 
 /* 首页特性表格首列不换行，读起来更整齐 */
 .md-typeset table:not([class]) th:first-child,
 .md-typeset table:not([class]) td:first-child {
   white-space: nowrap;
+}
+
+/* ── 9. 提示块：细线 + 左侧 2px 色条，不用整块色底 ────────────────────── */
+
+.md-typeset .admonition,
+.md-typeset details {
+  background: var(--mstl-surface);
+  border: 1px solid var(--mstl-line);
+  border-left: 2px solid var(--mstl-brand);
+  border-radius: var(--mstl-radius);
+  box-shadow: none;
+  font-size: 0.74rem;
+}
+
+.md-typeset .admonition-title,
+.md-typeset summary {
+  font-family: var(--mstl-mono);
+  font-size: 0.62rem;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  background: transparent !important;
+  border-bottom: 1px solid var(--mstl-line);
+  padding: 0.5rem 0.8rem;
+}
+
+.md-typeset .admonition.note,
+.md-typeset .admonition.info,
+.md-typeset details.note {
+  border-left-color: var(--mstl-info);
+}
+
+.md-typeset .admonition.tip,
+.md-typeset .admonition.success,
+.md-typeset .admonition.done {
+  border-left-color: var(--mstl-ok);
+}
+
+.md-typeset .admonition.warning,
+.md-typeset .admonition.caution,
+.md-typeset .admonition.attention {
+  border-left-color: var(--mstl-warn);
+}
+
+.md-typeset .admonition.danger,
+.md-typeset .admonition.failure,
+.md-typeset .admonition.bug {
+  border-left-color: var(--mstl-err);
+}
+
+/* ── 10. 标签页、按钮、搜索 ───────────────────────────────────────────── */
+
+.md-typeset .tabbed-set > label {
+  font-family: var(--mstl-mono);
+  font-size: 0.62rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--mstl-dim);
+  border-bottom: 1px solid var(--mstl-line);
+}
+
+.md-typeset .tabbed-set > input:checked + label {
+  color: var(--mstl-fg);
+  border-bottom-color: var(--mstl-brand);
+}
+
+.md-typeset .tabbed-content {
+  padding-top: 0.8rem;
+}
+
+.md-typeset .md-button {
+  font-family: var(--mstl-mono);
+  font-size: 0.66rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  border: 1px solid var(--mstl-brand);
+  border-radius: var(--mstl-radius);
+  background: var(--mstl-brand);
+  color: #ffffff;
+  box-shadow: none;
+  padding: 0.5rem 1rem;
+  transition: background 0.12s, border-color 0.12s, color 0.12s;
+}
+
+.md-typeset .md-button:hover {
+  background: var(--mstl-brand-2);
+  border-color: var(--mstl-brand-2);
+  color: #ffffff;
+}
+
+.md-typeset .md-button--primary {
+  background: transparent;
+  color: var(--mstl-brand);
+}
+
+.md-typeset .md-button--primary:hover {
+  background: var(--mstl-brand);
+  color: #ffffff;
+}
+
+.md-search__form {
+  background: var(--mstl-sunken);
+  border: 1px solid var(--mstl-line);
+  border-radius: var(--mstl-radius);
+  box-shadow: none;
+}
+
+.md-search__form:hover {
+  background: var(--mstl-sunken);
+  border-color: var(--mstl-line-strong);
+}
+
+.md-search__input {
+  font-size: 0.72rem;
+}
+
+.md-search__output {
+  border: 1px solid var(--mstl-line);
+  border-radius: var(--mstl-radius);
+}
+
+/* ── 11. 首页题头：一行「规格表」式的品牌带 ───────────────────────────── */
+
+.mstl-band {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  flex-wrap: wrap;
+  padding: 0.7rem 0.9rem;
+  margin: 0 0 1.6rem;
+  border: 1px solid var(--mstl-line);
+  border-radius: var(--mstl-radius);
+  background: var(--mstl-surface);
+}
+
+.mstl-band__mark {
+  display: inline-flex;
+  flex-shrink: 0;
+}
+
+.mstl-band__mark svg {
+  width: 26px;
+  height: 26px;
+  display: block;
+}
+
+.mstl-band__name {
+  font-family: var(--mstl-mono);
+  font-size: 0.62rem;
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--mstl-fg);
+}
+
+.mstl-band__chips {
+  display: inline-flex;
+  gap: 0.35rem;
+  margin-left: auto;
+}
+
+.mstl-band__chips i {
+  font-style: normal;
+  font-family: var(--mstl-mono);
+  font-size: 0.56rem;
+  letter-spacing: 0.08em;
+  padding: 0.16rem 0.5rem;
+  border: 1px solid var(--mstl-line);
+  border-radius: 999px;
+  color: var(--mstl-dim);
+}
+
+@media screen and (max-width: 44.9375em) {
+  .mstl-band__chips {
+    margin-left: 0;
+  }
+}
+
+/* ── 12. 页脚 ─────────────────────────────────────────────────────────── */
+
+.md-footer {
+  background: var(--mstl-surface);
+  border-top: 1px solid var(--mstl-line);
+  color: var(--mstl-dim);
+}
+
+.md-footer-meta {
+  background: var(--mstl-sunken);
+  border-top: 1px solid var(--mstl-line);
+}
+
+.md-copyright {
+  font-family: var(--mstl-mono);
+  font-size: 0.58rem;
+  letter-spacing: 0.04em;
+  color: var(--mstl-faint);
+}
+
+.md-footer__link {
+  border-bottom: none;
+}
+
+.md-footer__direction {
+  font-family: var(--mstl-mono);
+  font-size: 0.56rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--mstl-faint);
+}
+
+/* ── 13. 细节 ─────────────────────────────────────────────────────────── */
+
+/* 键盘键位（pymdownx.keys） */
+.md-typeset kbd {
+  font-family: var(--mstl-mono);
+  font-size: 0.72em;
+  background: var(--mstl-surface);
+  border: 1px solid var(--mstl-line);
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  color: var(--mstl-fg);
+  box-shadow: none;
+}
+
+/* 暗色模式在内容区后面铺一层极淡的 80px 竖栅格，和宣传片舞台同一套栅格 */
+[data-md-color-scheme="slate"] .md-main::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background-image: repeating-linear-gradient(
+    to right,
+    rgba(169, 163, 153, 0.16) 0 1px,
+    transparent 1px 80px
+  );
+  z-index: 0;
+}
+
+[data-md-color-scheme="slate"] .md-container,
+[data-md-color-scheme="slate"] .md-sidebar,
+[data-md-color-scheme="slate"] .md-content {
+  position: relative;
+  z-index: 1;
+}
+
+/* 打印：去掉顶栏与栅格 */
+@media print {
+  .md-header,
+  .md-tabs,
+  .md-sidebar,
+  .md-footer {
+    display: none;
+  }
+
+  [data-md-color-scheme="slate"] .md-main::before {
+    display: none;
+  }
 }
