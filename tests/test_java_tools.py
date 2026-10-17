@@ -240,5 +240,36 @@ class SafeExtractTarTest(unittest.TestCase):
         self.assertFalse(os.path.exists(self._outside("TAROUT.txt")))
 
 
+class JdkChecksumCoverageTest(unittest.TestCase):
+    """每个能下的 JDK 归档都得有 sha256 钉在 JDK_SHA256 里。
+
+    少钉一条不会报错，只会悄悄退回「只检查能不能解压出 bin/java」——
+    而那条路的防护力约等于零，所以用测试把它钉住。
+    """
+
+    def test_every_mirror_url_has_a_pinned_hash(self):
+        missing = sorted(f"{ver}/{os_name}"
+                         for ver, oses in jt.JDK_MIRROR_URLS.items()
+                         for os_name in oses
+                         if (ver, os_name) not in jt.JDK_SHA256)
+        self.assertEqual(missing, [])
+
+    def test_no_pin_without_a_url(self):
+        extra = sorted(f"{ver}/{os_name}"
+                       for ver, os_name in jt.JDK_SHA256
+                       if os_name not in jt.JDK_MIRROR_URLS.get(ver, {}))
+        self.assertEqual(extra, [])
+
+    def test_pins_are_lowercase_sha256_hex(self):
+        for (ver, os_name), value in jt.JDK_SHA256.items():
+            self.assertRegex(value, r"^[0-9a-f]{64}$", f"{ver}/{os_name} => {value}")
+
+    def test_url_points_at_the_pinned_version(self):
+        """URL 换了版本、哈希没跟着换，校验就会永远失败。"""
+        for ver, oses in jt.JDK_MIRROR_URLS.items():
+            for os_name, url in oses.items():
+                self.assertIn(f"-{ver}.", os.path.basename(url), url)
+
+
 if __name__ == "__main__":
     unittest.main()

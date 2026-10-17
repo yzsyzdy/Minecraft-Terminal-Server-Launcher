@@ -344,15 +344,18 @@ JDK_MIRROR_URLS: dict[str, dict[str, str]] = {
 }
 
 # 各版本 JDK 归档的 sha256，来源是 GitHub 上 graalvm/graalvm-ce-builds 对应
-# release 的 asset digest（https://api.github.com/repos/graalvm/graalvm-ce-builds
-# /releases/tags/jdk-<ver>）。镜像站只镜像字节、不提供校验值，而这里下载的是
-# 要拿去跑服务器的 java：镜像被换成别的包、被中间人改过、或者只下到一半，都会
-# 一直要到 java 启动失败才暴露。
+# release 里的 .sha256 sidecar（.../releases/download/jdk-<ver>/<归档>.sha256）。
+# 镜像站只镜像字节、不提供校验值，而这里下载的是要拿去跑服务器的 java：镜像被
+# 换成别的包、被中间人改过、或者只下到一半，都会一直要到 java 启动失败才暴露。
 #
-# 17.0.9 / 21.0.2 的官方值是空的：这两个 release 不返回 digest，而 .sha256
-# 资产在部分网络下取不到。缺项时退化成「必须能解压出 bin/java」——挡得住
-# 错误页和截断包，挡不住蓄意换包，所以下载时会明确告警而不是假装校验过了。
+# 25.0.2 这两个值同时出现在 GitHub API 的 asset digest 和 sidecar 里，两条独立
+# 渠道完全一致；17.0.9 / 21.0.2 是旧 release（API 不返回 digest），只从 sidecar
+# 取。新增版本时记得一起补，tests/test_java_tools.py 会检查覆盖是否完整。
 JDK_SHA256: dict[tuple[str, str], str] = {
+    ("17", "windows"): "285e045bfc0b87d2b61958fea97444c3c6c7e68fba3fdbbe146622328b52ec38",
+    ("17", "linux"): "e47ba7229cef02393e19d5b8f46f7f1cab4829dd17bfe84d5431fc8ff0e22a96",
+    ("21", "windows"): "e17b7bead097bf372a5c75df17815b0a2f30b777a019d25eff7706b21421f7fa",
+    ("21", "linux"): "b048069aaa3a99b84f5b957b162cc181a32a4330cbc35402766363c5be76ae48",
     ("25", "windows"): "72edc27ce2dd3c156332144a339c97995745cae291205ed2f9b5cc26aa9cb422",
     ("25", "linux"): "e0be791c8fda4d03b6b0a0cb824fef3149736170057b3a515252b44419606af0",
 }
