@@ -136,3 +136,15 @@ mkdocs build --strict # strict build; warnings become failures. Worth running be
 ```
 
 Chinese is the default language, and the English version lives under `docs/en/`. Pages without a translation fall back to the default language, so you can finish Chinese first and catch up on English later.
+
+!!! warning "Anchors on Chinese headings"
+
+    The default slugify strips non-ASCII characters entirely, so `## 通用实例` gets an id like `_8` (numbered by order of appearance) and a link to `#通用实例` from another page silently breaks. MkDocs only prints an INFO line for it and `--strict` does not fail, so broken anchors are easy to miss.
+
+    When you need to link to a Chinese heading from another page, attach an explicit ASCII anchor with `attr_list`:
+
+    ```markdown
+    ## 通用实例 {#generic-instances}
+    ```
+
+    and link to `[通用实例](../features/web-panel.md#generic-instances)`. English headings are unaffected — `## Generic instances` already slugifies to `generic-instances`.

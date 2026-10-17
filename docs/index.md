@@ -2,7 +2,7 @@
 
 **Minecraft Terminal Server Launcher** — 轻量级、零外部依赖的 Minecraft 服务端管理器。
 
-用 Python 标准库写成的终端工具，负责把「下载核心 → 装 Java → 配内存 → 开服 → 管插件模组」这条链路收进一个交互菜单里。Windows 和 Linux 都能跑。
+用 Python 标准库写成的终端工具，负责把「下载核心 → 装 Java → 配内存 → 开服 → 管插件模组」这条链路收进一个交互菜单里。Windows、Linux 和 macOS 都能跑。
 
 ## 它解决什么
 

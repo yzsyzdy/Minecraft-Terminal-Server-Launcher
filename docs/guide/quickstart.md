@@ -81,7 +81,7 @@ java_list.json   # Java 检测缓存（首次检测后生成）
 
 ### 方式三：新建通用实例
 
-主菜单 → `[3] 新建实例` → `[2] 通用实例`。它不跑 Minecraft，而是跑你指定的一个可执行文件，或者一段 `cmd` / `powershell` 命令；一样有启停、实时控制台与日志。详见[通用实例](../features/web-panel.md#通用实例)。
+主菜单 → `[3] 新建实例` → `[2] 通用实例`。它不跑 Minecraft，而是跑你指定的一个可执行文件，或者一段 `cmd` / `powershell` 命令；一样有启停、实时控制台与日志。详见[通用实例](../features/web-panel.md#generic-instances)。
 
 ## 启动
 

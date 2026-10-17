@@ -174,3 +174,15 @@ mkdocs build --strict # 严格模式构建，警告即失败，提交前建议�
 ```
 
 中文是默认语言，英文版放在 `docs/en/` 下。未翻译的页面会回落到默认语言，因此可以先把中文写完再补英文。
+
+!!! warning "中文标题的锚点"
+
+    默认的 slugify 会把中文字符整段剥掉：`## 通用实例` 生成的 id 是 `_8` 这种按出现顺序排的串，别的页面写 `#通用实例` 是链不过去的（mkdocs 只打一条 INFO，`--strict` 也不会失败，所以坏链很容易漏掉）。
+
+    需要跨页引用某个中文标题时，用 `attr_list` 给它挂一个显式锚点，锚点用 ASCII：
+
+    ```markdown
+    ## 通用实例 {#generic-instances}
+    ```
+
+    链接写成 `[通用实例](../features/web-panel.md#generic-instances)`。英文标题不受影响，`## Generic instances` 天然就是 `generic-instances`。

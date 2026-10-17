@@ -2,7 +2,7 @@
 
 **Minecraft Terminal Server Launcher** — a lightweight, zero-dependency Minecraft server manager.
 
-A terminal tool written entirely with the Python standard library. It folds the whole chain of "download a core → set up Java → allocate memory → start the server → manage plugins and mods" into a single interactive menu. Windows and Linux both work.
+A terminal tool written entirely with the Python standard library. It folds the whole chain of "download a core → set up Java → allocate memory → start the server → manage plugins and mods" into a single interactive menu. Windows, Linux and macOS all work.
 
 ## What it solves
 
