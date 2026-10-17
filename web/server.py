@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import atexit
 import hmac
+import ipaddress
 import json
 import os
 import queue
@@ -66,6 +67,18 @@ MAX_UPLOAD_BYTES = 512 * 1024 * 1024
 # /api/file/write 的正文，受 fileops.MAX_EDIT_BYTES（2 MiB）约束，再加上
 # 转义与其余字段，8 MiB 已经很宽裕。
 MAX_JSON_BODY_BYTES = 8 * 1024 * 1024
+
+# 单个连接的空闲/单次收发超时（秒）。没有它的时候，一个连上来就不说话的
+# socket 能让处理线程永远停在 readline 上：daemon_threads 只是让进程能退，
+# 活着的线程和它的 socket 一样占着资源。SSE 那条流每 15 秒发一次心跳，
+# 所以这里只要大于 15 就不会误杀正常的长连接。
+SOCKET_TIMEOUT = 30
+
+# 回 401 / 报错前愿意替客户端读掉的请求体上限。排空本来是为了保住长连接，
+# 但声明多大的 Content-Length 完全由客户端说了算：一个匿名请求写着
+# Content-Length: 1000000000000 就能让我们一直堵在读上面。超过这个数就直接
+# 关连接——关掉比错位安全，而且这么大的请求体本来也不该被当成下一个请求。
+MAX_DRAIN_BYTES = 1024 * 1024
 
 # 下载响应头里的文件名要塞进 Content-Disposition，而文件名是用户可控的：
 # Linux 上 \r 和 \n 都是合法文件名字符，直接拼进响应头就是一次头注入。
@@ -433,22 +446,40 @@ class _BodyStream:
 
 
 # 导入分「解压出计划 → 选核心 → 落地」两步，中间要把解压结果留在磁盘上。
-# plan_import 用的临时目录是固定的 .import_temp，所以同一时刻只有最新那一份
-# 计划是有效的：新的一次解压会把上一份覆盖掉。这里也只保留最新的一份，并且
-# 不对旧计划调 abort——那会连新解压出来的目录一起删掉。
+# 每份计划都有自己的临时目录（plan_import 用 mkdtemp），所以旧计划不会挡住
+# 新计划；但旧计划的目录得有人来清，否则连点几次「扫描」就在项目根下堆一堆
+# .import_temp-*。这里只保留最新的一份，换掉时顺手把上一份 abort 掉。
 _IMPORT_PLANS: dict[str, Any] = {}
 _IMPORT_PLANS_LOCK = threading.Lock()
 
 
 def _remember_plan(plan) -> None:
     with _IMPORT_PLANS_LOCK:
+        stale = list(_IMPORT_PLANS.values())
         _IMPORT_PLANS.clear()
         _IMPORT_PLANS[plan.zip_path] = plan
+    for old in stale:
+        abort_import(old)
 
 
 def _take_plan(zip_path: str):
     with _IMPORT_PLANS_LOCK:
         return _IMPORT_PLANS.pop(zip_path, None)
+
+
+def _is_loopback_address(address: str) -> bool:
+    """来源地址是不是本机回环（127.0.0.0/8 或 ::1）。
+
+    只在「没配 token」时用得上：那时只有本机才配享受免鉴权。解析不出来的
+    地址一律当外部来源处理——宁可多要求一次 token。
+    """
+    text = str(address or "").strip().strip("[]")
+    if text.startswith("::ffff:"):        # 双栈监听下 IPv4 会带这个前缀
+        text = text[len("::ffff:"):]
+    try:
+        return ipaddress.ip_address(text).is_loopback
+    except ValueError:
+        return False
 
 
 def _make_handler(manager: RuntimeManager, servers_dir: str, token: str,
@@ -462,6 +493,9 @@ def _make_handler(manager: RuntimeManager, servers_dir: str, token: str,
     class Handler(BaseHTTPRequestHandler):
         server_version = "MSTL"
         protocol_version = "HTTP/1.1"
+        # socketserver 会在 setup() 里拿这个值给连接 setblocking/settimeout，
+        # 所以它同时管住「连上来不发请求」和「发到一半不动了」两种情况。
+        timeout = SOCKET_TIMEOUT
         _body_read = 0
 
         def handle_one_request(self) -> None:
@@ -531,7 +565,12 @@ def _make_handler(manager: RuntimeManager, servers_dir: str, token: str,
         def _authed(self, query: dict[str, str]) -> bool:
             expected = self._expected_token()
             if not expected:
-                return True
+                # 「没配 token 就不校验」是既定行为：面板默认只监听本机，
+                # start_background / run_web 也会先补一个 token 再启动。
+                # 但它不能顺带变成「谁连上都算本机」——一旦 --host 0.0.0.0
+                # 暴露出去而 token 又是空的，整块面板就是裸的。这种情况下
+                # 只认回环来源。
+                return _is_loopback_address(self.client_address[0])
             # 定长比较：用 == 逐字符短路会通过响应时间泄露 token 前缀。
             # 另外别再拿 "mstl_token=xxx" 去 in 整个 Cookie 头做子串匹配，
             # 别的 cookie 的值里带上这一串也会被当成通过。
@@ -544,6 +583,9 @@ def _make_handler(manager: RuntimeManager, servers_dir: str, token: str,
             self.send_header("Content-Type", content_type)
             # 面板前后端都在本机迭代，别让浏览器拿旧页面
             self.send_header("Cache-Control", "no-store")
+            # 首次进面板时 token 在地址栏里（?token=...），带外链的页面上
+            # 一旦发生跳转就会顺着 Referer 把它送出去。这里直接禁掉。
+            self.send_header("Referrer-Policy", "no-referrer")
             self.send_header("Content-Length", str(len(body)))
             for key, value in (extra_headers or []):
                 self.send_header(key, value)
@@ -625,6 +667,12 @@ def _make_handler(manager: RuntimeManager, servers_dir: str, token: str,
             否则会阻塞在下一个请求上——上传到一半失败时就是这样。
             """
             remaining = max(0, length - self._body_read)
+            if remaining > MAX_DRAIN_BYTES:
+                # 声明了一个自己也不打算发的巨大请求体，是这类排空逻辑最容易被
+                # 反用的一点。不读、直接关连接：已经读走的字节不会被错当成
+                # 下一个请求，而这条连接上也不会再有「下一个请求」了。
+                self.close_connection = True
+                return
             while remaining > 0:
                 chunk = self.rfile.read(min(65536, remaining))
                 if not chunk:

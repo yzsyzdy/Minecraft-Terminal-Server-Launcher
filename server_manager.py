@@ -11,6 +11,7 @@
 import os
 import json
 import glob
+import tempfile
 import threading
 import time
 from typing import Any
@@ -293,13 +294,18 @@ def save_server_config(config: dict[str, Any], server_dir: str) -> None:
     _normalize_server_config(merged)
     config_path = os.path.join(server_dir, ".server.json")
     os.makedirs(server_dir, exist_ok=True)
-    # 原子写。以前是直接 open(path, "w") 截断再写：写到一半断电、或者写入
-    # 抛异常，留下的就是个残缺的 JSON。load_server_config 遇到解析失败会
-    # 静默回退到默认配置，于是实例在界面上「消失」成一份空白配置——比报错
-    # 难查得多。写临时文件再 os.replace 就不会出现中间态。
-    tmp_path = config_path + ".mstl-tmp"
+    # 先写临时文件再 os.replace：直接 open(path, "w") 会截断原文件，写到一半
+    # 断电或抛异常就留下残缺 JSON，而 load_server_config 解析失败会静默回退
+    # 到默认配置——实例在界面上「消失」成一份空白配置，比报错难查得多。
+    #
+    # 临时名还必须是唯一的。以前固定写 ".server.json.mstl-tmp"，两个请求同时
+    # 保存同一个实例时，后开的那个会把前一个正在写的内容截断，先收工的一方
+    # 再 os.replace 上去，落盘的就是别人的半截 JSON。mkstemp 保证唯一，并且
+    # 落在同一个目录里——os.replace 要求源和目标在同一个文件系统上。
+    fd, tmp_path = tempfile.mkstemp(prefix=".server.json-", suffix=".mstl-tmp",
+                                    dir=server_dir)
     try:
-        with open(tmp_path, "w", encoding="utf-8") as f:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
             json.dump(merged, f, ensure_ascii=False, indent=2)
         os.replace(tmp_path, config_path)
     except OSError:

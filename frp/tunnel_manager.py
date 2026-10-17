@@ -267,7 +267,17 @@ def download_frpc(project_dir: str, version: str = "",
         return None
 
     say("  [frp] 正在解压...")
-    if not frpc_files.extract_binary(archive_path, _frp_dir(project_dir)):
+    extracted = frpc_files.extract_binary(archive_path, _frp_dir(project_dir))
+    # 解出来的东西还得真的是本平台的可执行文件。镜像返回错误页、被换成别的
+    # 平台的包、或者只下到一半，以前都会算「安装成功」——面板显示已就绪，
+    # 一直到真正启动隧道才报错，而那时候用户已经在排查网络问题了。
+    if extracted and not frpc_files.looks_like_executable(extracted):
+        try:
+            os.remove(extracted)
+        except OSError:
+            pass
+        extracted = None
+    if not extracted:
         say("  [frp] 解压失败")
         try:
             os.remove(archive_path)

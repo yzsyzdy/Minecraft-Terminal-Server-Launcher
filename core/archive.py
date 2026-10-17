@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import os
 import tarfile
+import tempfile
 import zipfile
 from typing import NamedTuple, Optional
 
@@ -151,7 +152,7 @@ def extract(root: str, src_rel: str, dest_rel: Optional[str] = None,
             skipped += 1
             return
         parent = os.path.dirname(target)
-        tmp = target + ".mstl-extract"
+        tmp = ""
         try:
             # 建父目录必须留在 try 里面。放在外面时，FileExistsError 会一路
             # 穿出 _write，被调用方那个 except OSError 接住并翻译成
@@ -162,7 +163,13 @@ def extract(root: str, src_rel: str, dest_rel: Optional[str] = None,
             # web.error.write_failed，和本函数其它 OSError 的说法一致。
             if parent and not os.path.isdir(parent):
                 os.makedirs(parent, exist_ok=True)
-            with open(tmp, "wb") as out:
+            # 临时名必须唯一：以前固定拼 target + ".mstl-extract"，两个解压
+            # 任务同时往同一个目标写时，会互相把对方写到一半的文件
+            # os.replace 上去。mkstemp 还必须在建好父目录之后——父目录不存在
+            # 时它直接 FileNotFoundError。
+            fd, tmp = tempfile.mkstemp(prefix=".mstl-", suffix=".mstl-extract",
+                                       dir=parent or ".")
+            with os.fdopen(fd, "wb") as out:
                 while True:
                     chunk = stream.read(1024 * 1024)
                     if not chunk:

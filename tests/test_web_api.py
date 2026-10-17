@@ -209,6 +209,45 @@ class NoTokenTest(PanelCase):
         self.assertEqual(self.status_of("/api/state"), 200)
 
 
+class OpenPanelScopeTest(unittest.TestCase):
+    """没配 token 时「放开」只对回环地址成立。
+
+    以前 `_authed` 见到空 token 就 `return True`：用户把面板挂到反向代理后面
+    （或者本来就监听 0.0.0.0）而 config 里 token 恰好被清空/读不出来时，整个
+    面板对公网裸奔。现在空 token 只在请求确实来自本机时才算放行。
+    """
+
+    def test_loopback_addresses_are_trusted(self):
+        for address in ("127.0.0.1", "127.0.0.5", "::1", "::ffff:127.0.0.1"):
+            self.assertTrue(web._is_loopback_address(address), address)
+
+    def test_anything_else_is_not(self):
+        for address in ("192.168.1.5", "10.0.0.1", "0.0.0.0", "8.8.8.8", "", "nope"):
+            self.assertFalse(web._is_loopback_address(address), address)
+
+
+class OversizedBodyTest(PanelCase):
+    """未鉴权的请求不能照着 Content-Length 的声明去读。
+
+    面板的每条连接都在自己的线程里跑，排空请求体是为了 keep-alive 对齐；但
+    没通过鉴权时替对方读满它声明的 4GB，等于把线程白送出去。
+    """
+
+    def test_huge_declared_body_is_not_drained(self):
+        conn = http.client.HTTPConnection("127.0.0.1", self.port, timeout=10)
+        try:
+            conn.putrequest("POST", "/api/start")
+            conn.putheader("Content-Length", str(4 * 1024 * 1024 * 1024))
+            conn.endheaders()
+            # 一个字节都不发：服务端必须自己放弃排空并回 401
+            self.assertEqual(conn.getresponse().status, 401)
+        finally:
+            conn.close()
+
+    def test_drain_cap_is_small(self):
+        self.assertLessEqual(web.MAX_DRAIN_BYTES, 8 * 1024 * 1024)
+
+
 class StateContractTest(PanelCase):
     instances = ("a", "b")
 

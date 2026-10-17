@@ -5,6 +5,44 @@
 
 `v1.1.35` 及更早版本的说明见 [GitHub Releases](https://github.com/yzsyzdy/Minecraft-Terminal-Server-Launcher/releases)。
 
+## [未发布]
+
+### 安全
+
+- **修复导入实例时的目录穿越**（高危）：面板「导入压缩包」把用户填的实例名原样
+  拼进 `servers/<name>`，填 `../x` 或绝对路径就能在 `servers/` 之外建目录并写入
+  整包内容。现在导入和新建实例走同一套 `validate_instance_name`（长度、非法字符、
+  Windows 保留名），压缩包文件名推出的默认名也先做清洗。
+- **空 token 不再等于「谁都能进」**：以前配置里 token 为空时鉴权直接放行，一旦
+  用 `--host 0.0.0.0` 暴露出去（或挂在反向代理后面）而 token 又恰好没写进配置，
+  整个面板对公网裸奔。现在只在请求确实来自回环地址时放开，其它来源仍然要求 token。
+- **未鉴权请求不再按声明的 `Content-Length` 排空请求体**：声明 4 GB 却一个字节
+  都不发的匿名请求，以前会让服务端一直堵在读上面。超过 1 MiB 就直接关连接。
+- 所有面板响应加 `Referrer-Policy: no-referrer`，避免地址栏里的 `?token=` 顺着
+  Referer 漏给外链。
+- **JDK 下载开始校验哈希**：以前从第三方镜像下完直接解压，镜像返回错误页、被
+  换包或下到一半都要等 java 启动失败才暴露。现在有官方校验值的版本（25.0.2）
+  下载后必须匹配，没有官方值的版本会明确告警而不是假装校验过了。
+- **frpc 下载后校验可执行文件头**：解出来的东西不是本平台的 PE/ELF/Mach-O 就
+  判失败并删掉，不再显示「已就绪」。
+
+### 修复
+
+- 面板连接加 30 秒超时：连上来不发请求的 socket 以前能永久占住一个处理线程。
+- POSIX 上降低进程优先级不再用 `preexec_fn`（多线程进程里 fork 后只允许
+  async-signal-safe 调用，网页面板正是多线程的），改为 spawn 之后调
+  `os.setpriority`；Windows 上 `SetPriorityClass` 失败现在会说出来，而不是
+  假装已设为低优先级。
+- 三处原子写还在用固定临时名（`server_manager.save_server_config`、
+  `core/archive.extract`、`java_tools._extract_and_rename_jdk`），并发写同一目标
+  时会互相截断，JDK 那次更会把别人解到一半的目录整个删掉。统一换成 `mkstemp`。
+- 面板每次「扫描」导入包都会泄漏一个 `.import_temp-*` 目录，现在换计划时顺手
+  abort 掉上一份。
+- `neko` 语言补齐 59 个缺失的 key（整块 `frp.*`/`tunnel.*` 与部分 `settings.*`），
+  中文界面不再混着英文提示。
+- `build.bat` 与英文构建文档里的版本号还停在 1.1.37，跟上 `CHANGELOG` 的 1.1.38。
+- `.gitignore` 忽略下划线开头的本地临时脚本（`_*.bat` / `_*.txt`）。
+
 ## [1.1.38] - 2026-10-17
 
 ### 新增

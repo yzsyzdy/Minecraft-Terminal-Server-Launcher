@@ -11,11 +11,12 @@ import glob
 import zipfile
 import tarfile
 import shutil
+import tempfile
 from datetime import datetime, timezone
 from dataclasses import dataclass, asdict
 from typing import Optional, Any
 
-from download_msl import _download_with_progress
+from download_msl import _download_with_progress, _verify_sha256
 from i18n import t
 
 
@@ -342,6 +343,20 @@ JDK_MIRROR_URLS: dict[str, dict[str, str]] = {
     },
 }
 
+# 各版本 JDK 归档的 sha256，来源是 GitHub 上 graalvm/graalvm-ce-builds 对应
+# release 的 asset digest（https://api.github.com/repos/graalvm/graalvm-ce-builds
+# /releases/tags/jdk-<ver>）。镜像站只镜像字节、不提供校验值，而这里下载的是
+# 要拿去跑服务器的 java：镜像被换成别的包、被中间人改过、或者只下到一半，都会
+# 一直要到 java 启动失败才暴露。
+#
+# 17.0.9 / 21.0.2 的官方值是空的：这两个 release 不返回 digest，而 .sha256
+# 资产在部分网络下取不到。缺项时退化成「必须能解压出 bin/java」——挡得住
+# 错误页和截断包，挡不住蓄意换包，所以下载时会明确告警而不是假装校验过了。
+JDK_SHA256: dict[tuple[str, str], str] = {
+    ("25", "windows"): "72edc27ce2dd3c156332144a339c97995745cae291205ed2f9b5cc26aa9cb422",
+    ("25", "linux"): "e0be791c8fda4d03b6b0a0cb824fef3149736170057b3a515252b44419606af0",
+}
+
 
 def _version_tuple(v: str) -> tuple:
     parts = []
@@ -469,11 +484,13 @@ def _safe_extract_tar(tf: tarfile.TarFile, dest: str) -> None:
 
 def _extract_and_rename_jdk(archive: str, target_dir: str, os_name: str) -> Optional[str]:
     """Extract JDK archive and move the extracted root to target_dir."""
+    tmp = ""
     try:
-        tmp = os.path.join(os.path.dirname(target_dir), ".jdk_extract_tmp")
-        if os.path.isdir(tmp):
-            shutil.rmtree(tmp)
-        os.makedirs(tmp, exist_ok=True)
+        # 临时目录必须唯一。以前固定用 ".jdk_extract_tmp"，而且开头先 rmtree：
+        # 另一处（另一个终端、面板里另一次安装）正在解压时，这次会把对方解到
+        # 一半的目录整个删掉。mkdtemp 顺带省掉「先删再建」这两步。
+        tmp = tempfile.mkdtemp(prefix=".jdk_extract_",
+                               dir=os.path.dirname(target_dir) or ".")
         if os_name == "windows":
             with zipfile.ZipFile(archive, "r") as zf:
                 roots = set()
@@ -496,10 +513,14 @@ def _extract_and_rename_jdk(archive: str, target_dir: str, os_name: str) -> Opti
             src = os.path.join(tmp, root_dir)
             if os.path.isdir(src):
                 shutil.move(src, target_dir)
-        shutil.rmtree(tmp, ignore_errors=True)
     except Exception as e:
         print(t("jdk.extract_failed", msg=str(e)))
         return None
+    finally:
+        # 成功失败都要清。以前清理只在成功路径上，解压中途报错就把
+        # 上百 MB 的半成品永久留在项目目录里。
+        if tmp:
+            shutil.rmtree(tmp, ignore_errors=True)
 
     java_bin = "java.exe" if os_name == "windows" else "java"
     exe = os.path.join(target_dir, "bin", java_bin)
@@ -528,6 +549,16 @@ def _download_jdk(java_version: str, project_dir: str) -> Optional[str]:
         # 只按解压后的目录判断，所以 150–200MB 的半截归档会一直堆在项目目录里。
         _remove_quietly(dl)
         return None
+
+    expected = JDK_SHA256.get((java_version, os_name))
+    if expected:
+        # 不匹配时 _verify_sha256 会把文件删掉。
+        if not _verify_sha256(dl, expected):
+            print(t("jdk.sha256_mismatch", ver=java_version))
+            return None
+    else:
+        # 没有权威校验值就别假装校验过了——说清楚，把判断留给用户。
+        print(t("jdk.unverified", ver=java_version))
 
     print(t("jdk.extracting"))
     java_exe = _extract_and_rename_jdk(dl, jdk_dir, os_name)

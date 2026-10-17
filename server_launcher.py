@@ -61,7 +61,10 @@ def _set_priority_windows(handle: int, creationflags: int,
     if _WINDOWS_KERNEL32 is None or priority == "normal":
         return base_class
 
-    _WINDOWS_KERNEL32.SetPriorityClass(handle, base_class)
+    # SetPriorityClass 返回 0 就是失败（权限不够、句柄已失效）。以前不看返回值，
+    # 结果是优先级其实没设上，界面却显示「已设为最低」。
+    if not _WINDOWS_KERNEL32.SetPriorityClass(handle, base_class):
+        print(t("launch.priority_failed", priority=priority))
 
     # 只有 "low" 才启用_BG_BEGIN，否则 below_normal 会被意外覆盖为 idle
     if priority == "low":
@@ -80,10 +83,10 @@ def _start_priority_process(
     """按指定优先级启动子进程。
 
     Windows 通过 creationflags 和 SetPriorityClass 双重保证。
-    Unix/macOS 通过 preexec_fn 在 fork 后调用 os.nice()。
+    Unix/macOS 在 spawn 之后调 os.setpriority() 调整 nice 值。
     """
     creationflags = 0
-    preexec_fn = None
+    nice_val = 0
     system = platform.system()
 
     if system == "Windows" and priority in _PRIORITY_CLASS:
@@ -91,18 +94,28 @@ def _start_priority_process(
 
     if system != "Windows" and priority != "normal":
         nice_val = {"below_normal": 5, "low": 10}.get(priority, 0)
-        if nice_val:
-            preexec_fn = lambda: os.nice(nice_val)
 
     proc = subprocess.Popen(
-        cmd, cwd=cwd, creationflags=creationflags,
-        preexec_fn=preexec_fn, **popen_kw,
+        cmd, cwd=cwd, creationflags=creationflags, **popen_kw,
     )
 
+    # 降优先级放在 spawn 之后，不再用 preexec_fn。subprocess 文档写得很明白：
+    # 多线程进程里 preexec_fn 只允许调用 async-signal-safe 的函数，因为 fork
+    # 出来的子进程可能继承一把被别人持有、永远不会释放的锁。网页面板正是多线程
+    # 的（ThreadingHTTPServer），那条路上 os.nice() 有机会把 java 卡死在启动阶段。
+    # setpriority 对自己的子进程不需要额外权限，失败只意味着优先级没降下去。
+    if nice_val:
+        try:
+            os.setpriority(os.PRIORITY_PROCESS, proc.pid, nice_val)
+        except (AttributeError, OSError):
+            pass
+
     # Windows 上 creationflags 只在 CreateProcess 时生效，
-    # SetPriorityClass 可以覆盖后续调整
-    if system == "Windows" and priority != "normal":
-        _set_priority_windows(proc._handle, creationflags, priority)
+    # SetPriorityClass 可以覆盖后续调整。_handle 是 CPython 在 Windows 上
+    # 唯一暴露进程句柄的地方，没有公开等价物，取不到就跳过。
+    handle = getattr(proc, "_handle", None)
+    if system == "Windows" and priority != "normal" and handle:
+        _set_priority_windows(handle, creationflags, priority)
 
     return proc
 

@@ -160,5 +160,67 @@ class SafeExtractTest(unittest.TestCase):
         self.assertIs(transfer.MAX_TOTAL_BYTES, archive.MAX_TOTAL_BYTES)
 
 
+class CommitImportNameTest(unittest.TestCase):
+    """导入时落盘的目录名必须先过 validate_instance_name。
+
+    面板把用户填的实例名原样交给导入流程，而 `commit_import` 以前直接
+    `os.path.join(servers_dir, name)`：填 `../x` 就往 servers 外面写，填绝对
+    路径连 servers 目录都不看。这条路径必须和新实例同名，走同一套校验。
+    """
+
+    def setUp(self):
+        self.root = tempfile.mkdtemp(prefix="mstl-test-ci-")
+        self.servers = os.path.join(self.root, "servers")
+        self.temp = os.path.join(self.root, "temp")
+        os.makedirs(self.servers, exist_ok=True)
+        os.makedirs(self.temp, exist_ok=True)
+        with open(os.path.join(self.temp, "server.jar"), "wb") as f:
+            f.write(b"jar")
+
+    def tearDown(self):
+        shutil.rmtree(self.root, ignore_errors=True)
+
+    def _plan(self, suggested="pack"):
+        return transfer.ImportPlan(
+            zip_path=os.path.join(self.root, "pack.zip"),
+            temp_dir=self.temp, project_dir=self.root,
+            candidates=["server.jar"], suggested_name=suggested)
+
+    def test_relative_escape_is_rejected(self):
+        for name in ("../escape", "..\\escape", "a/b", "a\\b", "..", "."):
+            with self.assertRaises(CoreError) as ctx:
+                transfer.commit_import(self._plan(), "server.jar",
+                                       self.servers, name=name)
+            self.assertIn(ctx.exception.key, ("web.error.bad_instance_name",
+                                              "web.error.name_required"))
+        self.assertFalse(os.path.exists(os.path.join(self.root, "escape")))
+
+    def test_absolute_path_is_rejected(self):
+        target = os.path.join(self.root, "absolute_escape")
+        with self.assertRaises(CoreError):
+            transfer.commit_import(self._plan(), "server.jar",
+                                   self.servers, name=target)
+        self.assertFalse(os.path.exists(target))
+
+    def test_reserved_windows_name_is_rejected(self):
+        with self.assertRaises(CoreError) as ctx:
+            transfer.commit_import(self._plan(), "server.jar",
+                                   self.servers, name="CON")
+        self.assertEqual(ctx.exception.key, "web.error.bad_instance_name")
+
+    def test_normal_name_still_lands_under_servers(self):
+        path = transfer.commit_import(self._plan(), "server.jar",
+                                      self.servers, name="我的服务器")
+        self.assertEqual(os.path.dirname(path), self.servers)
+        self.assertTrue(os.path.isfile(os.path.join(path, "server.jar")))
+
+    def test_zip_filename_is_the_default_name(self):
+        """没填名字时用压缩包文件名（plan_import 已把非法字符换成下划线）。"""
+        path = transfer.commit_import(self._plan(suggested="pack 2024"),
+                                      "server.jar", self.servers)
+        self.assertEqual(os.path.dirname(path), self.servers)
+        self.assertEqual(os.path.basename(path), "pack 2024")
+
+
 if __name__ == "__main__":
     unittest.main()

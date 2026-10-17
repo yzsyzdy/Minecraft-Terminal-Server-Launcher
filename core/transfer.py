@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import tempfile
 import time
@@ -27,6 +28,22 @@ from .report import NULL, Reporter, as_reporter
 from server_manager import EXPORT_CATEGORIES, collect_export_files, save_server_config
 
 TEMP_DIR_NAME = ".import_temp"
+
+# 和 provision._INVALID_NAME_CHARS 保持同一套规则。这里不 import 它是因为
+# provision 在模块顶部就 import 了本模块，反过来引用会形成循环。
+_INVALID_NAME_CHARS = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
+
+
+def _safe_suggested_name(zip_basename: str) -> str:
+    """从压缩包文件名推一个能用的默认实例名。
+
+    包名什么字符都可能有（"我的服务器 v1.2 (副本).zip"），直接当目录名会在
+    Windows 上炸掉。这里只做清洗，保证默认值起步就合法；用户显式给的名字
+    仍然走 commit_import 里的严格校验。
+    """
+    stem = os.path.splitext(zip_basename)[0]
+    cleaned = _INVALID_NAME_CHARS.sub("_", stem).strip().rstrip(" .")
+    return cleaned or "instance"
 
 # 导入临时目录的保留时长。每次导入用独立目录，进程被杀时会留下垃圾，
 # 所以超过这个岁数的就顺手清掉（正在进行的导入不可能有这么老）。
@@ -208,7 +225,7 @@ def plan_import(
         temp_dir=temp_dir,
         project_dir=project_dir,
         candidates=candidates,
-        suggested_name=os.path.splitext(os.path.basename(zip_path))[0],
+        suggested_name=_safe_suggested_name(os.path.basename(zip_path)),
     )
 
 
@@ -229,7 +246,12 @@ def commit_import(
     if jar_rel not in plan.candidates:
         raise CoreError("import.no_jar")
 
-    base_name = name or plan.suggested_name
+    # 这是全流程里唯一把外部字符串直接拼成 servers/ 下路径的地方。
+    # 以前 name 原样落盘：传 "../../x" 或 "C:\\x" 就能在 servers/ 之外建目录
+    # 并把整包内容搬进去。校验放在这里而不是 Web 层，CLI 导入也一并治了。
+    from .provision import validate_instance_name
+
+    base_name = validate_instance_name(name or plan.suggested_name)
     server_dir = os.path.join(servers_dir, base_name)
     counter = 1
     while os.path.exists(server_dir):

@@ -212,7 +212,10 @@
     "jdk.java_not_found": "  [Error] java not found after extraction",
     "jdk.unsupported": "  [Error] Auto-download not supported for JDK {ver}",
     "jdk.unsupported_os": "  [Error] JDK {ver} does not support {os}",
+    "jdk.unverified": "  [Note] No official checksum for this version; structural checks only (a deliberate swap would pass)",
+    "jdk.sha256_mismatch": "  [Error] JDK {ver} checksum mismatch; download deleted (tampered with, or the mirror swapped the file)",
 
+    "launch.priority_failed": "  [Warn] Failed to set process priority ({priority}); the server will still start",
     "launch.header": "[Launch]",
     "launch.workdir": "[Launch] Working directory: {dir}",
     "launch.java": "[Launch] Java:    {path}",

@@ -213,7 +213,10 @@
     "jdk.java_not_found": "  [错误] 解压后未找到 java",
     "jdk.unsupported": "  [错误] 不支持自动下载 JDK {ver}",
     "jdk.unsupported_os": "  [错误] JDK {ver} 不支持 {os}",
+    "jdk.unverified": "  [提示] 该版本暂无官方校验值，只做了结构校验（挡不住蓄意换包）",
+    "jdk.sha256_mismatch": "  [错误] JDK {ver} 校验值不匹配，已删除下载文件（可能被篡改或镜像换了包）",
 
+    "launch.priority_failed": "  [警告] 设置进程优先级失败（{priority}），服务器仍会启动",
     "launch.header": "[启动]",
     "launch.workdir": "[启动] 工作目录: {dir}",
     "launch.java": "[启动] Java:    {path}",

@@ -52,3 +52,7 @@ version.json
 
 # 发布压缩包（CI 在仓库根目录生成 MSTL-<tag>.zip）
 MSTL-*.zip
+
+# 本地临时脚本与其输出（下划线开头），别混进提交
+_*.bat
+_*.txt

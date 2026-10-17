@@ -28,6 +28,9 @@ class I18nFallbackTest(unittest.TestCase):
     def test_missing_key_falls_back_to_chinese(self):
         """neko 没翻的 key 要显示中文，绝不能是裸 key。"""
         load_language("neko")
+        # neko 现在已经翻全了（见 test_neko_is_complete），所以手动挖掉一条，
+        # 模拟「这个语言还没翻到这里」的情况。
+        i18n._translations.pop("frp.add_title", None)
         value = t("frp.add_title")
         self.assertNotEqual(value, "frp.add_title")
         self.assertEqual(value, _locale(FALLBACK_LANG)["frp.add_title"])
@@ -60,6 +63,12 @@ class I18nFallbackTest(unittest.TestCase):
     def test_russian_is_complete(self):
         zh, ru = _locale("zh"), _locale("ru")
         missing = sorted(k for k in zh if k not in ru and k != "_fallback")
+        self.assertEqual(missing, [])
+
+    def test_neko_is_complete(self):
+        """neko 也一样：frp/设置那一段曾经整块没翻，中文界面混着英文提示。"""
+        zh, neko = _locale("zh"), _locale("neko")
+        missing = sorted(k for k in zh if k not in neko and k != "_fallback")
         self.assertEqual(missing, [])
 
     def test_fallback_marker_is_documented_behaviour(self):
