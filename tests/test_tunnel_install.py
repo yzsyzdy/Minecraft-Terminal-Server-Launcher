@@ -45,8 +45,15 @@ class FrpInstallTest(unittest.TestCase):
         self.win = mock.patch.object(frpc_files.platform, "system",
                                      lambda: "Windows")
         self.win.start()
+        # 架构同样要钉住：CI 的 macOS runner 是 arm64，platform.machine() 会给
+        # "arm64"，于是 expected_asset_name() 变成 frpc_windows_arm64.zip。
+        # 这些用例断言的是 x86_64 上的产物名，跟跑测试的机器是什么架构无关。
+        self.machine = mock.patch.object(frpc_files.platform, "machine",
+                                         lambda: "x86_64")
+        self.machine.start()
 
     def tearDown(self):
+        self.machine.stop()
         self.win.stop()
         shutil.rmtree(self.dir, ignore_errors=True)
 
@@ -160,8 +167,13 @@ class OpenFrpExtractTest(unittest.TestCase):
         self.win = mock.patch.object(frpc_files.platform, "system",
                                      lambda: "Windows")
         self.win.start()
+        # 同 FrpInstallTest：产物名按 x86_64 断言，不跟着测试机的架构走。
+        self.machine = mock.patch.object(frpc_files.platform, "machine",
+                                         lambda: "x86_64")
+        self.machine.start()
 
     def tearDown(self):
+        self.machine.stop()
         self.win.stop()
         shutil.rmtree(self.dir, ignore_errors=True)
 

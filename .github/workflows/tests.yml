@@ -21,6 +21,10 @@ jobs:
         # 隧道解压那两条用例拿 PE 的 MZ 当合法可执行文件，Windows 上永远绿，
         # Linux/macOS 上会被判成「拿错平台的包」而失败；而打包工作流现在
         # 三个平台都发产物，测试也得跟上。
+        #
+        # 架构同理：CI 的 macOS runner 是 arm64，断言产物名是 amd64 的用例
+        # 在 Windows/Linux 上绿、在 macOS 上红。写这类用例要连 platform.machine
+        # 一起 mock.patch.object 钉住。
         os: [windows-latest, ubuntu-latest, macos-latest]
     steps:
       - name: Checkout code
