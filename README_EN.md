@@ -1,4 +1,4 @@
-# Minecraft Server Launcher
+# MSTL — Minecraft Terminal Server Launcher
 
 **English** | [简体中文](README.md)
 
