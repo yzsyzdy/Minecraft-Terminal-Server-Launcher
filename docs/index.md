@@ -1,3 +1,16 @@
+<div class="mstl-band">
+  <span class="mstl-band__mark">
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" aria-hidden="true">
+      <defs><linearGradient id="mstl-band-mark" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#6B78E6"/><stop offset="1" stop-color="#4C5BD4"/></linearGradient></defs>
+      <rect width="48" height="48" rx="11" fill="url(#mstl-band-mark)"/>
+      <path d="M14 16.5 L22 24 L14 31.5" fill="none" stroke="#FFFFFF" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+      <path d="M26 31.5 L35 31.5" fill="none" stroke="#FFFFFF" stroke-width="3" stroke-linecap="round"/>
+    </svg>
+  </span>
+  <span class="mstl-band__name">MINECRAFT TERMINAL SERVER LAUNCHER</span>
+  <span class="mstl-band__chips"><i>Windows</i><i>Linux</i><i>macOS</i></span>
+</div>
+
 # MSTL
 
 **Minecraft Terminal Server Launcher** — 轻量级、零外部依赖的 Minecraft 服务端管理器。
