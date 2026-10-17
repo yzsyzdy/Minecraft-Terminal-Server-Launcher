@@ -5,7 +5,7 @@
 
 `v1.1.35` 及更早版本的说明见 [GitHub Releases](https://github.com/yzsyzdy/Minecraft-Terminal-Server-Launcher/releases)。
 
-## [未发布]
+## [1.1.38] - 2026-10-17
 
 ### 新增
 
@@ -536,4 +536,5 @@ Nuitka 的 `--standalone` **不设置 `sys.frozen`**（实测），而项目里�
 - 通用实例可以配置成执行任意命令，这是功能本身；它的信任边界和「面板能发控制台指令」
   「能改 `.server.json`」是同一条——拿到面板 token 的人本来就能在这台机器上跑东西。
 
+[1.1.38]: https://github.com/yzsyzdy/Minecraft-Terminal-Server-Launcher/compare/v1.1.37...v1.1.38
 [1.1.37]: https://github.com/yzsyzdy/Minecraft-Terminal-Server-Launcher/compare/v1.1.36...v1.1.37
