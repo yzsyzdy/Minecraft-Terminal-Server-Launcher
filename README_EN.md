@@ -2,7 +2,16 @@
 
 **English** | [简体中文](README.md)
 
-A lightweight, zero-dependency Minecraft server manager. Manage multiple server instances with version isolation, automatic Java detection and download, plugin and mod management. Supports Windows, Linux and macOS.
+A one-file server tool for people who run their own Minecraft server: double-click the executable and you get a terminal menu, and everything from downloading a core to a friend joining lives in it. No Node, no Python, no Docker — the only thing it needs is the Java that runs the server, and it can fetch that itself.
+
+- **One executable, zero runtime dependencies** — download `MSTL.exe` from Releases (or the Linux / macOS archive) and run it. No Node, no Python, no Docker; the only external dependency is the Java that runs the server, which the launcher downloads and verifies when it is missing
+- **The terminal menu and the web panel are the same process** — the panel is a thread inside the terminal process, not a second service; close the terminal and the panel ends with it, leaving no web server behind
+- **One chain from downloading a core to a friend connecting** — pick core and version → 16-thread chunked download → SHA256 check (skipped for cores whose upstream publishes no hash) → EULA detection and rewrite → launch → tunnel, without switching tools halfway
+- **Built-in tunneling** — OpenFrp cloud tunnels and vanilla frp, so a server with no public IP can still be reached
+
+Runs on Windows, Linux and macOS.
+
+![MSTL startup flow: from a command-line error to a double-click launch](docs/assets/demo.gif)
 
 ## Features
 
@@ -10,8 +19,8 @@ A lightweight, zero-dependency Minecraft server manager. Manage multiple server 
 
 - **Multi-server instances** — Each server lives in its own directory under `servers/`. Supports 30+ server types including Paper, Purpur, Fabric, Forge, NeoForge, Velocity, and more
 - **Version isolation** — Each server has its own MC version, server jar, Java version, memory allocation, and JVM arguments
-- **Automatic Java detection** — Scans environment variables and standard installation paths to discover installed JDK/JRE (Windows and Linux)
-- **JDK auto-download** — Automatically downloads GraalVM JDK (17 / 21 / 25) when Java is missing or incompatible
+- **Automatic Java detection** — Scans environment variables and standard installation paths to discover installed JDK/JRE (Windows / Linux / macOS)
+- **JDK auto-download** — Tries a China-friendly mirror first (GraalVM 17 / 21 / 25), then falls back to Adoptium for the combinations the mirror lacks (Java 8 / 11 / 16, macOS, arm64); checksums come with the package
 - **Java version validation** — Matches required Java version against MC version, warns and offers auto-download when incompatible
 - **Multithreaded download** — Server cores and plugins are downloaded with 16 concurrent threads using chunked Range requests, with automatic fallback to single-thread
 - **EULA handling** — Detects `eula=false` on server exit, prompts the user, and auto-restarts after acceptance
@@ -19,7 +28,7 @@ A lightweight, zero-dependency Minecraft server manager. Manage multiple server 
 - **Server export** — Package an existing server by category (world, plugins, config, player data, …) for migration or backup
 - **Run on startup** — Registers a `Run` key so the launcher starts on Windows logon
 - **Update check** — Reads the bundled version file and compares against the latest GitHub Release
-- **Localized UI** — Built-in 中文 / English / Русский translations, can follow the OS language
+- **Localized UI** — Built-in 中文 / English / Русский / 萌猫语 (`neko`, an easter-egg language) translations, can follow the OS language
 - **Cross-platform** — Runs on Windows, Linux and macOS (prebuilt binaries for all three)
 
 ### Plugin Management
@@ -136,7 +145,7 @@ Minecraft-Terminal-Server-Launcher/
 ├── web/                  # Web panel backend: HTTP + SSE, standard library only
 ├── webui/                # Web panel front end: one file, no build step
 ├── download_msl.py       # MSL API server download + multithreaded download engine
-├── java_tools.py         # Java detection, JDK download, version compatibility (Win/Linux)
+├── java_tools.py         # Java detection, JDK download, version compatibility (Win/Linux/macOS)
 ├── server_launcher.py    # Server process launcher, process priority
 ├── menu.py               # Interactive menus (servers, plugins/mods, tunnel, settings)
 ├── plugin_sources.py     # Plugin search & download (SpigotMC, Modrinth, Hangar)
@@ -168,9 +177,16 @@ start.py  main()
   │
   ├─ auto_start_server set → skip menu, select that server directly
   │  otherwise show main menu:
-  │    [1] Start server     [2] Import server zip  [3] Download server
-  │    [4] Manage plugins/mods  [5] Export server  [6] Tunneling
-  │    [7] Settings         [0] Exit
+  │    [1] Start Server (N available)
+  │    [2] Import Server (zip)
+  │    [3] New instance
+  │    [4] Manage Plugins/Mods
+  │    [5] Export Server
+  │    [6] Tunnels (OpenFrp / frp)
+  │    [7] Settings
+  │    [8] Web panel (manage servers in a browser)
+  │    [0] Quit
+  │    Choose (0-8): 
   │
   └─ After a server is selected
        ├─ Resolve Java (cache → scan → download)
@@ -200,7 +216,7 @@ Supported types include: Paper, Purpur, Leaf, Leaves, Spigot, Folia, Fabric, For
 | ≥ 1.20.5 | 21 | 21 | Official requirement |
 | ≥ 1.25 | 25 | 25 | Latest snapshot |
 
-When incompatible, the launcher offers automatic JDK download (17 / 21 / 25).
+When incompatible, the launcher offers automatic JDK download (8 / 11 / 16 / 17 / 21 / 25, picking the package for the current OS and architecture).
 
 ## Dependencies
 

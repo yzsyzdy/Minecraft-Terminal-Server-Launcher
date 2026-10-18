@@ -94,11 +94,16 @@ def detect_os_language() -> str:
 
 
 def available_languages() -> list[tuple[str, str]]:
-    """Return list of (lang_code, display_name) from available locale files."""
+    """Return list of (lang_code, display_name) from available locale files.
+
+    显示名取 locale 文件自己的 `_lang`，而不是在这里维护一张表——加了第五种
+    语言却忘了登记，菜单里就会露出 `neko` 这样的裸代码（这张表以前就漏过）。
+    """
     lang_names: dict[str, str] = {
         "zh": "中文",
         "en": "English",
         "ru": "Русский",
+        "neko": "萌猫语",
     }
     result: list[tuple[str, str]] = []
     d = _locale_dir()
@@ -107,7 +112,15 @@ def available_languages() -> list[tuple[str, str]]:
     for f in sorted(os.listdir(d)):
         if f.endswith(".json"):
             code = f[:-5]
-            result.append((code, lang_names.get(code, code)))
+            name = lang_names.get(code, code)
+            try:
+                with open(os.path.join(d, f), encoding="utf-8") as fh:
+                    declared = json.load(fh).get("_lang")
+            except (OSError, ValueError):
+                declared = None
+            if isinstance(declared, str) and declared.strip():
+                name = declared.strip()
+            result.append((code, name))
     if not result:
         result.append(("zh", "中文"))
     return result

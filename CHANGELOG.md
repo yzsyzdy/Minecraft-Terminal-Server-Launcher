@@ -45,6 +45,33 @@
 - `build.bat` 与英文构建文档里的版本号还停在 1.1.37，跟上 `CHANGELOG` 的 1.1.38。
 - `.gitignore` 忽略下划线开头的本地临时脚本（`_*.bat` / `_*.txt`）。
 
+### 新增
+
+- **崩溃自动重启**：服务器自己挂掉（非 0 退出码）后自动拉起来，退避 5 秒起、
+  每次翻倍、封顶 60 秒，连续失败 5 次后停手；活过 60 秒再崩会重置计数——否则
+  一台每天崩一次的服务器第五次之后就永久放弃。手动点停止、控制台里敲 `stop`
+  或正常关服（退出码 0）都不会重启。开关在面板设置页和实例配置菜单里，也可以
+  直接写 `.server.json` 的 `auto_restart` / `restart_max`。
+- **macOS 上能自动找到 Java 了**：扫描路径补上 `/Library/Java/JavaVirtualMachines`
+  与 Homebrew 的 `/opt/homebrew/opt`、`/usr/local/opt`，并认 `.jdk/Contents/Home`
+  这种 bundle 布局。此前 macOS 用户只能自己设 `JAVA_HOME` 或手填 `java_path`。
+- **JDK 自动下载覆盖 Java 8 / 11 / 16，并且认架构**：原来只有 GraalVM 的
+  17/21/25 且全是 x64 包，Java 兼容表里 8/11/16 那三档在 macOS 和 arm64 上直接
+  下不到。现在先试国内镜像，镜像没这个组合再问 Adoptium（校验值随包下发）；
+  16 在 Apple 芯片上确实不存在，会明确说「这个版本/架构不支持自动下载」而不是
+  下一个跑不起来的包。
+- **服务端核心下载有了官方源兜底**：以前只走 `api.mslmc.cn`，那个站一挂就什么
+  都下不了。现在 Paper / Folia / Velocity / Waterfall 走 PaperMC API、Purpur 走
+  自己的 API、原版走 Mojang 版本清单、Fabric 走 Fabric Meta；上游不给 sha256 的
+  核心（Purpur 只有 md5、原版只有 sha1、Fabric 没有）会跳过校验而不是假装校验过。
+  不在兜底范围内的核心（Spigot / Forge / NeoForge / Arclight）仍然如实报错。
+- **README 首屏重写**：一句话说清给谁用、是什么、凭什么不一样，四条差异化各自
+  指向具体代码落点；顺手修掉过期内容——菜单示意图的第 3 项写成了 `下载服务器`
+  （实际是 `新建实例`）且漏了第 8 项网页面板，语言数量写的 3 种（实际 4 种，
+  含 `neko` 彩蛋语言）。加了动图演示。
+- 语言菜单直接读 locale 文件里的 `_lang` 显示名，不再靠 `i18n.py` 里那张手写表
+  ——那张表漏了 `neko`，菜单里一直露着裸代码 `neko` 而不是「萌猫语」。
+
 ## [1.1.38] - 2026-10-17
 
 ### 新增
