@@ -50,6 +50,13 @@
         <xhtml:link rel="alternate" hreflang="en" href="https://yzsyzdy.github.io/Minecraft-Terminal-Server-Launcher/en/features/"/>
     </url>
     <url>
+        <loc>https://yzsyzdy.github.io/Minecraft-Terminal-Server-Launcher/features/ai-assistant/</loc>
+        <lastmod>2026-10-18</lastmod>
+        <changefreq>daily</changefreq>
+        <xhtml:link rel="alternate" hreflang="zh" href="https://yzsyzdy.github.io/Minecraft-Terminal-Server-Launcher/features/ai-assistant/"/>
+        <xhtml:link rel="alternate" hreflang="en" href="https://yzsyzdy.github.io/Minecraft-Terminal-Server-Launcher/en/features/ai-assistant/"/>
+    </url>
+    <url>
         <loc>https://yzsyzdy.github.io/Minecraft-Terminal-Server-Launcher/features/mod-management/</loc>
         <lastmod>2026-10-18</lastmod>
         <changefreq>daily</changefreq>
@@ -153,6 +160,13 @@
         <changefreq>daily</changefreq>
         <xhtml:link rel="alternate" hreflang="en" href="https://yzsyzdy.github.io/Minecraft-Terminal-Server-Launcher/en/features/"/>
         <xhtml:link rel="alternate" hreflang="zh" href="https://yzsyzdy.github.io/Minecraft-Terminal-Server-Launcher/features/"/>
+    </url>
+    <url>
+        <loc>https://yzsyzdy.github.io/Minecraft-Terminal-Server-Launcher/en/features/ai-assistant/</loc>
+        <lastmod>2026-10-18</lastmod>
+        <changefreq>daily</changefreq>
+        <xhtml:link rel="alternate" hreflang="en" href="https://yzsyzdy.github.io/Minecraft-Terminal-Server-Launcher/en/features/ai-assistant/"/>
+        <xhtml:link rel="alternate" hreflang="zh" href="https://yzsyzdy.github.io/Minecraft-Terminal-Server-Launcher/features/ai-assistant/"/>
     </url>
     <url>
         <loc>https://yzsyzdy.github.io/Minecraft-Terminal-Server-Launcher/en/features/mod-management/</loc>
