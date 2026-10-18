@@ -83,6 +83,28 @@ def _project_dir() -> str:
     return app_dir()
 
 
+def _ensure_utf8_stdout() -> None:
+    """把标准输出与标准错误切成 UTF-8。
+
+    Python 在真正的控制台上走 PEP 528（内部按 UTF-8 处理），但输出一旦被
+    重定向到文件或管道，就会退回系统 ANSI 代码页——英文 Windows 上是
+    cp1252，LANG=C 的 Linux 上是 ascii。那种环境里任何一句中文都会抛
+    UnicodeEncodeError，程序死在第一条提示上，而这条路径恰好是
+    `MSTL.exe > log.txt` 这种最常见的排障用法。
+
+    errors="replace" 是兜底：真遇到编码不了的字符也只显示成问号，
+    不该为了打印一行字把整个进程带走。
+    """
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is None:  # 3.6 及更早没有 reconfigure
+            continue
+        try:
+            reconfigure(encoding="utf-8", errors="replace")
+        except (OSError, ValueError):
+            continue
+
+
 # ---------------------------------------------------------------------------
 # 核心启动流程
 # ---------------------------------------------------------------------------
@@ -373,6 +395,10 @@ def _pause_before_exit() -> None:
 
 def main():
     """程序入口。"""
+    # 必须在任何一句 print 之前：否则重定向输出时中文会直接抛
+    # UnicodeEncodeError（见 _ensure_utf8_stdout 的说明）
+    _ensure_utf8_stdout()
+
     project_dir = _project_dir()
 
     # 语言要在处理参数之前就位，否则 --help 与参数报错会显示成一串 i18n key
