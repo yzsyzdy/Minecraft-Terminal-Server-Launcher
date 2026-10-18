@@ -103,6 +103,7 @@ plugins:
             模组管理: Mod management
             内网穿透: Tunneling
             网页面板: Web panel
+            AI 助手: AI assistant
             进阶: Advanced
             项目架构: Architecture
             从源码构建: Building from source
@@ -155,6 +156,7 @@ nav:
     - 模组管理: features/mod-management.md
     - 内网穿透: features/tunnel.md
     - 网页面板: features/web-panel.md
+    - AI 助手: features/ai-assistant.md
   - 进阶:
     - advanced/index.md
     - 项目架构: advanced/architecture.md

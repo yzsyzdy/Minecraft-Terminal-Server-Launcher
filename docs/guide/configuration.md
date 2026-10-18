@@ -18,6 +18,12 @@ MSTL 有两层配置：全局的 `config.json`，以及每个实例自己的 `.s
     "host": "127.0.0.1",
     "port": 8765,
     "token": ""
+  },
+  "ai": {
+    "enabled": false,
+    "base_url": "",
+    "model": "",
+    "api_key": ""
   }
 }
 ```
@@ -34,6 +40,10 @@ MSTL 有两层配置：全局的 `config.json`，以及每个实例自己的 `.s
 | `web.port` | int | `8765` | 网页面板监听端口；填 `0` 表示随便挑一个空闲端口 |
 | `web.token` | string | `""` | 网页面板访问 token，留空则首次启动自动生成 |
 | `web.auto_start` | bool | `false` | 面板是否随软件启动。开启后在后台线程里跑，不挡住终端菜单 |
+| `ai.enabled` | bool | `false` | 是否启用网页面板里的 AI 助手标签页 |
+| `ai.base_url` | string | `""` | OpenAI 兼容接口的 `/v1` 地址，例如 `https://api.openai.com/v1` |
+| `ai.model` | string | `""` | 模型标识，例如 `gpt-4o-mini` |
+| `ai.api_key` | string | `""` | 接口密钥。环境变量 `MSTL_AI_API_KEY` 优先于这里的值，面板永远不回显已保存的密钥 |
 
 其中 `language`、`download_threads`、`auto_start_server` 三项通常不需要手改，在菜单 `[7] 设置` 里操作即可：
 

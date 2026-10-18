@@ -18,6 +18,12 @@ It lives at the project root (next to the executable in a packaged build) and is
     "host": "127.0.0.1",
     "port": 8765,
     "token": ""
+  },
+  "ai": {
+    "enabled": false,
+    "base_url": "",
+    "model": "",
+    "api_key": ""
   }
 }
 ```
@@ -34,6 +40,10 @@ It lives at the project root (next to the executable in a packaged build) and is
 | `web.port` | int | `8765` | Web panel bind port; `0` means "pick a free one" |
 | `web.token` | string | `""` | Web panel access token; generated on first start when empty |
 | `web.auto_start` | bool | `false` | Whether the panel starts with the app. It runs on a background thread and does not block the terminal menu |
+| `ai.enabled` | bool | `false` | Whether the AI assistant tab in the web panel is enabled |
+| `ai.base_url` | string | `""` | OpenAI-compatible `/v1` endpoint, e.g. `https://api.openai.com/v1` |
+| `ai.model` | string | `""` | Model id, e.g. `gpt-4o-mini` |
+| `ai.api_key` | string | `""` | API key. The `MSTL_AI_API_KEY` environment variable wins over this value, and the panel never echoes a stored key |
 
 The `language`, `download_threads`, and `auto_start_server` fields normally do not need hand-editing; use menu `[7] Settings` instead:
 
