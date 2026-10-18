@@ -15,6 +15,7 @@ import tarfile
 import tempfile
 import unittest
 import warnings
+from unittest import mock
 
 import java_tools as jt
 
@@ -269,6 +270,139 @@ class JdkChecksumCoverageTest(unittest.TestCase):
         for ver, oses in jt.JDK_MIRROR_URLS.items():
             for os_name, url in oses.items():
                 self.assertIn(f"-{ver}.", os.path.basename(url), url)
+
+
+class MacosJavaScanTest(unittest.TestCase):
+    """macOS 的 JDK 装在 .jdk 包深处，扫描必须能走到那里。
+
+    以前 POSIX 分支只扫 `/usr/lib/jvm` 这类 Linux 目录，macOS 上一个都找不到，
+    于是「三平台」里只有两个平台能自动接上 Java。
+    """
+
+    def _make_bundle(self, home):
+        # 固定用 POSIX 的名字：下面把 _is_windows 也一起 patch 掉了，
+        # 扫描时 _java_exe_name() 会返回 "java"，不跟随本机真实平台。
+        exe = os.path.join(home, "Library", "Java", "JavaVirtualMachines",
+                           "temurin-21.jdk", "Contents", "Home", "bin", "java")
+        os.makedirs(os.path.dirname(exe))
+        with open(exe, "w", encoding="utf-8") as f:
+            f.write("")
+        return exe
+
+    def _scan(self, home, macos):
+        with mock.patch.object(jt, "_is_windows", lambda: False), \
+                mock.patch.object(jt, "_is_macos", lambda: macos), \
+                mock.patch.object(jt, "_run_java_version", lambda p: "21.0.2"), \
+                mock.patch.dict(os.environ, {"HOME": home}):
+            return jt._search_java_from_default_paths()
+
+    def test_roots_cover_the_macos_bundle_locations(self):
+        self.assertIn("/Library/Java/JavaVirtualMachines", jt._MACOS_JDK_ROOTS)
+        self.assertIn("{home}/Library/Java/JavaVirtualMachines", jt._MACOS_JDK_ROOTS)
+
+    def test_roots_cover_both_homebrew_prefixes(self):
+        # Apple 芯片在 /opt/homebrew，Intel 在 /usr/local，两个都得扫
+        self.assertIn("/opt/homebrew/opt", jt._MACOS_JDK_ROOTS)
+        self.assertIn("/usr/local/opt", jt._MACOS_JDK_ROOTS)
+
+    def test_suffixes_cover_bundle_and_homebrew_layouts(self):
+        self.assertIn(("Contents", "Home", "bin"), jt._POSIX_JDK_SUFFIX_PARTS)
+        self.assertIn(("libexec", "openjdk.jdk", "Contents", "Home", "bin"),
+                      jt._POSIX_JDK_SUFFIX_PARTS)
+
+    def test_finds_a_bundle_style_jdk(self):
+        with tempfile.TemporaryDirectory() as home:
+            exe = self._make_bundle(home)
+            found = self._scan(home, macos=True)
+            self.assertIn(os.path.normpath(exe),
+                          [os.path.normpath(j.path) for j in found])
+
+    def test_the_macos_roots_are_gated_on_darwin(self):
+        """同一棵树，不假装是 macOS 就不该被扫到。"""
+        with tempfile.TemporaryDirectory() as home:
+            self._make_bundle(home)
+            self.assertEqual(self._scan(home, macos=False), [])
+
+
+class JdkSourceResolutionTest(unittest.TestCase):
+    """下载源：镜像优先、Adoptium 兜底，键必须是「系统-架构」。"""
+
+    def test_mirror_keys_are_arch_qualified(self):
+        """只写 "linux" 的键在 ARM 上会静默下到 x64 包，必须带上架构。"""
+        for ver, entries in jt.JDK_MIRROR_URLS.items():
+            for key in entries:
+                self.assertRegex(key, r"^(windows|linux|darwin)-(x64|aarch64)$",
+                                 f"{ver}: {key}")
+
+    def test_mirror_wins_when_it_has_the_combo(self):
+        with mock.patch.object(jt, "_adoptium_package",
+                               side_effect=AssertionError("不该去问 Adoptium")):
+            url, sha = jt._jdk_source("21", "linux", "x64")
+        self.assertIn("graalvm", url)
+        self.assertEqual(sha, jt.JDK_SHA256[("21", "linux-x64")])
+
+    def test_adoptium_is_used_for_macos(self):
+        """镜像站没有 macOS 的包（实测 500），只能走 Adoptium。"""
+        with mock.patch.object(jt, "_adoptium_package",
+                               return_value=("https://example/jdk.tar.gz", "abc")) as m:
+            got = jt._jdk_source("21", "darwin", "aarch64")
+        self.assertEqual(got, ("https://example/jdk.tar.gz", "abc"))
+        m.assert_called_once_with("21", "darwin", "aarch64")
+
+    def test_adoptium_is_used_for_old_versions(self):
+        """Java 8 / 11 / 16 只有 Adoptium 有，镜像表里根本没有这几个版本。"""
+        for ver in ("8", "11", "16"):
+            self.assertNotIn(ver, jt.JDK_MIRROR_URLS)
+            self.assertTrue(jt.can_auto_download(ver))
+            with mock.patch.object(jt, "_adoptium_package",
+                                   return_value=("u", "s")):
+                self.assertEqual(jt._jdk_source(ver, "linux", "x64"), ("u", "s"))
+
+    def test_arch_names_are_mapped(self):
+        self.assertEqual(jt._ADOPTIUM_ARCH["arm64"], "aarch64")
+        self.assertEqual(jt._ADOPTIUM_ARCH["aarch64"], "aarch64")
+        self.assertEqual(jt._ADOPTIUM_ARCH["x86_64"], "x64")
+        self.assertEqual(jt._ADOPTIUM_ARCH["amd64"], "x64")
+
+    def test_unknown_version_cannot_be_downloaded(self):
+        self.assertFalse(jt.can_auto_download("30"))
+
+    def test_mirror_failure_falls_back_to_adoptium(self):
+        """镜像上的具体小版本被撤掉（HEAD 在、GET 500）时要换 Adoptium 再试。
+
+        镜像表钉的是 graalvm-community-jdk-17.0.9 这种精确文件名，上游删一个
+        文件就会让「自动下载」变成一句「不支持」，而 Adoptium 那边明明还有。
+        """
+        tried = []
+
+        def _fake_fetch(url, expected, ver, os_name, arch, project_dir):
+            tried.append(url)
+            return None if "fastmirror" in url else f"/jdk-{ver}/bin/java"
+
+        with mock.patch.object(jt, "_download_with_progress", return_value=False), \
+             mock.patch.object(jt, "_adoptium_package",
+                               return_value=("https://example/adoptium.tar.gz", "abc")), \
+             mock.patch.object(jt, "_fetch_jdk", side_effect=_fake_fetch), \
+             mock.patch.object(jt, "_os_platform", return_value="linux"), \
+             mock.patch.object(jt, "_machine_arch", return_value="x64"):
+            got = jt._download_jdk("21", ".")
+
+        self.assertEqual(got, "/jdk-21/bin/java")
+        self.assertEqual(len(tried), 2)
+        self.assertIn("fastmirror", tried[0])
+        self.assertIn("adoptium", tried[1])
+
+    def test_no_second_attempt_when_adoptium_has_the_same_url(self):
+        """镜像本身就是 Adoptium 地址时不要白试第二遍。"""
+        with mock.patch.object(jt, "_fetch_jdk", return_value=None) as fetch, \
+             mock.patch.object(jt, "_adoptium_package",
+                               return_value=("https://example/same.tar.gz", "abc")), \
+             mock.patch.object(jt, "_os_platform", return_value="darwin"), \
+             mock.patch.object(jt, "_machine_arch", return_value="aarch64"), \
+             mock.patch.object(jt, "_jdk_source",
+                               return_value=("https://example/same.tar.gz", "abc")):
+            self.assertIsNone(jt._download_jdk("21", "."))
+        self.assertEqual(fetch.call_count, 1)
 
 
 if __name__ == "__main__":

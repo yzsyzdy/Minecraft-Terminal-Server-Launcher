@@ -69,6 +69,8 @@ It lives at `servers/<server name>/.server.json`.
   "extra_jvm_args": [],
   "extra_server_args": [],
   "process_priority": "normal",
+  "auto_restart": false,
+  "restart_max": 5,
   "openfrp": {
     "token": "",
     "proxy_id": 0,
@@ -90,6 +92,8 @@ It lives at `servers/<server name>/.server.json`.
 | `process_priority` | string | `"normal"` | Process priority: `normal` / `below` (below normal) / `low` |
 | `kind` | string | `"minecraft"` | Instance kind: `minecraft` or `generic`. Cannot be changed after creation |
 | `auto_start` | bool | `false` | Start with the app: raised **in the background** when the app starts, manageable from the panel |
+| `auto_restart` | bool | `false` | Restart on crash: brought back automatically when the process exits with a non-zero code (5s backoff, doubling, capped at 60s). A manual stop, `stop` typed into the console, or a clean shutdown (exit code 0) never triggers it |
+| `restart_max` | int | `5` | How many consecutive crashes before giving up, range `0`–`20`; `0` disables it. Surviving 60 seconds resets the counter |
 | `launch` | object | see below | The **generic instance** launch spec; ignored when `kind` is `minecraft` |
 | `openfrp.token` | string | `""` | OpenFrp user token bound to this instance |
 | `openfrp.proxy_id` | int | `0` | Bound tunnel ID; `0` means unbound |
@@ -105,7 +109,7 @@ A generic instance's `launch` block:
 | `command` | string | `""` | With `mode=cmd` / `powershell`, the command string |
 | `workdir` | string | `""` | Working directory, relative to the instance; empty means the instance itself |
 
-`process_priority`, `extra_jvm_args`, `extra_server_args`, `auto_start` (and a generic instance's whole `launch` block) can be changed from the configuration menu that appears after selecting an instance under main menu `[1] Start server` — no hand-editing needed. In the web panel, select the instance and press `⚙` in the pane header.
+`process_priority`, `extra_jvm_args`, `extra_server_args`, `auto_start`, `auto_restart` (and a generic instance's whole `launch` block) can be changed from the configuration menu that appears after selecting an instance under main menu `[1] Start server` — no hand-editing needed. In the web panel, select the instance and press `⚙` in the pane header.
 
 ## Auto-generated files
 

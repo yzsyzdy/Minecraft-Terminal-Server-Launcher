@@ -444,6 +444,20 @@
         </label>
       </div>
       <div class="hint" id="set-instauto-hint"></div>
+      <div class="drow">
+        <label style="display:flex;gap:6px;align-items:center;font-size:13px">
+          <input type="checkbox" id="setautorestart" style="min-width:auto">
+          <span id="l-setautorestart"></span>
+        </label>
+      </div>
+      <div class="hint" id="set-autorestart-hint"></div>
+      <div class="drow" id="row-restartmax">
+        <div class="field">
+          <label id="l-setrestartmax"></label>
+          <input id="setrestartmax" type="number" min="0" max="20" step="1">
+        </div>
+      </div>
+      <div class="hint" id="set-restartmax-hint"></div>
       <div id="set-mc">
         <div class="drow">
           <div class="field">
@@ -902,6 +916,10 @@ function applyStrings() {
   $("l-setprio").textContent = strings["web.settings.priority"] || "";
   $("l-setinstauto").textContent = strings["web.settings.auto_start_instance"] || "";
   $("set-instauto-hint").textContent = strings["web.settings.auto_start_instance_hint"] || "";
+  $("l-setautorestart").textContent = strings["web.settings.auto_restart"] || "";
+  $("set-autorestart-hint").textContent = strings["web.settings.auto_restart_hint"] || "";
+  $("l-setrestartmax").textContent = strings["web.settings.restart_max"] || "";
+  $("set-restartmax-hint").textContent = strings["web.settings.restart_max_hint"] || "";
   $("l-setmcver").textContent = strings["web.new.mc_version"] || "";
   $("l-setjar").textContent = strings["web.settings.jar"] || "Jar";
   $("l-setminmem").textContent = strings["web.new.min_mem"] || "";
@@ -1853,6 +1871,10 @@ function openSettings() {
     (strings["web.settings.kind_locked"] || "");
   $("setprio").value = item.process_priority || "normal";
   $("setinstauto").checked = !!item.auto_start;
+  $("setautorestart").checked = !!item.auto_restart;
+  $("setrestartmax").value = String(
+    typeof item.restart_max === "number" ? item.restart_max : 5);
+  syncRestartMax();
   $("set-mc").hidden = generic;
   $("set-generic").hidden = !generic;
 
@@ -1885,6 +1907,14 @@ function closeSettings() {
   $("setmodal").hidden = true;
 }
 
+/* 「最多连续重启」只在勾了自动重启时才有意义。灰掉而不是藏起来：
+   藏起来会让面板在勾选前后跳一下高度，手指刚放上去的按钮就跑掉了。 */
+function syncRestartMax() {
+  const on = $("setautorestart").checked;
+  $("setrestartmax").disabled = !on;
+  $("row-restartmax").style.opacity = on ? "1" : "0.45";
+}
+
 async function saveSettings() {
   if (!selected) return;
   const item = instances.find(x => x.name === selected);
@@ -1895,6 +1925,13 @@ async function saveSettings() {
     name: selected,
     process_priority: $("setprio").value,
     auto_start: $("setinstauto").checked,
+    auto_restart: $("setautorestart").checked,
+    /* 空输入按默认 5 算，而不是 0：0 在运行时等于「不重启」，用户清空输入框
+       多半是想用默认值，不该把功能悄悄关掉。显式填 0 仍然生效。 */
+    restart_max: (() => {
+      const raw = parseInt($("setrestartmax").value, 10);
+      return Number.isFinite(raw) ? Math.max(0, Math.min(20, raw)) : 5;
+    })(),
     openfrp: {
       token: $("settoken").value.trim(),
       proxy_id: parseInt($("setproxyid").value, 10) || 0,
@@ -2202,6 +2239,7 @@ $("ni-gcreate").onclick = createGeneric;
 $("instset").onclick = openSettings;
 $("setclose").onclick = closeSettings;
 $("setgmode").onchange = setModeToggle;
+$("setautorestart").onchange = syncRestartMax;
 $("setsave").onclick = saveSettings;
 
 $("frpbtn").onclick = openFrp;

@@ -5,12 +5,15 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import unittest
+from dataclasses import replace
+from unittest import mock
 
 from core.errors import CoreError
 from core.runtime import (STATE_STOPPED, LaunchPlan, RuntimeManager, ServerRuntime,
-                          build_generic_plan, build_launch_plan)
+                          _restart_policy_of, build_generic_plan, build_launch_plan)
 from server_launcher import PRIORITY_CHOICES
 
 
@@ -205,6 +208,190 @@ class RuntimeTest(unittest.TestCase):
                 rt.start()
         finally:
             rt.stop(timeout=10)
+
+
+class RestartPolicyTest(unittest.TestCase):
+    """.server.json 是可以手改的，策略读出来的值必须收敛成可信的类型。"""
+
+    def test_bool_like_strings_are_read_literally(self):
+        # bool("false") 是 True —— 用户明确写了 false，不能变成「打开」
+        self.assertFalse(_restart_policy_of({"auto_restart": "false"})["auto_restart"])
+        self.assertFalse(_restart_policy_of({"auto_restart": ""})["auto_restart"])
+        self.assertFalse(_restart_policy_of({"auto_restart": None})["auto_restart"])
+        self.assertTrue(_restart_policy_of({"auto_restart": "true"})["auto_restart"])
+        self.assertTrue(_restart_policy_of({"auto_restart": True})["auto_restart"])
+        self.assertTrue(_restart_policy_of({"auto_restart": 1})["auto_restart"])
+
+    def test_restart_max_is_clamped(self):
+        # 1e9 等于没有熔断，负数没有意义
+        self.assertEqual(_restart_policy_of({"restart_max": 999})["restart_max"], 20)
+        self.assertEqual(_restart_policy_of({"restart_max": -3})["restart_max"], 0)
+        self.assertEqual(_restart_policy_of({"restart_max": "abc"})["restart_max"], 5)
+        self.assertEqual(_restart_policy_of({"restart_max": "7"})["restart_max"], 7)
+
+    def test_missing_keys_mean_off(self):
+        policy = _restart_policy_of({})
+        self.assertFalse(policy["auto_restart"])
+        self.assertEqual(policy["restart_max"], 5)
+
+    def test_the_plan_carries_the_policy(self):
+        """策略必须进 LaunchPlan：重启要沿用同一套参数，不能过一会儿再读配置。"""
+        d = tempfile.mkdtemp(prefix="mstl-test-policy-")
+        try:
+            plan = build_generic_plan(
+                {"name": "x", "kind": "generic", "auto_restart": True,
+                 "restart_max": 3,
+                 "launch": {"mode": "exec", "program": sys.executable}},
+                d)
+            self.assertTrue(plan.auto_restart)
+            self.assertEqual(plan.restart_max, 3)
+        finally:
+            shutil.rmtree(d, ignore_errors=True)
+
+
+class FakeTimer:
+    """替掉 threading.Timer：只记录「隔多久、要跑谁」，不真的等。"""
+
+    instances: list = []
+
+    def __init__(self, delay, fn):
+        self.delay = delay
+        self.fn = fn
+        self.daemon = False
+        self.started = False
+        self.cancelled = False
+        FakeTimer.instances.append(self)
+
+    def start(self):
+        self.started = True
+
+    def cancel(self):
+        self.cancelled = True
+
+
+class CrashRestartTest(unittest.TestCase):
+    """崩溃自动重启的决策逻辑。
+
+    核心是三件事：只对「非 0 退出」重启、手动停止绝不重启、连续崩到上限就停手。
+    """
+
+    def setUp(self):
+        self.dir = tempfile.mkdtemp(prefix="mstl-test-restart-")
+        FakeTimer.instances = []
+        self._timer_patch = mock.patch.object(threading, "Timer", FakeTimer)
+        self._timer_patch.start()
+        self.events = []
+        self.plan = LaunchPlan(
+            name="t", workdir=self.dir,
+            cmd=[sys.executable, "-c", "pass"], kind="generic",
+            log_path=os.path.join(self.dir, "log.txt"),
+            auto_restart=True, restart_max=3)
+
+    def tearDown(self):
+        self._timer_patch.stop()
+        shutil.rmtree(self.dir, ignore_errors=True)
+
+    def _rt(self, **overrides):
+        return ServerRuntime(replace(self.plan, **overrides),
+                             on_event=self.events.append)
+
+    def _note_keys(self):
+        return [e.get("key") for e in self.events if e.get("kind") == "note"]
+
+    def test_policy_off_means_no_restart(self):
+        self._rt(auto_restart=False)._maybe_restart(1)
+        self.assertEqual(FakeTimer.instances, [])
+
+    def test_clean_exit_is_not_a_crash(self):
+        """退出码 0 = 控制台里敲了 stop / 插件把服务器关了，重启等于对着干。"""
+        self._rt()._maybe_restart(0)
+        self.assertEqual(FakeTimer.instances, [])
+
+    def test_manual_stop_wins_over_the_policy(self):
+        rt = self._rt()
+        rt._stop_requested = True
+        rt._maybe_restart(1)
+        self.assertEqual(FakeTimer.instances, [])
+
+    def test_crash_schedules_a_backed_off_restart(self):
+        rt = self._rt()
+        rt._maybe_restart(1)
+        self.assertEqual(len(FakeTimer.instances), 1)
+        timer = FakeTimer.instances[0]
+        self.assertTrue(timer.started)
+        self.assertEqual(timer.delay, 5.0)
+        self.assertIn("web.console.restart_scheduled", self._note_keys())
+        self.assertTrue(rt.snapshot()["restart_pending"])
+
+    def test_backoff_doubles_and_is_capped(self):
+        rt = self._rt(restart_max=5)
+        for _ in range(5):
+            rt._maybe_restart(1)
+        self.assertEqual([t.delay for t in FakeTimer.instances],
+                         [5.0, 10.0, 20.0, 40.0, 60.0])
+
+    def test_gives_up_after_the_limit(self):
+        rt = self._rt(restart_max=2)
+        rt._maybe_restart(1)
+        rt._maybe_restart(1)
+        self.assertEqual(len(FakeTimer.instances), 2)
+        rt._maybe_restart(1)                 # 第三次：不再排重启
+        self.assertEqual(len(FakeTimer.instances), 2)
+        self.assertIn("web.console.restart_give_up", self._note_keys())
+
+    def test_a_long_run_resets_the_budget(self):
+        """活过一分钟再崩，说明不是启动配置的问题，预算该重新算。"""
+        rt = self._rt(restart_max=1)
+        rt._restart_count = 1
+        rt._started_at = time.time() - 120
+        rt._maybe_restart(1)
+        self.assertEqual(len(FakeTimer.instances), 1)
+        self.assertEqual(rt._restart_count, 1)
+
+    def test_cancelling_clears_the_pending_state(self):
+        rt = self._rt()
+        rt._maybe_restart(1)
+        timer = FakeTimer.instances[0]
+        rt._cancel_restart_locked()
+        self.assertTrue(timer.cancelled)
+        self.assertFalse(rt.snapshot()["restart_pending"])
+
+    def test_restart_fire_starts_the_process_again(self):
+        rt = self._rt()
+        rt._restart_count = 1
+        with mock.patch.object(rt, "start") as start:
+            rt._restart_fire()
+        start.assert_called_once()
+
+    def test_restart_fire_does_nothing_after_a_manual_stop(self):
+        rt = self._rt()
+        rt._restart_count = 1
+        rt._stop_requested = True
+        with mock.patch.object(rt, "start") as start:
+            rt._restart_fire()
+        start.assert_not_called()
+
+    def test_restart_failure_is_reported_not_retried(self):
+        rt = self._rt()
+        rt._restart_count = 2
+        with mock.patch.object(rt, "start",
+                               side_effect=CoreError("web.error.spawn_failed")):
+            rt._restart_fire()
+        self.assertIn("web.console.restart_failed", self._note_keys())
+        self.assertEqual(rt._restart_count, 0)
+
+    def test_a_real_nonzero_exit_schedules_a_restart(self):
+        """端到端：真的跑一个退出码 3 的进程，看 _pump 会不会排重启。"""
+        rt = self._rt(cmd=[sys.executable, "-c", "import sys; sys.exit(3)"])
+        rt.start()
+        for _ in range(200):
+            if FakeTimer.instances:
+                break
+            time.sleep(0.02)
+        # FakeTimer 不会真的到点，所以不用担心它在测试结束后去拉起进程
+        rt._stop_requested = True
+        self.assertEqual(len(FakeTimer.instances), 1)
+        self.assertEqual(rt.snapshot()["exit_code"], 3)
 
 
 class ManagerTest(unittest.TestCase):

@@ -40,6 +40,16 @@ STATE_STOPPED = "stopped"
 STATE_RUNNING = "running"
 STATE_STOPPING = "stopping"
 
+# 崩溃自动重启的退避：5 秒起、每次翻倍、封顶 60 秒。
+#
+# 为什么要退避而不是立刻拉起来：配置错的东西（jar 不匹配、Java 版本不对）
+# 会让进程在几百毫秒内反复崩，不退避就是在拿 CPU 和磁盘换噪音。
+_RESTART_BASE_DELAY = 5.0
+_RESTART_MAX_DELAY = 60.0
+# 「活得够久」的门槛：活过一分钟再崩，说明这次崩溃不是启动配置的问题，
+# 重启预算应当重置。否则一台每天崩一次的服务器会在第五次之后永久放弃。
+_RESTART_HEALTHY_SECONDS = 60.0
+
 
 @dataclass
 class LaunchPlan:
@@ -61,6 +71,11 @@ class LaunchPlan:
     # 存得下、看得见，从面板（或随软件启动）拉起来时却从来没生效过——
     # 只有终端前台启动那条路会去读这个设置。
     priority: str = "normal"
+    # 崩溃自动重启。策略放进 plan 而不是运行时现读配置：start() 拉起进程用的
+    # 就是这份 plan，重启要沿用同一套参数（内存、jar、Java 路径）。过一会儿
+    # 再去读一遍配置的话，「改了但还没保存」的实例会重启成另一个东西。
+    auto_restart: bool = False
+    restart_max: int = 5
 
 
 def _exec_args(value) -> list[str]:
@@ -88,6 +103,30 @@ def _priority_of(server_cfg: dict) -> str:
     """取实例的进程优先级，认不出来的值一律当 normal。"""
     value = str((server_cfg or {}).get("process_priority") or "normal").strip().lower()
     return value if value in PRIORITY_CHOICES else "normal"
+
+
+def _restart_policy_of(server_cfg: dict) -> dict:
+    """取实例的崩溃重启策略。
+
+    配置来源是 .server.json，而那个文件是可以手改的：`"auto_restart": "false"`
+    如果按「非空即真」认，就等于用户明确写了 false 却被打开。所以字符串按字面
+    意思认，和 server_manager._as_bool 同一套口径（core 不能反向 import
+    server_manager 的那个私有函数，这里就地写一份）。
+    """
+    cfg = server_cfg or {}
+    raw = cfg.get("auto_restart")
+    if isinstance(raw, bool):
+        auto = raw
+    elif isinstance(raw, (int, float)):
+        auto = raw != 0
+    else:
+        auto = str(raw or "").strip().lower() in ("1", "true", "yes", "on", "y")
+    try:
+        # 0 表示关掉，写 1e9 就等于没有熔断，负数没有意义
+        restart_max = max(0, min(20, int(cfg.get("restart_max"))))
+    except (TypeError, ValueError):
+        restart_max = 5
+    return {"auto_restart": auto, "restart_max": restart_max}
 
 
 def _global_java_path(project_dir: str) -> str:
@@ -159,6 +198,7 @@ def build_generic_plan(server_cfg: dict, server_dir: str) -> LaunchPlan:
         program=summary,
         log_path=os.path.join(server_dir, "logs", "mstl-console.log"),
         priority=_priority_of(server_cfg),
+        **_restart_policy_of(server_cfg),
     )
 
 
@@ -209,6 +249,7 @@ def build_launch_plan(
         max_mem=max_mem,
         log_path=os.path.join(server_dir, "logs", "mstl-console.log"),
         priority=_priority_of(server_cfg),
+        **_restart_policy_of(server_cfg),
     )
 
 
@@ -229,6 +270,12 @@ class ServerRuntime:
         self._reader: Optional[threading.Thread] = None
         self._seq = 0
         self._log_file = None
+        # 崩溃自动重启的状态。_stop_requested 用来区分「用户让我停」和
+        # 「它自己崩了」——前者绝不能重启，否则点了停止的服务器过 5 秒又回来了。
+        self._stop_requested = False
+        self._restart_timer: Optional[threading.Timer] = None
+        self._restart_count = 0
+        self._restart_at: Optional[float] = None
 
     # -- 只读 --------------------------------------------------------------
 
@@ -254,6 +301,7 @@ class ServerRuntime:
             pid = None
             if self._proc is not None and self._proc.poll() is None:
                 pid = self._proc.pid
+            restart_at = self._restart_at
             return {
                 "name": self.plan.name,
                 "state": self._state,
@@ -268,6 +316,12 @@ class ServerRuntime:
                 "min_mem": self.plan.min_mem,
                 "max_mem": self.plan.max_mem,
                 "command": list(self.plan.cmd),
+                "auto_restart": self.plan.auto_restart,
+                "restart_max": self.plan.restart_max,
+                "restart_count": self._restart_count,
+                # 面板拿这个时间戳做倒计时；None 表示没有在等重启
+                "restart_at": restart_at,
+                "restart_pending": restart_at is not None,
             }
 
     # -- 控制 --------------------------------------------------------------
@@ -286,6 +340,9 @@ class ServerRuntime:
         with self._lock:
             if self._proc is not None and self._proc.poll() is None:
                 raise CoreError("web.error.already_running", name=self.plan.name)
+            # 手动启动等于「我要它现在跑」，之前排着的重启就没意义了
+            self._stop_requested = False
+            self._cancel_restart_locked()
             self._open_log()
             try:
                 self._proc = spawn_priority_process(
@@ -336,6 +393,11 @@ class ServerRuntime:
                 raise CoreError("web.error.not_running", name=self.plan.name)
             proc = self._proc
             reader = self._reader
+            # 用户明确要停：关掉自动重启的念头。不设这一位的话，stop() 让进程
+            # 以退出码 0 结束时虽然不会重启，但若 stop 之后进程被信号打断
+            # （退出码非 0），面板里那台「已经停了」的服务器会自己站起来。
+            self._stop_requested = True
+            self._cancel_restart_locked()
             self._state = STATE_STOPPING
             try:
                 if proc.stdin:
@@ -371,11 +433,86 @@ class ServerRuntime:
 
     def kill(self) -> None:
         with self._lock:
+            # kill 是「立刻弄死它」，同样是用户的明确意图，不许自动重启
+            self._stop_requested = True
+            self._cancel_restart_locked()
             proc = self._proc
         if proc is not None and proc.poll() is None:
             proc.kill()
 
     # -- 内部 --------------------------------------------------------------
+
+    # -- 崩溃自动重启 ------------------------------------------------------
+
+    def _cancel_restart_locked(self) -> None:
+        """取消待执行的重启。调用方需持有锁。"""
+        timer, self._restart_timer = self._restart_timer, None
+        self._restart_at = None
+        if timer is not None:
+            try:
+                timer.cancel()
+            except Exception:      # pragma: no cover - cancel 本身不抛，纯防御
+                pass
+
+    def _maybe_restart(self, code: int) -> None:
+        """进程退出后决定要不要再拉一次。调用方不持锁（在 _pump 里）。"""
+        if not self.plan.auto_restart or self.plan.restart_max <= 0:
+            return
+        give_up = False
+        delay = 0.0
+        attempt = 0
+        with self._lock:
+            if self._stop_requested:
+                self._restart_count = 0
+                return
+            if code == 0:
+                # 退出码 0 = 正常关服（控制台里敲了 stop、或者插件把服务器关了）。
+                # 这种情况重启等于跟用户对着干。
+                self._restart_count = 0
+                return
+            lived = time.time() - (self._started_at or time.time())
+            if lived >= _RESTART_HEALTHY_SECONDS:
+                self._restart_count = 0
+            if self._restart_count >= self.plan.restart_max:
+                # 连续崩到上限：停下来，等下一次人工启动重新计预算
+                give_up = True
+                self._restart_count = 0
+            else:
+                self._restart_count += 1
+                attempt = self._restart_count
+                delay = min(_RESTART_MAX_DELAY,
+                            _RESTART_BASE_DELAY * (2 ** (attempt - 1)))
+                self._restart_at = time.time() + delay
+        if give_up:
+            self._note("web.console.restart_give_up", count=self.plan.restart_max)
+            self._emit_state()
+            return
+        self._note("web.console.restart_scheduled", seconds=int(round(delay)),
+                   attempt=attempt, max=self.plan.restart_max)
+        self._emit_state()
+        timer = threading.Timer(delay, self._restart_fire)
+        timer.daemon = True
+        with self._lock:
+            self._restart_timer = timer
+        timer.start()
+
+    def _restart_fire(self) -> None:
+        with self._lock:
+            self._restart_timer = None
+            self._restart_at = None
+            if self._stop_requested:
+                return
+        self._note("web.console.restarting", attempt=self._restart_count)
+        try:
+            self.start()
+        except CoreError:
+            # 起不来通常和刚才崩掉是同一个原因（jar 不匹配、Java 路径没了）。
+            # 这里不再排下一次：退避已经走完一轮，而原因就写在控制台上，
+            # 继续重试只会把同一行错误刷满屏。
+            with self._lock:
+                self._restart_count = 0
+            self._note("web.console.restart_failed")
+            self._emit_state()
 
     def _pump(self, proc: subprocess.Popen) -> None:
         try:
@@ -391,6 +528,10 @@ class ServerRuntime:
                 self._exit_code = code
             self._note("web.console.exited", code=code)
             self._emit_state()
+            # 状态先摆正、再决定要不要重启：面板要先看到「它退了、退出码是多少」，
+            # 然后才看到「5 秒后重启」。顺序反过来的话，前端会先收到重启通知，
+            # 再去拿状态，读到的还是 running。
+            self._maybe_restart(code)
         finally:
             self._close_pipes(proc)
             self._close_log()

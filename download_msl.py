@@ -18,7 +18,7 @@ from datetime import datetime, timezone
 from typing import Any, Optional
 
 from server_manager import save_server_config
-from http_utils import open_url
+from http_utils import fetch_json, open_url
 from i18n import t
 from constants import MSL_API_BASE, USER_AGENT
 
@@ -202,20 +202,163 @@ def _msl_request(path: str) -> Any:
     return data.get("data")
 
 
+# ---------------------------------------------------------------------------
+# 官方源兜底
+# ---------------------------------------------------------------------------
+#
+# MSL 镜像（api.mslmc.cn）是社区维护的第三方服务：它改接口、限速或者直接挂掉，
+# 「开服」这条路的第一步就断了——而「从下载核心到朋友能连上，一条链路」正是
+# 这个工具存在的理由。所以下面给每个「上游有稳定官方 API」的核心写了兜底：
+# 镜像拿不到时直接问官方。
+#
+# 只覆盖确实有官方 API 的：paper / folia / velocity / waterfall 走 PaperMC，
+# purpur 走 PurpurMC，vanilla 走 Mojang 的版本清单，fabric 走 Fabric Meta。
+# 其余核心（spigot、forge、neoforge、各种 arclight / mohist 分支）没有可依赖
+# 的官方直链，这里不假装有。
+
+_OFFICIAL_PAPER_PROJECTS = {
+    "paper": "paper",
+    "folia": "folia",
+    "velocity": "velocity",
+    "waterfall": "waterfall",
+}
+
+# 镜像完全连不上、本地又没有缓存时，至少还能从这几个核心里选。
+_FALLBACK_SERVER_TYPES = {
+    "pluginsCore": ["paper", "purpur", "folia"],
+    "modsCore_Fabric": ["fabric"],
+    "vanillaCore": ["vanilla"],
+    "proxyCore": ["velocity"],
+}
+
+
+def _official_versions(server_type: str) -> Optional[dict]:
+    """向官方源要版本列表，返回与 MSL 同形的 {"versions": [...]}。
+
+    顺序必须「新的在前」：_interactive_pick_version 把 versions[0] 当成最新版。
+    """
+    versions: Optional[list] = None
+    if server_type in _OFFICIAL_PAPER_PROJECTS:
+        project = _OFFICIAL_PAPER_PROJECTS[server_type]
+        data = fetch_json(f"https://api.papermc.io/v2/projects/{project}", timeout=20)
+        if isinstance(data, dict):
+            versions = list(data.get("versions") or [])
+            versions.reverse()          # PaperMC 是从旧到新
+    elif server_type == "purpur":
+        data = fetch_json("https://api.purpurmc.org/v2/purpur", timeout=20)
+        if isinstance(data, dict):
+            versions = list(data.get("versions") or [])
+            versions.reverse()
+    elif server_type == "vanilla":
+        data = fetch_json(
+            "https://launchermeta.mojang.com/mc/game/version_manifest_v2.json",
+            timeout=20)
+        if isinstance(data, dict):
+            versions = [v.get("id") for v in data.get("versions") or []
+                        if isinstance(v, dict) and v.get("type") == "release"]
+    elif server_type == "fabric":
+        data = fetch_json("https://meta.fabricmc.net/v2/versions/game", timeout=20)
+        if isinstance(data, list):
+            versions = [v.get("version") for v in data if isinstance(v, dict)]
+    if not versions:
+        return None
+    return {"versions": [str(v) for v in versions if v], "description": ""}
+
+
+def _official_papermc(server_type: str, version: str) -> Optional[dict]:
+    project = _OFFICIAL_PAPER_PROJECTS[server_type]
+    data = fetch_json(
+        f"https://api.papermc.io/v2/projects/{project}/versions/{version}/builds",
+        timeout=20)
+    if not isinstance(data, dict):
+        return None
+    best = None
+    for entry in data.get("builds") or []:
+        if not isinstance(entry, dict):
+            continue
+        app = ((entry.get("downloads") or {}).get("application") or {})
+        if not app.get("name"):
+            continue
+        if best is None or int(entry.get("build") or 0) > int(best.get("build") or 0):
+            best = entry
+    if best is None:
+        return None
+    app = best["downloads"]["application"]
+    return {
+        "url": (f"https://api.papermc.io/v2/projects/{project}/versions/{version}"
+                f"/builds/{best['build']}/downloads/{app['name']}"),
+        # PaperMC 的 builds 接口直接给 sha256，能校验就校验
+        "sha256": str(app.get("sha256") or ""),
+    }
+
+
+def _official_download_url(server_type: str, version: str) -> Optional[dict]:
+    """按核心挑一个官方源，返回与 MSL 同形的 {"url", "sha256"}。"""
+    if server_type in _OFFICIAL_PAPER_PROJECTS:
+        return _official_papermc(server_type, version)
+    if server_type == "purpur":
+        data = fetch_json(f"https://api.purpurmc.org/v2/purpur/{version}/latest",
+                          timeout=20)
+        build = str((data or {}).get("build") or "") if isinstance(data, dict) else ""
+        if not build:
+            return None
+        return {
+            "url": f"https://api.purpurmc.org/v2/purpur/{version}/{build}/download",
+            "sha256": "",       # Purpur 只给 md5，_verify_sha256 用不上
+        }
+    if server_type == "vanilla":
+        data = fetch_json(
+            "https://launchermeta.mojang.com/mc/game/version_manifest_v2.json",
+            timeout=20)
+        for entry in (data or {}).get("versions") or [] if isinstance(data, dict) else []:
+            if not isinstance(entry, dict) or entry.get("id") != version:
+                continue
+            detail = fetch_json(str(entry.get("url") or ""), timeout=20)
+            server = ((detail or {}).get("downloads") or {}).get("server") or {}
+            if server.get("url"):
+                # Mojang 只给 sha1，这里的校验位留空（不假装校验过）
+                return {"url": server["url"], "sha256": ""}
+            return None
+        return None
+    if server_type == "fabric":
+        loaders = fetch_json(
+            f"https://meta.fabricmc.net/v2/versions/loader/{version}", timeout=20)
+        if not isinstance(loaders, list):
+            return None
+        for entry in loaders:
+            loader = ((entry or {}).get("loader") or {}) if isinstance(entry, dict) else {}
+            if loader.get("stable") and loader.get("version"):
+                return {
+                    "url": (f"https://meta.fabricmc.net/v2/versions/loader/{version}"
+                            f"/{loader['version']}/server/jar"),
+                    "sha256": "",
+                }
+        return None
+    return None
+
+
 def msl_get_server_types(project_dir: str = "") -> Optional[dict]:
     """获取 MSL 镜像支持的所有服务端类型列表。
 
     按类型分类: pluginsCore / modsCore / vanillaCore / proxyCore / bedrockCore。
     有 project_dir 时会走每日缓存，避免频繁请求（MSL API 有限速:
     30次/小时, 60次/天）。
+
+    镜像拿不到时退回内置的一小份列表（只含官方源能兜底的核心），
+    免得整条开服流程卡在第一步。
     """
-    return _msl_cache_fetch("server_types", "/mirrors", project_dir) if project_dir else _msl_request("/mirrors")
+    data = _msl_cache_fetch("server_types", "/mirrors", project_dir) if project_dir else _msl_request("/mirrors")
+    if data:
+        return data
+    print(t("download.fallback_types"))
+    return {k: list(v) for k, v in _FALLBACK_SERVER_TYPES.items()}
 
 
 def msl_get_versions(server_type: str, project_dir: str = "") -> Optional[dict]:
     """获取指定服务端类型的可用版本列表。
 
     版本列表会过滤掉 pre/rc/snapshot 等测试版，只显示稳定版。
+    镜像拿不到时向官方源要。
     """
     key = f"versions_{server_type}"
     if project_dir:
@@ -223,7 +366,12 @@ def msl_get_versions(server_type: str, project_dir: str = "") -> Optional[dict]:
                                 project_dir)
     else:
         data = _msl_request(f"/mirrors/{server_type}")
-    return data
+    if data:
+        return data
+    fallback = _official_versions(server_type)
+    if fallback:
+        print(t("download.fallback_source", core=server_type))
+    return fallback
 
 
 def msl_get_download_url(server_type: str, version: str) -> Optional[dict]:
@@ -233,8 +381,16 @@ def msl_get_download_url(server_type: str, version: str) -> Optional[dict]:
     返回的 dict 里目前稳定提供 url 与 sha256；size 字段在实测响应中并不存在
     （v4 /download/server/paper/1.21.8 只回了这两个键），所以不要依赖它，
     需要文件大小时用 HEAD 探测。
+
+    镜像拿不到时退到官方源；官方源也没有这个核心就返回 None（由调用方报错）。
     """
-    return _msl_request(f"/download/server/{server_type}/{version}")
+    data = _msl_request(f"/download/server/{server_type}/{version}")
+    if isinstance(data, dict) and data.get("url"):
+        return data
+    fallback = _official_download_url(server_type, version)
+    if fallback:
+        print(t("download.fallback_source", core=server_type))
+    return fallback
 
 
 # ---------------------------------------------------------------------------

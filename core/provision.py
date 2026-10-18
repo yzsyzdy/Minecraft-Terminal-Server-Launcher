@@ -113,6 +113,9 @@ _PATCH_FIELDS = (
     "mc_version", "jar", "java_path", "min_mem", "max_mem",
     "extra_jvm_args", "extra_server_args", "process_priority",
     "launch", "openfrp", "auto_start",
+    # 崩溃自动重启。放在这里而不是只写进 .server.json：面板保存设置走的是
+    # update_instance，字段不在白名单里就会被静默丢掉，用户勾了没反应。
+    "auto_restart", "restart_max",
 )
 
 

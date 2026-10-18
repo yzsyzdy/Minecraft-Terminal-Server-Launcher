@@ -8,6 +8,7 @@ import os
 import re
 import json
 import glob
+import platform
 import zipfile
 import tarfile
 import shutil
@@ -17,6 +18,7 @@ from dataclasses import dataclass, asdict
 from typing import Optional, Any
 
 from download_msl import _download_with_progress, _verify_sha256
+from http_utils import fetch_json
 from i18n import t
 
 
@@ -68,6 +70,39 @@ def _run_java_version(java_exe: str) -> Optional[str]:
 
 def _is_windows() -> bool:
     return sys.platform.startswith("win")
+
+
+def _is_macos() -> bool:
+    return sys.platform == "darwin"
+
+
+# POSIX 上找 JDK 的根目录。{home} 会在运行时替换成 $HOME。
+_POSIX_JDK_ROOTS = (
+    "/usr/lib/jvm",
+    "/usr/java",
+    "/opt/java",
+    "/opt/jdk",
+    "{home}/.jdks",
+    "{home}/.sdkman/candidates/java",
+    "{home}/.local/share/JetBrains/Toolbox/apps",
+)
+
+# macOS 专属的根目录。Homebrew 的两条分别是 Apple 芯片与 Intel 的安装前缀。
+_MACOS_JDK_ROOTS = (
+    "/Library/Java/JavaVirtualMachines",
+    "{home}/Library/Java/JavaVirtualMachines",
+    "/opt/homebrew/opt",
+    "/usr/local/opt",
+)
+
+# 一个 JDK 目录里 java 可能落在这几种位置（相对该目录的路径分段）：
+# 普通解压包、JetBrains 自带运行时、macOS 的 .jdk 包、Homebrew 的 openjdk 包。
+_POSIX_JDK_SUFFIX_PARTS = (
+    ("bin",),
+    ("jbr", "bin"),
+    ("Contents", "Home", "bin"),
+    ("libexec", "openjdk.jdk", "Contents", "Home", "bin"),
+)
 
 
 def _java_exe_name() -> str:
@@ -161,34 +196,29 @@ def _search_java_from_default_paths() -> list[JavaInfo]:
                     seen.add(norm)
                     found.append(JavaInfo(path=norm, version=ver, detected_at=now))
     else:
-        roots = [
-            "/usr/lib/jvm",
-            "/usr/java",
-            "/opt/java",
-            "/opt/jdk",
-            os.path.join(os.environ.get("HOME", ""), ".jdks"),
-            os.path.join(os.environ.get("HOME", ""), ".sdkman", "candidates", "java"),
-            os.path.join(os.environ.get("HOME", ""), ".local", "share", "JetBrains", "Toolbox", "apps"),
-        ]
+        home = os.environ.get("HOME", "")
+        roots = [p.format(home=home) for p in _POSIX_JDK_ROOTS]
+        if _is_macos():
+            # macOS 的 JDK 装成 .jdk 包，真正的 java 在 <包名>.jdk/Contents/Home/bin/ 下。
+            # 系统自带的 /usr/bin/java 只是个 shim：图形界面里启动 MSTL 时 PATH 里
+            # 不一定有它，只靠 PATH 扫描会漏掉所有已安装的 JDK。
+            roots += [p.format(home=home) for p in _MACOS_JDK_ROOTS]
         for root in roots:
             if not root or not os.path.isdir(root):
                 continue
-            for entry in os.listdir(root):
+            try:
+                entries = os.listdir(root)
+            except OSError:
+                continue
+            for entry in entries:
                 jdk_path = os.path.join(root, entry)
                 if not os.path.isdir(jdk_path):
                     continue
-                exe = os.path.join(jdk_path, "bin", java_bin)
-                if os.path.isfile(exe):
-                    norm = os.path.normpath(exe)
-                    if norm in seen:
+                for parts in _POSIX_JDK_SUFFIX_PARTS:
+                    exe = os.path.join(jdk_path, *parts, java_bin)
+                    if not os.path.isfile(exe):
                         continue
-                    ver = _run_java_version(norm)
-                    if ver:
-                        seen.add(norm)
-                        found.append(JavaInfo(path=norm, version=ver, detected_at=now))
-                jbr = os.path.join(jdk_path, "jbr", "bin", java_bin)
-                if os.path.isfile(jbr):
-                    norm = os.path.normpath(jbr)
+                    norm = os.path.normpath(exe)
                     if norm in seen:
                         continue
                     ver = _run_java_version(norm)
@@ -328,37 +358,111 @@ MC_JAVA_COMPAT: list[tuple[str, str, str, str, str]] = [
     ("1.25", "999",    "25", "25", "Latest snapshot"),
 ]
 
+# 各版本 JDK 的下载源。键是「系统-架构」，值是归档地址。
+#
+# 分两层：
+#   * GraalVM（经 fastmirror 镜像）——国内快，但镜像上只有 windows-x64 与
+#     linux-x64 两个包；实测 macos-x64 / macos-aarch64 / linux-aarch64 一律
+#     返回 500（文件不存在），所以不能拿它当唯一来源。
+#   * Eclipse Temurin（Adoptium 官方 API）——覆盖 win/linux/mac × x64/aarch64，
+#     而且 Java 8 / 11 / 16 只有它有（GraalVM 从 17 起）。它在境外、国内偏慢，
+#     因此只在镜像没有对应组合时兜底。
 JDK_MIRROR_URLS: dict[str, dict[str, str]] = {
     "17": {
-        "linux": "https://res.fastmirror.net/directlink/1/Java%20%E7%8E%AF%E5%A2%83/OpenJDK/Oracle%20GraalVM/graalvm-community-jdk-17.0.9_linux-x64_bin.tar.gz",
-        "windows": "https://res.fastmirror.net/directlink/1/Java%20%E7%8E%AF%E5%A2%83/OpenJDK/Oracle%20GraalVM/graalvm-community-jdk-17.0.9_windows-x64_bin.zip",
+        "linux-x64": "https://res.fastmirror.net/directlink/1/Java%20%E7%8E%AF%E5%A2%83/OpenJDK/Oracle%20GraalVM/graalvm-community-jdk-17.0.9_linux-x64_bin.tar.gz",
+        "windows-x64": "https://res.fastmirror.net/directlink/1/Java%20%E7%8E%AF%E5%A2%83/OpenJDK/Oracle%20GraalVM/graalvm-community-jdk-17.0.9_windows-x64_bin.zip",
     },
     "21": {
-        "linux": "https://res.fastmirror.net/directlink/1/Java%20%E7%8E%AF%E5%A2%83/OpenJDK/Oracle%20GraalVM/graalvm-community-jdk-21.0.2_linux-x64_bin.tar.gz",
-        "windows": "https://res.fastmirror.net/directlink/1/Java%20%E7%8E%AF%E5%A2%83/OpenJDK/Oracle%20GraalVM/graalvm-community-jdk-21.0.2_windows-x64_bin.zip",
+        "linux-x64": "https://res.fastmirror.net/directlink/1/Java%20%E7%8E%AF%E5%A2%83/OpenJDK/Oracle%20GraalVM/graalvm-community-jdk-21.0.2_linux-x64_bin.tar.gz",
+        "windows-x64": "https://res.fastmirror.net/directlink/1/Java%20%E7%8E%AF%E5%A2%83/OpenJDK/Oracle%20GraalVM/graalvm-community-jdk-21.0.2_windows-x64_bin.zip",
     },
     "25": {
-        "linux": "https://res.fastmirror.net/directlink/1/Java%20%E7%8E%AF%E5%A2%83/OpenJDK/Oracle%20GraalVM/graalvm-community-jdk-25.0.2_linux-x64_bin.tar.gz",
-        "windows": "https://res.fastmirror.net/directlink/1/Java%20%E7%8E%AF%E5%A2%83/OpenJDK/Oracle%20GraalVM/graalvm-community-jdk-25.0.2_windows-x64_bin.zip",
+        "linux-x64": "https://res.fastmirror.net/directlink/1/Java%20%E7%8E%AF%E5%A2%83/OpenJDK/Oracle%20GraalVM/graalvm-community-jdk-25.0.2_linux-x64_bin.tar.gz",
+        "windows-x64": "https://res.fastmirror.net/directlink/1/Java%20%E7%8E%AF%E5%A2%83/OpenJDK/Oracle%20GraalVM/graalvm-community-jdk-25.0.2_windows-x64_bin.zip",
     },
 }
 
-# 各版本 JDK 归档的 sha256，来源是 GitHub 上 graalvm/graalvm-ce-builds 对应
+# 能自动装的 Java 大版本。8 / 11 / 16 只走 Adoptium——老版本服（≤1.16.5）
+# 正好需要它们，而 GraalVM 没有。
+JDK_DOWNLOAD_VERSIONS: tuple[str, ...] = ("8", "11", "16", "17", "21", "25")
+
+# Adoptium 的 os / architecture 取值与本地叫法不一致，这里做映射。
+_ADOPTIUM_OS = {"windows": "windows", "linux": "linux", "darwin": "mac"}
+_ADOPTIUM_ARCH = {
+    "x86_64": "x64", "amd64": "x64", "x64": "x64",
+    "aarch64": "aarch64", "arm64": "aarch64",
+}
+
+# 镜像源的归档 sha256，来源是 GitHub 上 graalvm/graalvm-ce-builds 对应
 # release 里的 .sha256 sidecar（.../releases/download/jdk-<ver>/<归档>.sha256）。
 # 镜像站只镜像字节、不提供校验值，而这里下载的是要拿去跑服务器的 java：镜像被
 # 换成别的包、被中间人改过、或者只下到一半，都会一直要到 java 启动失败才暴露。
 #
 # 25.0.2 这两个值同时出现在 GitHub API 的 asset digest 和 sidecar 里，两条独立
 # 渠道完全一致；17.0.9 / 21.0.2 是旧 release（API 不返回 digest），只从 sidecar
-# 取。新增版本时记得一起补，tests/test_java_tools.py 会检查覆盖是否完整。
+# 取。键是「版本, 系统-架构」，与 JDK_MIRROR_URLS 一一对应。
+#
+# 走 Adoptium 的组合不在这里：它的 assets 接口会随包给出官方 checksum，
+# _jdk_source() 直接把那个值带回来，所以不用手工钉（也就不会因为补丁版
+# 升级而过期）。
 JDK_SHA256: dict[tuple[str, str], str] = {
-    ("17", "windows"): "285e045bfc0b87d2b61958fea97444c3c6c7e68fba3fdbbe146622328b52ec38",
-    ("17", "linux"): "e47ba7229cef02393e19d5b8f46f7f1cab4829dd17bfe84d5431fc8ff0e22a96",
-    ("21", "windows"): "e17b7bead097bf372a5c75df17815b0a2f30b777a019d25eff7706b21421f7fa",
-    ("21", "linux"): "b048069aaa3a99b84f5b957b162cc181a32a4330cbc35402766363c5be76ae48",
-    ("25", "windows"): "72edc27ce2dd3c156332144a339c97995745cae291205ed2f9b5cc26aa9cb422",
-    ("25", "linux"): "e0be791c8fda4d03b6b0a0cb824fef3149736170057b3a515252b44419606af0",
+    ("17", "windows-x64"): "285e045bfc0b87d2b61958fea97444c3c6c7e68fba3fdbbe146622328b52ec38",
+    ("17", "linux-x64"): "e47ba7229cef02393e19d5b8f46f7f1cab4829dd17bfe84d5431fc8ff0e22a96",
+    ("21", "windows-x64"): "e17b7bead097bf372a5c75df17815b0a2f30b777a019d25eff7706b21421f7fa",
+    ("21", "linux-x64"): "b048069aaa3a99b84f5b957b162cc181a32a4330cbc35402766363c5be76ae48",
+    ("25", "windows-x64"): "72edc27ce2dd3c156332144a339c97995745cae291205ed2f9b5cc26aa9cb422",
+    ("25", "linux-x64"): "e0be791c8fda4d03b6b0a0cb824fef3149736170057b3a515252b44419606af0",
 }
+
+
+def _machine_arch() -> str:
+    """把 platform.machine() 归一成 x64 / aarch64；认不出来返回空串。
+
+    归一之后才敢去拼下载地址——ARM 机器上拿到 x64 的包，装完是一堆
+    「Exec format error」，比直接说「装不了」更难查。
+    """
+    return _ADOPTIUM_ARCH.get(platform.machine().lower(), "")
+
+
+def can_auto_download(java_version: str) -> bool:
+    """这个 Java 大版本有没有自动安装渠道（能不能装 ≠ 本机装不装得到）。"""
+    return str(java_version) in JDK_DOWNLOAD_VERSIONS
+
+
+def _adoptium_package(ver: str, os_name: str, arch: str) -> Optional[tuple[str, str]]:
+    """向 Adoptium 问某个 版本/系统/架构 的 JDK，返回 (下载地址, sha256)。
+
+    assets 接口一次就把「当前最新补丁版 + 包地址 + 官方校验值」都给出来，
+    所以代码里不用钉死小版本号，换补丁版时这里什么都不用改。
+    """
+    os_key = _ADOPTIUM_OS.get(os_name)
+    arch_key = _ADOPTIUM_ARCH.get(arch.lower())
+    if not os_key or not arch_key:
+        return None
+    url = (
+        f"https://api.adoptium.net/v3/assets/latest/{ver}/hotspot"
+        f"?architecture={arch_key}&image_type=jdk&os={os_key}&vendor=eclipse"
+    )
+    data = fetch_json(url, timeout=20)
+    if not isinstance(data, list) or not data:
+        return None
+    package = (data[0].get("binary") or {}).get("package") or {}
+    link = str(package.get("link") or "")
+    checksum = str(package.get("checksum") or "")
+    return (link, checksum) if link else None
+
+
+def _jdk_source(ver: str, os_name: str, arch: str) -> Optional[tuple[str, str]]:
+    """挑首选下载源：先国内镜像，镜像没有这个组合再问 Adoptium。
+
+    镜像优先是因为它在国内快；也只有镜像缺这个组合时才去问 Adoptium，
+    省掉一次境外请求。
+    """
+    key = f"{os_name}-{arch}"
+    mirrored = JDK_MIRROR_URLS.get(ver, {}).get(key)
+    if mirrored:
+        return mirrored, JDK_SHA256.get((ver, key), "")
+    return _adoptium_package(ver, os_name, arch)
 
 
 def _version_tuple(v: str) -> tuple:
@@ -419,7 +523,7 @@ def _check_java_compatibility(
         print(t("java.hint", note=req["note"]))
     print()
 
-    if rec in JDK_MIRROR_URLS:
+    if can_auto_download(rec):
         print(t("java.compat.download", n=1, ver=rec))
         print(t("java.compat.ignore", n=2))
         print(t("java.compat.cancel", n=0))
@@ -494,7 +598,9 @@ def _extract_and_rename_jdk(archive: str, target_dir: str, os_name: str) -> Opti
         # 一半的目录整个删掉。mkdtemp 顺带省掉「先删再建」这两步。
         tmp = tempfile.mkdtemp(prefix=".jdk_extract_",
                                dir=os.path.dirname(target_dir) or ".")
-        if os_name == "windows":
+        # 按归档后缀判，不按系统判：Windows 是 .zip，Linux 与 macOS 都是
+        # .tar.gz。以后若某个源换了打包格式，这里不用跟着改。
+        if archive.lower().endswith(".zip"):
             with zipfile.ZipFile(archive, "r") as zf:
                 roots = set()
                 for m in zf.infolist():
@@ -530,22 +636,17 @@ def _extract_and_rename_jdk(archive: str, target_dir: str, os_name: str) -> Opti
     return exe if os.path.isfile(exe) else None
 
 
-def _download_jdk(java_version: str, project_dir: str) -> Optional[str]:
-    os_name = _os_platform()
-    urls = JDK_MIRROR_URLS.get(java_version)
-    if not urls:
-        print(t("jdk.unsupported", ver=java_version)); return None
-    url = urls.get(os_name)
-    if not url:
-        print(t("jdk.unsupported_os", ver=java_version, os=os_name)); return None
-
-    jdk_dir = os.path.join(project_dir, f"jdk-{java_version}")
-    java_exe = os.path.join(jdk_dir, "bin", "java.exe" if os_name == "windows" else "java")
-    if os.path.isdir(jdk_dir) and os.path.isfile(java_exe):
-        print(t("jdk.existing", dir=jdk_dir)); return java_exe
-
-    print(t("jdk.downloading", ver=java_version, os=os_name))
-    ext = ".zip" if os_name == "windows" else ".tar.gz"
+def _fetch_jdk(
+    url: str,
+    expected: str,
+    java_version: str,
+    os_name: str,
+    arch: str,
+    project_dir: str,
+) -> Optional[str]:
+    """从单个地址下载、校验、解压一个 JDK；失败返回 None（不抛）。"""
+    # 归档格式按 URL 判，不按系统猜：Windows 是 .zip，Linux 与 macOS 都是 .tar.gz。
+    ext = ".zip" if url.lower().split("?")[0].endswith(".zip") else ".tar.gz"
     dl = os.path.join(project_dir, f"jdk-{java_version}{ext}")
     if not _download_with_progress(url, dl, desc=f"JDK {java_version}"):
         # 下载失败也要清掉残片。以前只有成功路径删归档，而「是否已有 JDK」
@@ -553,7 +654,6 @@ def _download_jdk(java_version: str, project_dir: str) -> Optional[str]:
         _remove_quietly(dl)
         return None
 
-    expected = JDK_SHA256.get((java_version, os_name))
     if expected:
         # 不匹配时 _verify_sha256 会把文件删掉。
         if not _verify_sha256(dl, expected):
@@ -564,6 +664,7 @@ def _download_jdk(java_version: str, project_dir: str) -> Optional[str]:
         print(t("jdk.unverified", ver=java_version))
 
     print(t("jdk.extracting"))
+    jdk_dir = os.path.join(project_dir, f"jdk-{java_version}")
     java_exe = _extract_and_rename_jdk(dl, jdk_dir, os_name)
     _remove_quietly(dl)
 
@@ -571,6 +672,42 @@ def _download_jdk(java_version: str, project_dir: str) -> Optional[str]:
         print(t("jdk.java_not_found")); return None
     print(t("jdk.complete", path=java_exe))
     return java_exe
+
+
+def _download_jdk(java_version: str, project_dir: str) -> Optional[str]:
+    os_name = _os_platform()
+    if not can_auto_download(java_version):
+        print(t("jdk.unsupported", ver=java_version)); return None
+    arch = _machine_arch()
+    if not arch:
+        # 认不出架构就别猜着下——下错架构的包会在启动时变成一句
+        # "Exec format error"，离真正原因很远。
+        print(t("jdk.unsupported_arch", ver=java_version, arch=platform.machine()))
+        return None
+
+    jdk_dir = os.path.join(project_dir, f"jdk-{java_version}")
+    java_exe = os.path.join(jdk_dir, "bin", "java.exe" if os_name == "windows" else "java")
+    if os.path.isdir(jdk_dir) and os.path.isfile(java_exe):
+        print(t("jdk.existing", dir=jdk_dir)); return java_exe
+
+    source = _jdk_source(java_version, os_name, arch)
+    if not source:
+        print(t("jdk.unsupported_os", ver=java_version, os=f"{os_name}/{arch}"))
+        return None
+
+    print(t("jdk.downloading", ver=java_version, os=f"{os_name}/{arch}"))
+    found = _fetch_jdk(source[0], source[1], java_version, os_name, arch, project_dir)
+    if found:
+        return found
+
+    # 镜像表里钉的是具体小版本（GraalVM 17.0.9 之类），上游撤掉那个文件时
+    # HEAD 还在、GET 却 500——这时候换 Adoptium 再试一次，而不是直接告诉
+    # 用户「这个版本不支持自动下载」。
+    fallback = _adoptium_package(java_version, os_name, arch)
+    if not fallback or fallback[0] == source[0]:
+        return None
+    print(t("jdk.source_fallback", ver=java_version))
+    return _fetch_jdk(fallback[0], fallback[1], java_version, os_name, arch, project_dir)
 
 
 def resolve_java(
@@ -628,7 +765,7 @@ def resolve_java(
                 print(t("java.recommend_generic"))
 
             target = req["recommended"] if req else "21"
-            if target in JDK_MIRROR_URLS:
+            if can_auto_download(target):
                 print()
                 if input(t("java.ask_download", ver=target)).strip().lower() == "y":
                     exe = _download_jdk(target, project_dir or storage_dir)

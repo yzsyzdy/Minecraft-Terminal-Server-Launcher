@@ -51,6 +51,11 @@ DEFAULT_SERVER_CONFIG: dict[str, Any] = {
     "process_priority": "normal",
     # 随软件启动而启动：软件一起来就在后台把它拉起（网页面板里能看能管）
     "auto_start": False,
+    # 崩溃自动重启：进程以非 0 退出码结束时，等一会儿再拉起来。手动停止
+    # 与正常退出（退出码 0）不重启。restart_max 是连续失败次数的上限——
+    # 配置错的东西会让进程一启动就崩，没有上限就是无限重启的死循环。
+    "auto_restart": False,
+    "restart_max": 5,
     # 显式造一份新的（args 是列表，不能用 dict(DEFAULT_GENERIC_LAUNCH) 直接共用）
     "launch": {**DEFAULT_GENERIC_LAUNCH, "args": []},
     "openfrp": {
@@ -227,6 +232,12 @@ def _normalize_server_config(cfg: dict[str, Any]) -> dict[str, Any]:
     kind = str(cfg.get("kind") or KIND_MINECRAFT).strip().lower()
     cfg["kind"] = kind if kind in INSTANCE_KINDS else KIND_MINECRAFT
     cfg["auto_start"] = _as_bool(cfg.get("auto_start"))
+    cfg["auto_restart"] = _as_bool(cfg.get("auto_restart"))
+    # 上限只允许 0–20：0 等于关掉，写 1e9 就等于没有熔断，而负数没有意义。
+    try:
+        cfg["restart_max"] = max(0, min(20, int(cfg.get("restart_max"))))
+    except (TypeError, ValueError):
+        cfg["restart_max"] = DEFAULT_SERVER_CONFIG["restart_max"]
 
     launch = cfg.get("launch")
     if not isinstance(launch, dict):

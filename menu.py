@@ -435,9 +435,11 @@ def _edit_server_config(server_cfg: dict, server_dir: str) -> None:
         print(t("menu.config.3", n=3, val=" ".join(server_cfg.get("extra_server_args", []))))
         print(t("menu.config.4", n=4,
                 val=t("settings.on") if server_cfg.get("auto_start") else t("settings.off")))
+        print(t("menu.config.5", n=5,
+                val=t("settings.on") if server_cfg.get("auto_restart") else t("settings.off")))
         print(t("menu.plugin.back", n=0))
         print()
-        c = input("  " + t("menu.main.prompt", max=4)).strip()
+        c = input("  " + t("menu.main.prompt", max=5)).strip()
         if c == "0":
             return
         elif c == "1":
@@ -465,6 +467,11 @@ def _edit_server_config(server_cfg: dict, server_dir: str) -> None:
             save_server_config(server_cfg, server_dir)
             print(t("menu.config.auto_start_saved",
                     val=t("settings.on") if server_cfg["auto_start"] else t("settings.off")))
+        elif c == "5":
+            server_cfg["auto_restart"] = not bool(server_cfg.get("auto_restart"))
+            save_server_config(server_cfg, server_dir)
+            print(t("menu.config.auto_restart_saved",
+                    val=t("settings.on") if server_cfg["auto_restart"] else t("settings.off")))
         else:
             print(t("app.invalid_choice_short"))
 
@@ -493,9 +500,11 @@ def _edit_generic_config(server_cfg: dict, server_dir: str) -> None:
         print(t("menu.generic.cfg_workdir", n=6, val=launch.get("workdir") or "-"))
         print(t("menu.config.4", n=7,
                 val=t("settings.on") if server_cfg.get("auto_start") else t("settings.off")))
+        print(t("menu.config.5", n=8,
+                val=t("settings.on") if server_cfg.get("auto_restart") else t("settings.off")))
         print(t("menu.plugin.back", n=0))
         print()
-        c = input("  " + t("menu.main.prompt", max=7)).strip()
+        c = input("  " + t("menu.main.prompt", max=8)).strip()
         if c == "0":
             return
 
@@ -536,6 +545,8 @@ def _edit_generic_config(server_cfg: dict, server_dir: str) -> None:
             patch["launch"] = {**launch, "workdir": value}
         elif c == "7":
             patch["auto_start"] = not bool(server_cfg.get("auto_start"))
+        elif c == "8":
+            patch["auto_restart"] = not bool(server_cfg.get("auto_restart"))
         else:
             print(t("app.invalid_choice_short"))
 

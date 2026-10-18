@@ -69,6 +69,8 @@ MSTL 有两层配置：全局的 `config.json`，以及每个实例自己的 `.s
   "extra_jvm_args": [],
   "extra_server_args": [],
   "process_priority": "normal",
+  "auto_restart": false,
+  "restart_max": 5,
   "openfrp": {
     "token": "",
     "proxy_id": 0,
@@ -90,6 +92,8 @@ MSTL 有两层配置：全局的 `config.json`，以及每个实例自己的 `.s
 | `process_priority` | string | `"normal"` | 进程优先级，可选 `normal` / `below`（低于正常）/ `low`（低） |
 | `kind` | string | `"minecraft"` | 实例种类，`minecraft` 或 `generic`（通用实例）。创建后不可更改 |
 | `auto_start` | bool | `false` | 随软件启动而启动：软件一起来就在**后台**把它拉起（可被面板管理） |
+| `auto_restart` | bool | `false` | 崩溃自动重启：进程以非 0 退出码结束时自动拉起（退避 5 秒起、每次翻倍、封顶 60 秒）。手动停止、控制台里敲 `stop`、正常关服（退出码 0）都不会触发 |
+| `restart_max` | int | `5` | 连续崩溃多少次后放弃自动重启，范围 `0`–`20`，`0` 等于关闭。进程活过 60 秒后再崩会重置这个计数 |
 | `launch` | object | 见下 | **通用实例**的启动配置，`kind` 为 `minecraft` 时忽略 |
 | `openfrp.token` | string | `""` | 绑定到本实例的 OpenFrp 用户 token |
 | `openfrp.proxy_id` | int | `0` | 绑定的隧道 ID，`0` 表示未绑定 |
@@ -105,7 +109,7 @@ MSTL 有两层配置：全局的 `config.json`，以及每个实例自己的 `.s
 | `command` | string | `""` | `mode=cmd` / `powershell` 时要执行的命令原文 |
 | `workdir` | string | `""` | 工作目录，相对实例目录；留空即实例目录 |
 
-`process_priority`、`extra_jvm_args`、`extra_server_args`、`auto_start`（以及通用实例的整套 `launch`）在主菜单 `[1] 启动服务器` 选中实例后的配置菜单里可以直接改，不需要手写 JSON；网页面板里选中实例点标题栏的 `⚙` 也能改。
+`process_priority`、`extra_jvm_args`、`extra_server_args`、`auto_start`、`auto_restart`（以及通用实例的整套 `launch`）在主菜单 `[1] 启动服务器` 选中实例后的配置菜单里可以直接改，不需要手写 JSON；网页面板里选中实例点标题栏的 `⚙` 也能改。
 
 ## 自动生成的文件
 

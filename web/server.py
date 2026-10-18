@@ -219,6 +219,10 @@ WEB_STRINGS = (
     "web.settings.kind_locked",
     "web.settings.auto_start_instance",
     "web.settings.auto_start_instance_hint",
+    "web.settings.auto_restart",
+    "web.settings.auto_restart_hint",
+    "web.settings.restart_max",
+    "web.settings.restart_max_hint",
     # frp 面板
     "web.frp.title",
     "web.frp.status",
