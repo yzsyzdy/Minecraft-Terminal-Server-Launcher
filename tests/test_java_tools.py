@@ -318,10 +318,17 @@ class MacosJavaScanTest(unittest.TestCase):
                           [os.path.normpath(j.path) for j in found])
 
     def test_the_macos_roots_are_gated_on_darwin(self):
-        """同一棵树，不假装是 macOS 就不该被扫到。"""
+        """同一棵树，不假装是 macOS 就不该被扫到。
+
+        不能断言「结果为空」：CI 的 ubuntu runner 自带 /usr/lib/jvm 里的 JDK，
+        扫描本来就会扫到真东西。这里要的是「假 HOME 下那棵树没被当成 macOS
+        bundle 认出来」，所以只否掉那一条路径。
+        """
         with tempfile.TemporaryDirectory() as home:
-            self._make_bundle(home)
-            self.assertEqual(self._scan(home, macos=False), [])
+            exe = self._make_bundle(home)
+            found = self._scan(home, macos=False)
+            self.assertNotIn(os.path.normpath(exe),
+                             [os.path.normpath(j.path) for j in found])
 
 
 class JdkSourceResolutionTest(unittest.TestCase):

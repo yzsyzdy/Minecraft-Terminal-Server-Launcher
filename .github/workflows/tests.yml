@@ -44,8 +44,14 @@ jobs:
       - name: Run tests
         shell: pwsh
         run: |
+          # 跑测试期间放宽 ErrorActionPreference：unittest 的失败输出走 stderr，
+          # `2>&1 |` 之后会变成 ErrorRecord，在 Stop 下直接抛 NativeCommandError，
+          # 脚本被打断在拼 annotation 之前——2026-10 的 ubuntu 腿就是这么只剩
+          # 一句 "Process completed with exit code 1" 的。拼诊断时再收紧。
+          $ErrorActionPreference = 'Continue'
           python -m unittest discover -s tests -t . 2>&1 | Tee-Object -FilePath tests-output.txt
           $code = $LASTEXITCODE
+          $ErrorActionPreference = 'Stop'
           if ($code -eq 0) { Write-Host "tests passed on ${{ matrix.os }} py${{ matrix.python-version }}"; exit 0 }
           $all = @(Get-Content -LiteralPath tests-output.txt -ErrorAction SilentlyContinue)
           $report = @("tests failed on ${{ matrix.os }} py${{ matrix.python-version }} (exit code $code)")
@@ -58,5 +64,8 @@ jobs:
             if ($s.Length -gt 320) { $s = $s.Substring(0, 320) + '...' }
             $s
           }
-          Write-Host ("::error::" + ($clean -join '%0A'))
+          # 单条 annotation 有长度上限，超了会被整条丢掉，所以自己先截
+          $body = $clean -join '%0A'
+          if ($body.Length -gt 3500) { $body = $body.Substring(0, 3500) + '%0A...' }
+          Write-Host ("::error::" + $body)
           exit 1
