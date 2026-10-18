@@ -5,7 +5,7 @@
 
 `v1.1.35` 及更早版本的说明见 [GitHub Releases](https://github.com/yzsyzdy/Minecraft-Terminal-Server-Launcher/releases)。
 
-## [未发布]
+## [1.1.39] - 2026-10-18
 
 ### 安全
 
@@ -94,6 +94,12 @@
   含 `neko` 彩蛋语言）。加了动图演示。
 - 语言菜单直接读 locale 文件里的 `_lang` 显示名，不再靠 `i18n.py` 里那张手写表
   ——那张表漏了 `neko`，菜单里一直露着裸代码 `neko` 而不是「萌猫语」。
+
+### 说明
+
+- 1.1.38 里写的两条限制这次解除了一条：macOS 现在会自动扫描系统 JDK，也会按需下载
+  JDK。仍然成立的是 **产物未签名**（macOS 首次运行要右键打开，或执行
+  `xattr -d com.apple.quarantine ./MSTL`）与 **Linux 需要 glibc ≥ 2.35**。
 
 ## [1.1.38] - 2026-10-17
 
@@ -626,5 +632,6 @@ Nuitka 的 `--standalone` **不设置 `sys.frozen`**（实测），而项目里�
 - 通用实例可以配置成执行任意命令，这是功能本身；它的信任边界和「面板能发控制台指令」
   「能改 `.server.json`」是同一条——拿到面板 token 的人本来就能在这台机器上跑东西。
 
+[1.1.39]: https://github.com/yzsyzdy/Minecraft-Terminal-Server-Launcher/compare/v1.1.38...v1.1.39
 [1.1.38]: https://github.com/yzsyzdy/Minecraft-Terminal-Server-Launcher/compare/v1.1.37...v1.1.38
 [1.1.37]: https://github.com/yzsyzdy/Minecraft-Terminal-Server-Launcher/compare/v1.1.36...v1.1.37

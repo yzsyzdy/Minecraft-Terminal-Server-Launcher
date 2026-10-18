@@ -54,8 +54,8 @@ python -m nuitka --standalone ^
   --windows-icon-from-ico=icon.png ^
   --output-dir=build ^
   --product-name=MSTL ^
-  --product-version="1.1.38" ^
-  --file-version="1.1.38" ^
+  --product-version="1.1.39" ^
+  --file-version="1.1.39" ^
   --file-description="Minecraft Terminal Server Launcher" ^
   --copyright="MSTL" ^
   --include-data-dir=locales=locales ^
