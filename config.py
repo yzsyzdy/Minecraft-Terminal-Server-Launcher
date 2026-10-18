@@ -20,6 +20,15 @@ DEFAULT_CONFIG: dict[str, Any] = {
         # 启动软件时顺带把面板也拉起来（后台线程，不挡住终端菜单）
         "auto_start": False,
     },
+    "ai": {
+        # 面板里的 AI 助手。默认关着：没有 base_url/model/api_key 时它什么也
+        # 做不了，而「默认关闭」也意味着升级上来的老配置不会突然开始往外发请求。
+        "enabled": False,
+        # OpenAI 兼容接口，填到 /v1 这一层，程序自己拼 /chat/completions
+        "base_url": "",
+        "api_key": "",
+        "model": "",
+    },
 }
 
 
@@ -34,6 +43,7 @@ def _default_config() -> dict[str, Any]:
     """
     fresh = dict(DEFAULT_CONFIG)
     fresh["web"] = dict(DEFAULT_CONFIG["web"])
+    fresh["ai"] = dict(DEFAULT_CONFIG["ai"])
     return fresh
 
 

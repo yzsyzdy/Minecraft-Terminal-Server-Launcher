@@ -45,6 +45,7 @@ from core.runtime import RuntimeManager
 from core.transfer import abort_import
 from i18n import detect_os_language, load_language, t
 from paths import bundled_dir
+from web.ai import AiAssistant
 from server_manager import (
     KIND_GENERIC,
     KIND_MINECRAFT,
@@ -260,6 +261,33 @@ WEB_STRINGS = (
     "web.frp.upload",
     "web.frp.uploading",
     "web.frp.upload_done",
+    # AI 助手（前端标签页 + 设置面板里的 AI 区块）
+    "web.settings.ai",
+    "web.settings.ai_enabled",
+    "web.settings.ai_base_url",
+    "web.settings.ai_base_url_hint",
+    "web.settings.ai_model",
+    "web.settings.ai_model_hint",
+    "web.settings.ai_key",
+    "web.settings.ai_key_hint",
+    "web.settings.ai_key_set",
+    "web.settings.ai_key_env",
+    "web.settings.ai_saved",
+    "web.ai.tab",
+    "web.ai.placeholder",
+    "web.ai.send",
+    "web.ai.thinking",
+    "web.ai.empty",
+    "web.ai.need_config",
+    "web.ai.confirm",
+    "web.ai.cancel",
+    "web.ai.pending_title",
+    "web.ai.reset",
+    "web.ai.you",
+    "web.ai.assistant",
+    "web.ai.hint_disabled",
+    "web.ai.tool_read",
+    "web.ai.expires",
 )
 
 
@@ -493,6 +521,10 @@ def _make_handler(manager: RuntimeManager, servers_dir: str, token: str,
     token 是启动时那份（兜底用）；token_provider 每次请求现读配置，
     让「重新生成 token」不必重启面板就能生效。
     """
+
+    # 一个面板进程一个助手：会话、待确认请求都挂在它身上。放进闭包而不是
+    # 模块级全局，测试里每个 build_server 才能拿到互不干扰的一份。
+    assistant = AiAssistant(project_dir, servers_dir, manager)
 
     class Handler(BaseHTTPRequestHandler):
         server_version = "MSTL"
@@ -785,6 +817,8 @@ def _make_handler(manager: RuntimeManager, servers_dir: str, token: str,
                 return self._guard(lambda: self._cores(query))
             if path == "/api/frp":
                 return self._guard(self._frp_state)
+            if path == "/api/ai":
+                return self._guard(lambda: self._json(assistant.state()))
             self._json({"ok": False, "message": "not found"}, HTTPStatus.NOT_FOUND)
 
         def do_POST(self) -> None:  # noqa: N802
@@ -972,9 +1006,48 @@ def _make_handler(manager: RuntimeManager, servers_dir: str, token: str,
             self._json({"ok": True, "size": written,
                         "path": fileops.normalize_rel(rel)})
 
+        def _save_ai_config(self, body: dict) -> None:
+            """保存 AI 设置。密钥只进不出：查询接口只回 key_set 布尔值。"""
+            config = load_config(project_dir)
+            current = config.get("ai")
+            section = dict(current) if isinstance(current, dict) else {}
+            if "enabled" in body:
+                section["enabled"] = bool(body["enabled"])
+            if "base_url" in body:
+                section["base_url"] = str(body.get("base_url") or "").strip()
+            if "model" in body:
+                section["model"] = str(body.get("model") or "").strip()
+            # 空字符串一律当成「不改」：前端每次保存都会带着这三个字段，而它
+            # 拿不到已保存的密钥（接口只回 key_set）。真要清空请显式传 clear_key。
+            api_key = body.get("api_key")
+            if isinstance(api_key, str) and api_key.strip():
+                section["api_key"] = api_key.strip()
+            if body.get("clear_key"):
+                section["api_key"] = ""
+            config["ai"] = section
+            save_config(config, project_dir)
+            return self._json({"ok": True, "message": t("web.settings.ai_saved"),
+                               "ai": assistant.state()})
+
         def _post_rest(self, path: str, body: dict) -> None:
             """do_POST 里除进程控制之外的部分。"""
             name = str(body.get("name") or "")
+
+            # -- AI 助手 ---------------------------------------------------
+            if path == "/api/ai/chat":
+                return self._json(assistant.chat(
+                    str(body.get("text") or ""),
+                    str(body.get("instance") or "")))
+
+            if path == "/api/ai/confirm":
+                return self._json(assistant.confirm(
+                    str(body.get("id") or ""), bool(body.get("approve"))))
+
+            if path == "/api/ai/reset":
+                return self._json(assistant.reset())
+
+            if path == "/api/ai/config":
+                return self._save_ai_config(body)
 
             if path == "/api/file/write":
                 root = self._instance_dir(name)

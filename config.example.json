@@ -10,5 +10,11 @@
     "port": 8765,
     "token": "",
     "auto_start": false
+  },
+  "ai": {
+    "enabled": false,
+    "base_url": "",
+    "model": "",
+    "api_key": ""
   }
 }

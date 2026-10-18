@@ -193,6 +193,49 @@
   #jobpct{color:var(--dim);font-size:12px;flex:0 0 auto;
           font-variant-numeric:tabular-nums}
 
+  /* --------------------------------------------------------------- AI 助手 */
+  #ai{flex:1;display:flex;flex-direction:column;min-height:0;background:#ffffff}
+  #aihead{display:flex;align-items:center;gap:10px;padding:8px 14px;
+          border-bottom:1px solid var(--line);flex-wrap:wrap;
+          background:linear-gradient(180deg,#ffffff,#fbfcff)}
+  #aistate{font-size:12px;color:var(--dim)}
+  #aistate.on{color:var(--ok)}
+  #aistate.warn{color:var(--warn)}
+  #aiconfig{padding:12px 14px;border-bottom:1px solid var(--line);
+            background:linear-gradient(180deg,#fbfcff,var(--tint))}
+  #aichat{flex:1;overflow:auto;padding:14px 16px;
+          display:flex;flex-direction:column;gap:9px}
+  .msg{max-width:min(78ch,86%);border:1px solid var(--line);border-radius:10px;
+       padding:8px 12px;white-space:pre-wrap;word-break:break-word;
+       font-size:13px;line-height:1.6}
+  .msg .who{display:block;font-size:10.5px;color:var(--dim);margin-bottom:3px;
+            letter-spacing:.06em;text-transform:uppercase}
+  .msg.user{align-self:flex-end;background:var(--tint);
+            border-color:var(--accent-2);border-bottom-right-radius:3px}
+  .msg.bot{align-self:flex-start;background:#ffffff;border-bottom-left-radius:3px}
+  .msg.tool{align-self:flex-start;background:#fbfcff;border-style:dashed;
+            color:var(--dim);font:12px/1.55 ui-monospace,Consolas,monospace}
+  .msg.tool b{color:var(--fg);font-weight:600}
+  .msg.sys{align-self:center;background:#f7f8fa;color:var(--dim);font-size:12px;
+           max-width:92%;border-radius:99px}
+  .msg.err{align-self:flex-start;border-color:#f0c2c5;background:#fff5f5;color:var(--err)}
+  #aipending{display:flex;flex-direction:column;gap:8px;padding:0 16px 10px}
+  .pending{border:1px solid #e6cf94;border-radius:10px;padding:10px 12px;
+           background:linear-gradient(180deg,#fffdf6,#fff8e8)}
+  .pending .ptitle{font-size:11px;color:var(--warn);font-weight:700;
+                   letter-spacing:.06em;margin-bottom:4px}
+  .pending .psum{font-size:13px;word-break:break-word}
+  .pending .pmeta{font-size:11px;color:var(--dim);margin-top:4px}
+  .pending .pacts{display:flex;gap:8px;margin-top:9px}
+  #aibar{display:flex;gap:8px;padding:10px 16px;border-top:1px solid var(--line);
+         background:linear-gradient(180deg,#ffffff,#fbfcff);align-items:flex-end}
+  #aiinput{flex:1;min-height:38px;max-height:132px;resize:vertical;
+           padding:8px 10px;border-radius:6px;border:1px solid var(--line);
+           background:#ffffff;color:var(--fg);font-family:inherit;font-size:13px;
+           line-height:1.5}
+  #aiinput:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px rgba(76,91,212,.12)}
+  #aiinput::placeholder{color:var(--dim)}
+
   @media (max-width:780px){
     main{grid-template-columns:1fr;grid-template-rows:auto minmax(0,1fr)}
     #list{border-right:none;border-bottom:1px solid var(--line);max-height:34vh}
@@ -218,6 +261,7 @@
       <span class="sp"></span>
       <button class="tab" id="tab-console"></button>
       <button class="tab" id="tab-files"></button>
+      <button class="tab" id="tab-ai"></button>
       <button id="instset">⚙</button>
       <button id="clear"></button>
       <button id="follow"></button>
@@ -247,6 +291,54 @@
           <button id="ecancel"></button>
         </div>
         <textarea id="etext" spellcheck="false" autocomplete="off"></textarea>
+      </div>
+    </div>
+    <div id="ai" hidden>
+      <div id="aihead">
+        <b id="aititle" style="font-size:13px"></b>
+        <span id="aistate"></span>
+        <span style="flex:1"></span>
+        <button id="aiset" title="">⚙</button>
+        <button id="aireset"></button>
+      </div>
+      <div id="aiconfig" hidden>
+        <div class="drow">
+          <label style="display:flex;gap:6px;align-items:center;font-size:13px">
+            <input type="checkbox" id="aienabled" style="min-width:auto">
+            <span id="l-aienabled"></span>
+          </label>
+        </div>
+        <div class="drow">
+          <div class="field">
+            <label id="l-aibase"></label>
+            <input id="aibase" placeholder="https://api.openai.com/v1" spellcheck="false"
+                   autocomplete="off">
+          </div>
+          <div class="field">
+            <label id="l-aimodel"></label>
+            <input id="aimodel" placeholder="gpt-4o-mini" spellcheck="false"
+                   autocomplete="off">
+          </div>
+        </div>
+        <div class="drow">
+          <div class="field">
+            <label id="l-aikey"></label>
+            <input type="password" id="aikey" spellcheck="false"
+                   autocomplete="new-password">
+          </div>
+        </div>
+        <div class="hint" id="ai-base-hint"></div>
+        <div class="hint" id="ai-model-hint"></div>
+        <div class="hint" id="ai-key-hint"></div>
+        <div class="dactions">
+          <button class="primary" id="aisave"></button>
+        </div>
+      </div>
+      <div id="aichat"></div>
+      <div id="aipending" hidden></div>
+      <div id="aibar">
+        <textarea id="aiinput" rows="1" spellcheck="false"></textarea>
+        <button class="primary" id="aisend"></button>
       </div>
     </div>
     <button id="jump" hidden></button>
@@ -941,6 +1033,21 @@ function applyStrings() {
   $("l-setauto").textContent = strings["web.settings.auto_start"] || "";
   $("setsave").textContent = strings["web.settings.save"] || "";
 
+  // AI 助手
+  $("tab-ai").textContent = strings["web.ai.tab"] || "AI";
+  $("aititle").textContent = strings["web.ai.tab"] || "AI";
+  $("aireset").textContent = strings["web.ai.reset"] || "";
+  $("aisend").textContent = strings["web.ai.send"] || "";
+  $("aisave").textContent = strings["web.settings.save"] || "";
+  $("aiinput").placeholder = strings["web.ai.placeholder"] || "";
+  $("l-aienabled").textContent = strings["web.settings.ai_enabled"] || "";
+  $("l-aibase").textContent = strings["web.settings.ai_base_url"] || "";
+  $("l-aimodel").textContent = strings["web.settings.ai_model"] || "";
+  $("l-aikey").textContent = strings["web.settings.ai_key"] || "";
+  $("ai-base-hint").textContent = strings["web.settings.ai_base_url_hint"] || "";
+  $("ai-model-hint").textContent = strings["web.settings.ai_model_hint"] || "";
+  $("ai-key-hint").textContent = strings["web.settings.ai_key_hint"] || "";
+
   // frp 面板
   $("frpbtn").title = strings["web.frp.title"] || "frp";
   $("frptitle").textContent = strings["web.frp.title"] || "frp";
@@ -1251,16 +1358,224 @@ let tab = "console";
 function switchTab(name) {
   tab = name;
   const isFiles = name === "files";
-  $("tab-console").className = "tab" + (isFiles ? "" : " on");
+  const isAi = name === "ai";
+  $("tab-console").className = "tab" + (name === "console" ? " on" : "");
   $("tab-files").className = "tab" + (isFiles ? " on" : "");
+  $("tab-ai").className = "tab" + (isAi ? " on" : "");
   $("files").hidden = !isFiles;
-  $("log").hidden = isFiles;
-  $("bar").hidden = isFiles;
-  $("clear").hidden = isFiles;
-  $("follow").hidden = isFiles;
+  $("ai").hidden = !isAi;
+  // 控制台那一列（日志 + 输入条 + 底部按钮）在文件和 AI 下都要让位
+  const hideConsole = isFiles || isAi;
+  $("log").hidden = hideConsole;
+  $("bar").hidden = hideConsole;
+  $("clear").hidden = hideConsole;
+  $("follow").hidden = hideConsole;
   $("jump").hidden = true;
   if (isFiles) loadFiles(filesPath);
+  if (isAi) aiShow();
 }
+
+/* ------------------------------------------------------------------ AI 助手 */
+
+// 模型说的话是不可信文本：服主装的插件能往日志里写任何东西，而日志会被喂给
+// 模型，模型再把它复述回来。所以这里一律用 textContent 建节点，绝不把模型
+// 的输出塞进 innerHTML —— 面板里的其它地方可以用 esc() + innerHTML，但对话流
+// 是唯一一处由外部内容驱动的，走 DOM 更省心。
+let aiState = null;
+let aiConfigOpen = false;
+let aiLoading = false;
+
+function aiNode(tag, cls, text) {
+  const node = document.createElement(tag);
+  if (cls) node.className = cls;
+  if (text != null) node.textContent = String(text);
+  return node;
+}
+
+function aiShow() {
+  aiReload().catch(aiError);
+}
+
+async function aiReload() {
+  if (aiLoading) return;
+  aiLoading = true;
+  try {
+    aiRender(await apiOk("/api/ai"));
+  } catch (err) {
+    aiError(err);
+  } finally {
+    aiLoading = false;
+  }
+}
+
+function aiError(err) {
+  const box = $("aichat");
+  if (!box) return;
+  box.appendChild(aiNode("div", "msg err", (err && err.message) || String(err)));
+  box.scrollTop = box.scrollHeight;
+}
+
+function aiSetState(text, cls) {
+  const node = $("aistate");
+  node.textContent = text || "";
+  node.className = cls || "";
+}
+
+function aiDisabled() {
+  return !aiState || !aiState.enabled || !aiState.configured;
+}
+
+function aiBusy(on) {
+  $("aisend").disabled = on || aiDisabled();
+  $("aiinput").disabled = on;
+  if (on) aiSetState(strings["web.ai.thinking"] || "", "warn");
+}
+
+function aiRenderChat(list) {
+  const box = $("aichat");
+  const atBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 40;
+  box.innerHTML = "";
+  if (!list.length) {
+    box.appendChild(aiNode("div", "msg sys",
+      strings["web.ai.empty"] || ""));
+  }
+  list.forEach((item) => {
+    const role = String(item.role || "");
+    if (role === "user") {
+      const node = aiNode("div", "msg user", item.text);
+      node.insertBefore(aiNode("span", "who", strings["web.ai.you"] || "you"), node.firstChild);
+      box.appendChild(node);
+    } else if (role === "assistant") {
+      const node = aiNode("div", "msg bot", item.text);
+      node.insertBefore(aiNode("span", "who", strings["web.ai.assistant"] || "MSTL"), node.firstChild);
+      box.appendChild(node);
+    } else if (role === "tool") {
+      const node = aiNode("div", "msg tool");
+      const head = aiNode("span", "who", item.tool || "tool");
+      if (item.risk === "confirm") head.textContent += " · " + (strings["web.ai.pending_title"] || "");
+      node.appendChild(head);
+      node.appendChild(document.createTextNode(String(item.text || "")));
+      box.appendChild(node);
+    } else if (role === "system") {
+      box.appendChild(aiNode("div", "msg sys", item.text));
+    }
+  });
+  if (atBottom) box.scrollTop = box.scrollHeight;
+}
+
+function aiRenderPending(list) {
+  const box = $("aipending");
+  box.innerHTML = "";
+  box.hidden = !(list && list.length);
+  (list || []).forEach((item) => {
+    const card = aiNode("div", "pending");
+    card.appendChild(aiNode("div", "ptitle", strings["web.ai.pending_title"] || ""));
+    card.appendChild(aiNode("div", "psum", item.summary));
+    const secs = Math.max(0, Math.round(Number(item.expires_in) || 0));
+    card.appendChild(aiNode("div", "pmeta",
+      fmt(strings["web.ai.expires"] || "{seconds}s", { seconds: secs })));
+    const acts = aiNode("div", "pacts");
+    const ok = aiNode("button", "primary", strings["web.ai.confirm"] || "OK");
+    ok.onclick = () => aiConfirm(item.id, true);
+    const no = aiNode("button", null, strings["web.ai.cancel"] || "Cancel");
+    no.onclick = () => aiConfirm(item.id, false);
+    acts.appendChild(ok);
+    acts.appendChild(no);
+    card.appendChild(acts);
+    box.appendChild(card);
+  });
+}
+
+function aiRender(st) {
+  aiState = st;
+  $("tab-ai").textContent = strings["web.ai.tab"] || "AI";
+  $("aititle").textContent = strings["web.ai.tab"] || "AI";
+  $("aireset").textContent = strings["web.ai.reset"] || "";
+  $("aiset").title = strings["web.settings.ai"] || "AI";
+
+  if (st.busy) {
+    aiSetState(strings["web.ai.thinking"] || "", "warn");
+  } else if (!st.enabled) {
+    aiSetState(strings["web.ai.hint_disabled"] || "", "warn");
+  } else if (!st.configured) {
+    aiSetState(strings["web.ai.need_config"] || "", "warn");
+  } else {
+    aiSetState(st.model || "", "on");
+  }
+
+  // 设置区：没配好就自动展开，配好了就收起来（用户点齿轮还能再打开）
+  if (!st.enabled || !st.configured) aiConfigOpen = true;
+  $("aiconfig").hidden = !aiConfigOpen;
+  $("aienabled").checked = !!st.enabled;
+  if (document.activeElement !== $("aibase")) $("aibase").value = st.base_url || "";
+  if (document.activeElement !== $("aimodel")) $("aimodel").value = st.model || "";
+  $("aikey").placeholder = st.key_from_env
+    ? (strings["web.settings.ai_key_env"] || "")
+    : st.key_set ? (strings["web.settings.ai_key_set"] || "") : "";
+  if (st.key_from_env) $("aikey").disabled = true;
+
+  aiRenderChat(st.transcript || []);
+  aiRenderPending(st.pending || []);
+  aiBusy(false);
+}
+
+async function aiSend() {
+  const input = $("aiinput");
+  const text = input.value.trim();
+  if (!text || aiDisabled() || (aiState && aiState.busy)) return;
+  input.value = "";
+  aiBusy(true);
+  try {
+    await apiOk("/api/ai/chat", { text: text, instance: selected || "" });
+    await aiReload();
+  } catch (err) {
+    aiError(err);
+    aiBusy(false);
+  }
+}
+
+async function aiConfirm(id, approve) {
+  aiBusy(true);
+  try {
+    await apiOk("/api/ai/confirm", { id: id, approve: approve });
+    await aiReload();
+  } catch (err) {
+    aiError(err);
+    aiBusy(false);
+  }
+}
+
+async function aiReset() {
+  aiBusy(true);
+  try {
+    await apiOk("/api/ai/reset", {});
+    await aiReload();
+  } catch (err) {
+    aiError(err);
+    aiBusy(false);
+  }
+}
+
+async function aiSaveConfig() {
+  const body = {
+    enabled: $("aienabled").checked,
+    base_url: $("aibase").value.trim(),
+    model: $("aimodel").value.trim()
+  };
+  const key = $("aikey").value.trim();
+  // 空 = 不改：服务端从不回传旧 key，前端拿不到原值，发空串会把已存的清掉
+  if (key) body.api_key = key;
+  try {
+    const data = await apiOk("/api/ai/config", body);
+    $("aikey").value = "";
+    aiConfigOpen = false;
+    aiRender(data.ai);
+    toast(data.message || strings["web.settings.ai_saved"] || "");
+  } catch (err) {
+    aiError(err);
+  }
+}
+
 
 /* -------------------------------------------------------------- 文件管理器 */
 
@@ -2200,6 +2515,22 @@ $("jump").onclick = () => setFollow(true);
 
 $("tab-console").onclick = () => switchTab("console");
 $("tab-files").onclick = () => switchTab("files");
+$("tab-ai").onclick = () => switchTab("ai");
+
+// AI 助手：Enter 发送、Shift+Enter 换行
+$("aisend").onclick = () => aiSend();
+$("aiinput").addEventListener("keydown", (ev) => {
+  if (ev.key === "Enter" && !ev.shiftKey) {
+    ev.preventDefault();
+    aiSend();
+  }
+});
+$("aireset").onclick = () => aiReset();
+$("aisave").onclick = () => aiSaveConfig();
+$("aiset").onclick = () => {
+  aiConfigOpen = !aiConfigOpen;
+  $("aiconfig").hidden = !aiConfigOpen;
+};
 
 $("fup").onclick = () => { if (filesPath) loadFiles(filesParent); };
 $("froot").onclick = () => loadFiles("");
