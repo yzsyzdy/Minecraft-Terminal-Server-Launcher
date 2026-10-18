@@ -44,6 +44,15 @@
   中文界面不再混着英文提示。
 - `build.bat` 与英文构建文档里的版本号还停在 1.1.37，跟上 `CHANGELOG` 的 1.1.38。
 - `.gitignore` 忽略下划线开头的本地临时脚本（`_*.bat` / `_*.txt`）。
+- 输出被重定向到文件或管道时，中文会让程序直接崩在第一条提示上：那时
+  Python 不用控制台的 UTF-8，而退回系统 ANSI 代码页（英文 Windows 是
+  cp1252、`LANG=C` 的 Linux 是 ascii），一句 `[JDK] 正在下载…` 就是
+  `UnicodeEncodeError`。启动时把 stdout/stderr 切到 UTF-8，`MSTL.exe > log.txt`
+  这种最常见的排障用法不会再「双击没反应」。
+- 测试不再假设运行环境干净：macOS 挂载用例曾断言「扫不到任何 JDK」，而 CI 的
+  ubuntu runner 自带 `/usr/lib/jvm`；CI 只报 `exit code 1` 是因为测试的 stderr
+  输出在 `ErrorActionPreference=Stop` 下抛 `NativeCommandError`，把拼诊断的
+  代码打断了——现在跨平台失败能读出真实的 FAIL/ERROR 行。
 
 ### 新增
 
