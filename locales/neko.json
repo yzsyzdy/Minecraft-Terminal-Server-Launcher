@@ -407,6 +407,7 @@
     "settings.startup_disabled": "  [设置] 开机自启动关掉啦喵。",
     "settings.startup_unsupported": "  [呜…错误] 开机自启动只有 Windows 能管喵。",
     "web.panel.title": "MSTL 网页面板喵",
+    "web.panel.theme": "换个主题喵（跟随系统 → 深色 → 浅色）",
     "web.panel.instances": "实例",
     "web.panel.no_instances": "还没有实例喵，先去命令行里导入或下载一个吧~",
     "web.panel.console": "控制台",

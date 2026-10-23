@@ -408,6 +408,7 @@
     "settings.startup_disabled": "  [设置] 已关闭开机自启动。",
     "settings.startup_unsupported": "  [错误] 开机自启动管理仅支持 Windows 系统。",
     "web.panel.title": "MSTL 网页面板",
+    "web.panel.theme": "切换主题（跟随系统 → 深色 → 浅色）",
     "web.panel.instances": "实例",
     "web.panel.no_instances": "还没有实例。先在命令行里导入或下载一个。",
     "web.panel.console": "控制台",

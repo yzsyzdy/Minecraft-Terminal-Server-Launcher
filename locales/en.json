@@ -407,6 +407,7 @@
     "settings.startup_disabled": "  [Settings] Startup disabled.",
     "settings.startup_unsupported": "  [Error] Startup management is only supported on Windows.",
     "web.panel.title": "MSTL Web Panel",
+    "web.panel.theme": "Theme (auto → dark → light)",
     "web.panel.instances": "Instances",
     "web.panel.no_instances": "No instances yet. Import or download one from the CLI first.",
     "web.panel.console": "Console",

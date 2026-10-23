@@ -407,6 +407,7 @@
     "settings.startup_disabled": "  [Настройки] Автозапуск при старте системы выключен.",
     "settings.startup_unsupported": "  [Ошибка] Управление автозапуском доступно только в Windows.",
     "web.panel.title": "Веб-панель MSTL",
+    "web.panel.theme": "Тема (авто → тёмная → светлая)",
     "web.panel.instances": "Экземпляры",
     "web.panel.no_instances": "Экземпляров пока нет. Сначала импортируйте или скачайте один в CLI.",
     "web.panel.console": "Консоль",

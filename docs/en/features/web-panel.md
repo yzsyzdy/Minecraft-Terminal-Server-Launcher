@@ -27,6 +27,7 @@ The panel revolves around one loop — see instances → start → watch the con
 - **Instance settings**: memory, extra JVM arguments, process priority, **start with the app**, a generic instance's launch spec, and the OpenFrp tunnel binding
 - **frp tunneling**: edit `frpc.toml`, add and remove tunnels, start and stop frpc, download or update the frpc binary (with a manual upload fallback)
 - **Visible progress**: downloading a server core, downloading frpc and uploading files all show a progress bar along the bottom — a tens-of-megabytes core no longer means staring at a spinning button
+- **Dark mode**: follows the system by default; the `◐` button in the top bar cycles auto → dark → light and the choice is remembered in the browser
 
 The console and the file manager are two tabs of the right-hand pane; switching tabs does not drop the SSE connection. Instance settings (`⚙`) and frp (`frp` in the top bar) are separate dialogs.
 
