@@ -26,6 +26,7 @@ import os
 import queue
 import secrets
 import shutil
+import tempfile
 import threading
 import traceback
 import urllib.parse
@@ -39,17 +40,21 @@ from config import load_config, save_config
 from core import archive as archives
 from core import files as fileops
 from core import frp as frpops
+from core import instances as instlib
 from core import provision
 from core.errors import CoreError
-from core.runtime import RuntimeManager
+from core.runtime import RuntimeManager, accept_eula, eula_accepted
 from core.transfer import abort_import
-from i18n import detect_os_language, load_language, t
+from core import transfer as transferops
+from i18n import available_languages, detect_os_language, load_language, t
 from paths import bundled_dir
 from web.ai import AiAssistant
 from server_manager import (
+    EXPORT_CATEGORIES,
     KIND_GENERIC,
     KIND_MINECRAFT,
     LAUNCH_EXEC,
+    classify_server_type,
     ensure_servers_folder,
     list_servers,
     load_server_config,
@@ -88,6 +93,34 @@ _UNSAFE_HEADER_CHARS = {code: "_" for code in range(0x20)}
 _UNSAFE_HEADER_CHARS[0x7F] = "_"
 _UNSAFE_HEADER_CHARS[ord('"')] = "_"
 _UNSAFE_HEADER_CHARS[ord("\\")] = "_"
+
+# 实例能装什么，看的是服务端类型：插件的只有 plugins/，模组的只有 mods/，
+# 混合端（比如 Arclight）两边都有。其余的端两个目录都不该出现。
+def _jar_kind_of(server_cfg: dict, server_dir: str) -> str:
+    stype = classify_server_type(server_cfg, server_dir)
+    if stype == "plugin":
+        return "plugins"
+    if stype == "mod":
+        return "mods"
+    if stype == "hybrid":
+        return "both"
+    return ""
+
+
+def _jar_dir(server_dir: str, kind: str) -> str:
+    return (instlib.mods_dir(server_dir) if kind == "mods"
+            else instlib.plugins_dir(server_dir))
+
+
+def _safe_jar_name(filename: str) -> str:
+    """只接受纯文件名。这个值会拼进目录路径，带分隔符就是一次目录穿越。"""
+    name = str(filename or "")
+    if not name or os.path.basename(name) != name or name in (".", ".."):
+        raise CoreError("web.error.no_such_file", path=name)
+    if "\\" in name or "/" in name or ":" in name:
+        raise CoreError("web.error.no_such_file", path=name)
+    return name
+
 
 # 前端需要的那几句文案，由服务端统一下发，前端只负责摆放
 WEB_STRINGS = (
@@ -159,6 +192,47 @@ WEB_STRINGS = (
     "web.files.uploading_folder",
     "web.files.folder_done",
     "web.files.folder_partial",
+    # 内容（插件 / 模组）
+    "web.jars.tab",
+    "web.jars.plugins",
+    "web.jars.mods",
+    "web.jars.empty",
+    "web.jars.search",
+    "web.jars.search_hint",
+    "web.jars.searching",
+    "web.jars.no_results",
+    "web.jars.download",
+    "web.jars.upload",
+    "web.jars.enable",
+    "web.jars.disable",
+    "web.jars.confirm_delete",
+    "web.jars.uploaded",
+    # 导出
+    "web.export.title",
+    "web.export.hint",
+    "web.export.start",
+    "web.export.none",
+    # EULA
+    "web.eula.title",
+    "web.eula.body",
+    "web.eula.agree",
+    "web.eula.accepted",
+    # 全局设置
+    "web.panel.settings",
+    "web.settings.language",
+    "web.settings.language_auto",
+    "web.settings.threads",
+    "web.settings.threads_hint",
+    "web.settings.auto_start_server",
+    "web.settings.auto_start_none",
+    "web.settings.startup",
+    "web.settings.startup_hint",
+    "web.settings.update_check",
+    "web.settings.update_running",
+    "web.settings.update_new",
+    "web.settings.update_latest",
+    "web.settings.update_unknown",
+    "web.settings.saved",
     # 新建实例
     "web.new.title",
     # 新建实例时的前端校验文案：后端本来就有这两句翻译，但没下发到前端，
@@ -403,6 +477,50 @@ def progress_reporter(label: str):
 def finish_job(label: str, message: str = "") -> None:
     JOB_BUS.publish({"type": "job", "label": label, "ratio": 1.0,
                      "done": True, "message": message})
+
+
+def start_job(label: str) -> None:
+    """起一个不知道总量的长任务：进度条显示成来回扫的那条，而不是卡在 0%。"""
+    JOB_BUS.publish({"type": "job", "label": label, "ratio": 0.0,
+                     "indeterminate": True, "done": False})
+
+
+class _JobReporter:
+    """把 core 的 Reporter 协议接到面板的进度条上。
+
+    core 的 export_instance / 下载函数只认「有 log/progress/warn 三个方法的
+    对象」，而 JOB_BUS 这边是一条事件流。这层就是两边之间的适配器。
+    """
+
+    def __init__(self, label: str) -> None:
+        self.label = label
+
+    def log(self, key: str, **kwargs) -> None:
+        try:
+            JOB_BUS.publish({"type": "job", "label": self.label, "ratio": 0.0,
+                             "indeterminate": True, "done": False,
+                             "message": t(key, **kwargs)})
+        except Exception:  # noqa: BLE001
+            pass
+
+    def progress(self, *, label: str = "", current=None, total=None,
+                 ratio=None, done: bool = False) -> None:
+        if ratio is None:
+            ratio = (float(current) / float(total)
+                     if current is not None and total else 0.0)
+        try:
+            JOB_BUS.publish({"type": "job", "label": label or self.label,
+                             "ratio": max(0.0, min(1.0, float(ratio))),
+                             "done": bool(done)})
+        except Exception:  # noqa: BLE001
+            pass
+
+    def warn(self, key: str, **kwargs) -> None:
+        return None
+
+
+def _job_reporter(label: str) -> _JobReporter:
+    return _JobReporter(label)
 
 
 def _render_event(event: dict) -> dict:
@@ -819,6 +937,19 @@ def _make_handler(manager: RuntimeManager, servers_dir: str, token: str,
                 return self._guard(self._frp_state)
             if path == "/api/ai":
                 return self._guard(lambda: self._json(assistant.state()))
+            if path == "/api/jars":
+                return self._guard(lambda: self._jar_list(query))
+            if path == "/api/jars/search":
+                return self._guard(lambda: self._jar_search(query))
+            if path == "/api/export":
+                # 带 name 就是「打包给我」，不带就是「先告诉我有哪些分类」
+                if query.get("name"):
+                    return self._guard(lambda: self._export_download(query))
+                return self._guard(self._export_categories)
+            if path == "/api/settings":
+                return self._guard(lambda: self._json(self._settings_view()))
+            if path == "/api/update":
+                return self._guard(self._update_check)
             self._json({"ok": False, "message": "not found"}, HTTPStatus.NOT_FOUND)
 
         def do_POST(self) -> None:  # noqa: N802
@@ -830,6 +961,8 @@ def _make_handler(manager: RuntimeManager, servers_dir: str, token: str,
                 return self._guard(lambda: self._file_upload(query))
             if path == "/api/frp/upload":
                 return self._guard(lambda: self._frp_upload(query))
+            if path == "/api/jars/upload":
+                return self._guard(lambda: self._jar_upload(query))
             try:
                 body = self._body()
             except CoreError as err:
@@ -884,6 +1017,12 @@ def _make_handler(manager: RuntimeManager, servers_dir: str, token: str,
                     # 实例设置对话框靠它回显复选框；漏掉的话框永远是空的，
                     # 用户随手一保存就把 auto_start 悄悄关掉了
                     "auto_start": bool(entry.get("auto_start")),
+                    # 面板靠它决定要不要显示「内容」标签页，以及往哪个目录放 jar。
+                    # "plugins" / "mods" / "both" / ""（这个端没有内容目录）
+                    "jar_kind": _jar_kind_of(entry, path),
+                    # 通用实例没有 EULA 这回事，别让它弹那条框
+                    "eula": (True if (entry.get("kind") or KIND_MINECRAFT)
+                             == KIND_GENERIC else eula_accepted(path)),
                     "workdir": path,
                     "state": "stopped",
                     "exit_code": None,
@@ -1006,6 +1145,275 @@ def _make_handler(manager: RuntimeManager, servers_dir: str, token: str,
             self._json({"ok": True, "size": written,
                         "path": fileops.normalize_rel(rel)})
 
+        # -- EULA ----------------------------------------------------------
+
+        def _accept_eula(self, body: dict) -> None:
+            """用户在前端点了「同意」。写盘之后再启动一次，由前端发起。"""
+            root = self._instance_dir(str(body.get("name") or ""))
+            accept_eula(root)
+            self._json({"ok": True, "message": t("web.eula.accepted")})
+
+        # -- 导出 ----------------------------------------------------------
+
+        def _export_categories(self) -> None:
+            self._json({
+                "ok": True,
+                "categories": [
+                    {"key": key, "label": t(label), "default": bool(default)}
+                    for key, label, _patterns, default in EXPORT_CATEGORIES
+                ],
+            })
+
+        def _export_download(self, query: dict) -> None:
+            """在临时目录打包，然后把字节流给浏览器。
+
+            不在实例目录里落地：导出的 zip 动辄上 GB，而实例目录本身可能就
+            在系统盘上；临时文件用完即删，浏览器那边就是一次普通下载。
+            """
+            name = str(query.get("name") or "")
+            root = self._instance_dir(name)
+            chosen = {c.strip() for c in str(query.get("cats") or "").split(",")
+                      if c.strip()}
+            chosen &= {key for key, _l, _p, _d in EXPORT_CATEGORIES}
+            if not chosen:
+                raise CoreError("web.export.none")
+
+            label = t("web.export.packing", name=name)
+            fd, tmp = tempfile.mkstemp(prefix="mstl-export-", suffix=".zip")
+            os.close(fd)
+            try:
+                try:
+                    transferops.export_instance(
+                        root, tmp, chosen,
+                        reporter=_job_reporter(label))
+                finally:
+                    finish_job(label)
+                self._send_file(tmp, f"{name or 'server'}-export.zip")
+            finally:
+                try:
+                    os.remove(tmp)
+                except OSError:
+                    pass
+
+        # -- 插件 / 模组 ---------------------------------------------------
+
+        def _jar_target(self, source: dict) -> tuple[str, str]:
+            """解析出实例目录与目录种类（plugins / mods）。"""
+            kind = str(source.get("kind") or "plugins")
+            if kind not in ("plugins", "mods"):
+                raise CoreError("web.error.bad_kind")
+            return self._instance_dir(str(source.get("name") or "")), kind
+
+        def _jar_list(self, query: dict) -> None:
+            root, kind = self._jar_target(query)
+            directory = _jar_dir(root, kind)
+            jar_set = instlib.list_jars(directory)
+            rows = []
+            for filename, enabled in ([(f, True) for f in jar_set.enabled]
+                                      + [(f, False) for f in jar_set.disabled]):
+                try:
+                    stat = os.stat(os.path.join(directory, filename))
+                except OSError:
+                    continue
+                rows.append({
+                    "file": filename,
+                    "enabled": enabled,
+                    "size": stat.st_size,
+                    "mtime": stat.st_mtime,
+                })
+            rows.sort(key=lambda r: (-r["mtime"], r["file"].lower()))
+            self._json({"ok": True, "kind": kind, "entries": rows})
+
+        def _jar_toggle(self, body: dict) -> None:
+            root, kind = self._jar_target(body)
+            filename = _safe_jar_name(body.get("file"))
+            directory = _jar_dir(root, kind)
+            # 当前是 .jar.disabled 就说明它现在是禁用的，操作是把启用回来
+            enable = filename.lower().endswith(".jar.disabled")
+            new_name = instlib.set_jar_enabled(directory, filename, enable)
+            self._json({"ok": True, "file": new_name,
+                        "message": t("web.jars.toggled", name=new_name)})
+
+        def _jar_delete(self, body: dict) -> None:
+            root, kind = self._jar_target(body)
+            filename = _safe_jar_name(body.get("file"))
+            instlib.delete_jar(_jar_dir(root, kind), filename)
+            self._json({"ok": True,
+                        "message": t("web.jars.deleted", name=filename)})
+
+        def _jar_upload(self, query: dict) -> None:
+            root, kind = self._jar_target(query)
+            filename = _safe_jar_name(query.get("file"))
+            if not filename.lower().endswith(".jar"):
+                raise CoreError("web.jars.not_jar")
+            length = self._content_length()
+            if length <= 0:
+                raise CoreError("web.error.upload_empty")
+            if length > MAX_UPLOAD_BYTES:
+                self._drain(length)
+                raise CoreError("web.error.upload_too_large",
+                                max=round(MAX_UPLOAD_BYTES / 1024 / 1024))
+            written = fileops.save_upload(
+                root, f"{kind}/{filename}", _BodyStream(self), length,
+                MAX_UPLOAD_BYTES, create_dirs=True)
+            self._json({"ok": True, "file": filename, "size": written,
+                        "message": t("web.jars.uploaded", name=filename)})
+
+        def _jar_search(self, query: dict) -> None:
+            root, kind = self._jar_target(query)
+            text = str(query.get("q") or "").strip()
+            if not text:
+                raise CoreError("web.error.empty_query")
+            results = []
+            if kind == "plugins":
+                from plugin_sources import search_all as search_plugins
+                found = search_plugins(text, limit=6)
+            else:
+                from mod_sources import extract_mod_loader, search_all_mods
+                cfg = load_server_config(root)
+                found = search_all_mods(
+                    text,
+                    str(cfg.get("mc_version") or ""),
+                    extract_mod_loader(str(cfg.get("jar") or "")),
+                    limit=8)
+            for source, items in found.items():
+                for item in items:
+                    row = dict(item)
+                    row["source"] = source
+                    results.append(row)
+            self._json({"ok": True, "kind": kind, "results": results[:40]})
+
+        def _jar_download(self, body: dict) -> None:
+            root, kind = self._jar_target(body)
+            result = body.get("result")
+            if not isinstance(result, dict):
+                raise CoreError("web.jars.bad_result")
+            source = str(result.get("source") or "")
+            allowed = (("SpigotMC", "Modrinth", "Hangar") if kind == "plugins"
+                       else ("Modrinth", "CurseForge"))
+            if source not in allowed:
+                raise CoreError("web.jars.bad_result")
+            directory = _jar_dir(root, kind)
+            os.makedirs(directory, exist_ok=True)
+            label = t("web.jars.downloading", name=str(result.get("name") or ""))
+            start_job(label)
+            try:
+                if kind == "plugins":
+                    from plugin_sources import download_plugin
+                    filename = download_plugin(result, directory)
+                else:
+                    from mod_sources import download_mod, extract_mod_loader
+                    cfg = load_server_config(root)
+                    filename = download_mod(
+                        result, directory,
+                        str(cfg.get("mc_version") or ""),
+                        extract_mod_loader(str(cfg.get("jar") or "")))
+            finally:
+                finish_job(label)
+            if not filename:
+                raise CoreError("web.jars.download_failed",
+                                name=str(result.get("name") or ""))
+            self._json({"ok": True, "file": filename,
+                        "message": t("web.jars.installed", name=filename)})
+
+        # -- 全局设置 ---------------------------------------------------
+
+        def _settings_view(self) -> dict:
+            config = load_config(project_dir)
+            from startup import is_startup_enabled, is_supported
+            startup_state = False
+            try:
+                startup_state = is_startup_enabled()
+            except Exception:  # noqa: BLE001 注册表读不出来不该让设置页打不开
+                startup_state = False
+            return {
+                "ok": True,
+                "language": str(config.get("language") or "auto") or "auto",
+                "download_threads": int(config.get("download_threads") or 16),
+                "auto_start_server": str(config.get("auto_start_server") or ""),
+                "languages": [{"code": code, "name": name}
+                              for code, name in available_languages()],
+                "startup": {"enabled": startup_state,
+                            "supported": is_supported()},
+            }
+
+        def _settings_save(self, body: dict) -> None:
+            config = load_config(project_dir)
+            changed_language = False
+
+            if "language" in body:
+                lang = str(body.get("language") or "").strip()
+                if lang in ("", "auto"):
+                    config["language"] = ""
+                else:
+                    codes = {code for code, _n in available_languages()}
+                    if lang not in codes:
+                        raise CoreError("web.settings.bad_language")
+                    config["language"] = lang
+                changed_language = True
+
+            if "download_threads" in body:
+                try:
+                    threads = int(body.get("download_threads"))
+                except (TypeError, ValueError):
+                    raise CoreError("web.settings.bad_threads") from None
+                from download_msl import MAX_DOWNLOAD_THREADS, set_download_threads
+                threads = max(1, min(threads, MAX_DOWNLOAD_THREADS))
+                config["download_threads"] = threads
+                set_download_threads(threads)
+
+            if "auto_start_server" in body:
+                target = str(body.get("auto_start_server") or "")
+                if target:
+                    self._instance_dir(target)   # 不存在的实例名直接报错
+                config["auto_start_server"] = target
+
+            save_config(config, project_dir)
+
+            if "startup" in body:
+                from startup import is_supported, set_startup_enabled
+                if not is_supported():
+                    raise CoreError("web.settings.startup_unsupported")
+                if not set_startup_enabled(bool(body.get("startup"))):
+                    raise CoreError("web.settings.startup_failed")
+
+            # 语言当场生效：菜单和面板读的是同一份 config，晚一步就会出
+            # 现「设置里写着 English、界面还是中文」
+            if changed_language:
+                load_language(config.get("language") or detect_os_language())
+
+            self._json(dict(self._settings_view(),
+                            message=t("web.settings.saved")))
+
+        def _update_check(self) -> None:
+            """检查更新。网络不通时如实说不知道，不要冒充「已是最新」。"""
+            from check_update import check_for_update
+            has_new, current, latest = check_for_update()
+            if has_new:
+                status = "new"
+            elif current and not latest:
+                status = "latest"
+            else:
+                status = "unknown"
+            self._json({"ok": True, "status": status,
+                        "current": current, "latest": latest})
+
+        def _send_file(self, path: str, download_name: str) -> None:
+            """把一个本地文件当成下载响应发出去。"""
+            size = os.path.getsize(path)
+            ascii_name = download_name.encode("ascii", "replace").decode("ascii")
+            ascii_name = ascii_name.translate(_UNSAFE_HEADER_CHARS)
+            disposition = (f'attachment; filename="{ascii_name}"; '
+                           f"filename*=UTF-8''{urllib.parse.quote(download_name)}")
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", "application/zip")
+            self.send_header("Content-Length", str(size))
+            self.send_header("Content-Disposition", disposition)
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            with open(path, "rb") as f:
+                shutil.copyfileobj(f, self.wfile, 64 * 1024)
+
         def _save_ai_config(self, body: dict) -> None:
             """保存 AI 设置。密钥只进不出：查询接口只回 key_set 布尔值。"""
             config = load_config(project_dir)
@@ -1048,6 +1456,21 @@ def _make_handler(manager: RuntimeManager, servers_dir: str, token: str,
 
             if path == "/api/ai/config":
                 return self._save_ai_config(body)
+
+            if path == "/api/eula":
+                return self._accept_eula(body)
+
+            if path == "/api/settings":
+                return self._settings_save(body)
+
+            if path == "/api/jars/toggle":
+                return self._jar_toggle(body)
+
+            if path == "/api/jars/delete":
+                return self._jar_delete(body)
+
+            if path == "/api/jars/download":
+                return self._jar_download(body)
 
             if path == "/api/file/write":
                 root = self._instance_dir(name)

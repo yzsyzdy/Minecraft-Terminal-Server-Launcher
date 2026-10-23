@@ -247,13 +247,19 @@ python start.py --help             # if you forget the options
 
 Startup prints a URL carrying a token; opening it logs you in. The token lives in `web.token` under `config.json`. From the panel you can list instances, start and stop them, watch the console live, and send server commands. Console output is also appended to `logs/mstl-console.log` inside the instance directory.
 
-The right-hand pane has two tabs, **Console** and **Files**. The file manager browses an instance's tree and edits text files such as `server.properties` in place, and can create, rename, delete, upload files, **upload a whole folder**, and **extract zip / tar archives online**; every path stays inside the selected instance folder. The `＋` in the top bar creates a new instance: download a server core from the MSL mirror, use a local jar, import an existing zip archive, or create a **generic instance**.
+The right-hand pane has three tabs, **Console**, **Files** and **Add-ons** (vanilla, proxy and Bedrock cores get no Add-ons tab). The file manager browses an instance's tree and edits text files such as `server.properties` in place, and can create, rename, delete, upload files, **upload a whole folder**, and **extract zip / tar archives online**; every path stays inside the selected instance folder. The `＋` in the top bar creates a new instance: download a server core from the MSL mirror, use a local jar, import an existing zip archive, or create a **generic instance**.
+
+The **Add-ons** tab manages plugins and mods: search SpigotMC / Modrinth / Hangar (mods come from Modrinth / CurseForge, filtered by the instance's MC version and loader) and install straight from the results; upload a local jar; enable or disable what is installed (via the `.jar.disabled` suffix) and delete it. It uses the same sources and the same functions as the terminal menu.
 
 A **generic instance** runs something of your own instead of Minecraft: an executable (`exec`, no shell involved) or a command handed to `cmd` / `powershell`. It still gets start/stop, a live console, a log file, the ability to receive input, and an optional tunnel — it just skips Java resolution and the jar check. The terminal menu has the same entry point (`[3] New instance`). Select an instance and press `⚙` to edit it, or edit `.server.json` through the file manager.
 
 The `frp` button in the top bar configures vanilla frp from the panel: connection settings in `frpc.toml`, adding and removing tunnels, starting and stopping frpc, and downloading or updating the frpc binary (with a manual upload fallback).
 
 Downloading a server core, downloading frpc and uploading files all show a progress bar along the bottom of the panel. Instance settings also gained "start with the app", which raises that instance in the background when the app starts.
+
+`⚙` on the instance title bar edits that instance, and also offers **Export**: pick categories (world, datapacks, plugins, plugin data, player data, icon, config) and the panel hands a zip straight to the browser. The `⚙` at the far right of the top bar is **app settings**: interface language, download threads, the instance to start with the app, launch-at-login on Windows, and a version check.
+
+Starting an instance that has not accepted the EULA yet asks first, writes `eula.txt` on approval, and then starts — the same behaviour as the terminal menu.
 
 > **It listens on 127.0.0.1 only, by default.** The panel can send commands to a server console, rewrite files inside the instance directory, *and* configure an instance to execute arbitrary commands, so it hands both a command channel and the instance tree to a browser. To reach it through frp, put a reverse proxy and HTTPS in front, and think twice before changing `web.host`.
 

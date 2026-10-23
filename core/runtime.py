@@ -202,6 +202,59 @@ def build_generic_plan(server_cfg: dict, server_dir: str) -> LaunchPlan:
     )
 
 
+EULA_HEADER = (
+    "#By changing the setting below to TRUE you are indicating your "
+    "agreement to our EULA (https://aka.ms/MinecraftEULA).\n"
+)
+
+
+def eula_accepted(server_dir: str) -> bool:
+    """eula.txt 里是否写了 eula=true。文件不存在、读不出、没这一行都算没同意。"""
+    path = os.path.join(server_dir, "eula.txt")
+    try:
+        with open(path, "r", encoding="utf-8", errors="replace") as f:
+            for line in f:
+                text = line.strip()
+                if text.startswith("#") or "=" not in text:
+                    continue
+                key, _, value = text.partition("=")
+                if key.strip().lower() == "eula":
+                    return value.strip().lower() in ("true", "1", "yes")
+    except OSError:
+        return False
+    return False
+
+
+def accept_eula(server_dir: str) -> None:
+    """把 eula.txt 改写成 eula=true。没这个文件就新建一份，写法照上游。
+
+    只动 eula 这一行：服务端自己写的注释和别的键都会保留下来，
+    和「用户在终端里点了个同意」的结果一致。
+    """
+    os.makedirs(server_dir, exist_ok=True)
+    path = os.path.join(server_dir, "eula.txt")
+    lines: list[str] = []
+    replaced = False
+    try:
+        with open(path, "r", encoding="utf-8", errors="replace") as f:
+            lines = f.read().splitlines()
+    except OSError:
+        lines = []
+
+    for i, line in enumerate(lines):
+        key = line.split("=", 1)[0].strip()
+        if key and not line.strip().startswith("#") and key.lower() == "eula":
+            lines[i] = "eula=true"
+            replaced = True
+    if not replaced:
+        if not lines:
+            lines = [EULA_HEADER.rstrip("\n")]
+        lines.append("eula=true")
+
+    with open(path, "w", encoding="utf-8") as f:
+        f.write("\n".join(lines) + "\n")
+
+
 def build_launch_plan(
     server_cfg: dict,
     server_dir: str,
@@ -228,6 +281,12 @@ def build_launch_plan(
     jar_abs = os.path.abspath(os.path.join(server_dir, jar_rel))
     if not os.path.isfile(jar_abs):
         raise CoreError("app.error_jar_missing", path=jar_abs)
+
+    # 面板没办法像终端那样中途问一句「同意 EULA 吗」，所以先拦住再让前端
+    # 弹框。放过去的话，java 会打一行 "You must agree to the EULA" 就退出，
+    # 用户只能自己在文件管理器里找 eula.txt。
+    if not eula_accepted(server_dir):
+        raise CoreError("web.error.eula_required", name=name)
 
     min_mem = server_cfg.get("min_mem", "1G")
     max_mem = server_cfg.get("max_mem", "4G")
@@ -733,6 +792,8 @@ __all__ = [
     "LaunchPlan",
     "build_launch_plan",
     "build_generic_plan",
+    "accept_eula",
+    "eula_accepted",
     "ServerRuntime",
     "RuntimeManager",
     "STATE_RUNNING",

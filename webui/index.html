@@ -416,6 +416,59 @@
                  box-shadow:0 0 0 3px var(--brand-soft)}
   #aibar .primary{height:36px;padding:0 16px}
 
+  /* ---------------------------------------------------- 插件 / 模组（内容） */
+  #jars{flex:1;min-height:0;display:flex;flex-direction:column}
+  #jbar{display:flex;align-items:center;gap:var(--s2);flex-wrap:wrap;
+        padding:var(--s2) var(--s4);border-bottom:1px solid var(--line)}
+  #jq{flex:1;min-width:140px;height:32px;padding:0 10px;
+      border-radius:var(--r);border:1px solid var(--line-strong);
+      background:var(--surface);color:var(--fg);font:var(--t-ui)/1 var(--font)}
+  #jq::placeholder{color:var(--faint);font-size:var(--t-meta)}
+  #jq:focus{outline:none;border-color:var(--brand-text);
+            box-shadow:0 0 0 3px var(--brand-soft)}
+  #jresults{max-height:46%;overflow:auto;background:var(--bg);
+            border-bottom:1px solid var(--line)}
+  .res{display:flex;align-items:flex-start;gap:var(--s3);
+       padding:10px var(--s4);border-bottom:1px solid var(--line)}
+  .res:last-child{border-bottom:0}
+  .res .rmain{flex:1;min-width:0}
+  .res .rname{font-size:var(--t-ui);font-weight:600;
+              overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .res .rmeta{margin-top:2px;color:var(--dim);
+              font:400 var(--t-label)/1.5 var(--mono)}
+  .res .rdesc{margin-top:4px;color:var(--dim);font-size:var(--t-meta);line-height:1.6;
+              display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;
+              overflow:hidden}
+  #jlist{flex:1;min-height:0;overflow:auto}
+  .jar{display:flex;align-items:center;gap:var(--s3);
+       padding:9px var(--s4);border-bottom:1px solid var(--line)}
+  .jar .jname{flex:1;min-width:0;font-size:var(--t-ui);
+              overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .jar .jmeta{flex:0 0 auto;color:var(--dim);
+              font:400 var(--t-label)/1 var(--mono);font-variant-numeric:tabular-nums}
+  .jar.off .jname{color:var(--faint);text-decoration:line-through}
+  .jar .jops{flex:0 0 auto;display:flex;gap:6px}
+  .jar .jops button{height:24px;padding:0 9px;border-color:transparent;
+                    background:transparent;color:var(--dim);
+                    font-size:var(--t-label)}
+  .jar .jops button:hover:not(:disabled){background:var(--hover);
+                    border-color:var(--line-strong);color:var(--fg)}
+
+  /* 导出分类的勾选列表 */
+  .checklist{display:grid;gap:2px;margin-bottom:var(--s3)}
+  .ck{display:flex;align-items:center;gap:8px;padding:6px 2px;
+      font-size:var(--t-ui);cursor:pointer}
+  .ck input{margin:0;flex:0 0 auto}
+  label.check{display:flex;align-items:center;gap:8px;
+              font-size:var(--t-ui);cursor:pointer}
+
+  /* 不知道总量的任务：一条来回扫的进度条 */
+  #jobfill.indet{width:32%;animation:jobslide 1.2s ease-in-out infinite}
+  @keyframes jobslide{
+    0%{transform:translateX(-100%)}
+    100%{transform:translateX(312%)}
+  }
+
   /* -------------------------------------------------------------- 窄屏适配 */
   @media (max-width:780px){
     main{grid-template-columns:1fr;grid-template-rows:auto minmax(0,1fr)}
@@ -441,6 +494,7 @@
   <button class="ghost" id="newinst">＋</button>
   <button class="ghost" id="refresh">⟳</button>
   <button class="ghost" id="themebtn">◐</button>
+  <button class="ghost" id="cfgbtn">⚙</button>
 </header>
 <main>
   <div id="list"></div>
@@ -453,6 +507,7 @@
         <button class="tab on" id="tab-console"></button>
         <button class="tab" id="tab-files"></button>
         <button class="tab" id="tab-ai"></button>
+        <button class="tab" id="tab-jars" hidden></button>
       </span>
       <button class="ghost" id="instset">⚙</button>
       <button id="clear"></button>
@@ -484,6 +539,21 @@
         </div>
         <textarea id="etext" spellcheck="false" autocomplete="off"></textarea>
       </div>
+    </div>
+    <div id="jars" hidden>
+      <div id="jbar">
+        <span class="tabs" id="jkind" hidden>
+          <button class="tab on" id="jkind-plugins"></button>
+          <button class="tab" id="jkind-mods"></button>
+        </span>
+        <input id="jq" spellcheck="false" autocomplete="off">
+        <button class="primary" id="jsearch"></button>
+        <span class="sp"></span>
+        <button id="jupload"></button>
+        <input type="file" id="jfile" accept=".jar" hidden>
+      </div>
+      <div id="jresults" hidden></div>
+      <div id="jlist"></div>
     </div>
     <div id="ai" hidden>
       <div id="aihead">
@@ -837,6 +907,7 @@
         </label>
       </div>
       <div class="dactions">
+        <button id="expopen"></button>
         <button class="primary" id="setsave"></button>
       </div>
     </div>
@@ -937,6 +1008,82 @@
 </div>
 
 <div id="toast" hidden></div>
+<div id="eulamodal" hidden>
+  <div class="dialog" style="width:min(520px,100%)">
+    <div class="dhead">
+      <b id="eulatitle"></b>
+      <span style="flex:1"></span>
+      <button class="ghost" id="eulaclose">✕</button>
+    </div>
+    <div class="dbody">
+      <div class="hint" id="eulabody"></div>
+      <div class="dactions">
+        <button id="eulacancel"></button>
+        <button class="primary" id="eulaagree"></button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="expmodal" hidden>
+  <div class="dialog" style="width:min(520px,100%)">
+    <div class="dhead">
+      <b id="exptitle"></b>
+      <span style="flex:1"></span>
+      <button class="ghost" id="expclose">✕</button>
+    </div>
+    <div class="dbody">
+      <div class="hint" id="exphint"></div>
+      <div id="expcats" class="checklist"></div>
+      <div class="dactions">
+        <button id="expcancel"></button>
+        <button class="primary" id="expstart"></button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="cfgmodal" hidden>
+  <div class="dialog" style="width:min(560px,100%)">
+    <div class="dhead">
+      <b id="cfgtitle"></b>
+      <span style="flex:1"></span>
+      <button class="ghost" id="cfgclose">✕</button>
+    </div>
+    <div class="dbody">
+      <div class="drow">
+        <div class="field">
+          <label id="l-cfglang"></label>
+          <select id="cfglang"></select>
+        </div>
+        <div class="field">
+          <label id="l-cfgthreads"></label>
+          <input id="cfgthreads" type="number" min="1" max="32" step="1">
+        </div>
+      </div>
+      <div class="hint" id="cfgthreads-hint"></div>
+      <div class="drow">
+        <div class="field">
+          <label id="l-cfgauto"></label>
+          <select id="cfgauto"></select>
+        </div>
+      </div>
+      <div class="drow">
+        <label class="check">
+          <input type="checkbox" id="cfgstartup">
+          <span id="l-cfgstartup"></span>
+        </label>
+      </div>
+      <div class="hint" id="cfgstartup-hint"></div>
+      <div class="hint" id="cfgupdate"></div>
+      <div class="dactions">
+        <button id="cfgcheck"></button>
+        <button class="primary" id="cfgsave"></button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <script>
 const $ = (id) => document.getElementById(id);
 const MAX_LINES = 2000;
@@ -1263,6 +1410,27 @@ function applyStrings() {
   $("frpreleases").textContent = strings["web.frp.releases"] || "";
   $("frpupload").textContent = strings["web.frp.upload"] || "";
   renderFrpManual();
+
+  // 内容（插件 / 模组）
+  $("tab-jars").textContent = strings["web.jars.tab"] || "Add-ons";
+  $("jsearch").textContent = strings["web.jars.search"] || "";
+  $("jupload").textContent = strings["web.jars.upload"] || "";
+  $("jkind-plugins").textContent = strings["web.jars.plugins"] || "Plugins";
+  $("jkind-mods").textContent = strings["web.jars.mods"] || "Mods";
+  $("jq").placeholder = strings["web.jars.search_hint"] || "";
+
+  // 全局设置
+  $("cfgbtn").title = strings["web.panel.settings"] || "Settings";
+  $("cfgtitle").textContent = strings["web.panel.settings"] || "Settings";
+  $("l-cfglang").textContent = strings["web.settings.language"] || "";
+  $("l-cfgthreads").textContent = strings["web.settings.threads"] || "";
+  $("cfgthreads-hint").textContent = strings["web.settings.threads_hint"] || "";
+  $("l-cfgauto").textContent = strings["web.settings.auto_start_server"] || "";
+  $("l-cfgstartup").textContent = strings["web.settings.startup"] || "";
+  $("cfgstartup-hint").textContent = strings["web.settings.startup_hint"] || "";
+  $("cfgcheck").textContent = strings["web.settings.update_check"] || "";
+  $("cfgsave").textContent = strings["web.files.save"] || "";
+  $("expopen").textContent = strings["web.export.title"] || "";
 }
 
 function stateLabel(state) {
@@ -1298,7 +1466,7 @@ function render() {
       if (act === "start") {
         // 顺便把它选上，否则点了启动却在右边控制台里看不到任何反应
         select(item.name);
-        api("/api/start", { name: item.name }).then(refresh).catch(() => {});
+        startInstance(item);
       } else if (act === "stop") {
         api("/api/stop", { name: item.name }).then(refresh).catch(() => {});
       } else {
@@ -1314,6 +1482,10 @@ function render() {
   $("curstate").textContent = cur ? stateLabel(st) : "";
   $("curstate").className = "badge " + st;
   $("instset").disabled = !cur;
+  // 原版 / 代理 / 基岩端没有 plugins 也没有 mods，这个标签页对它们没意义
+  const canJars = !!(cur && cur.jar_kind);
+  $("tab-jars").hidden = !canJars;
+  if (!canJars && tab === "jars") switchTab("console");
 }
 
 /* ---------------------------------------------------------------- 详情条 */
@@ -1445,6 +1617,8 @@ function select(name) {
   renderDetails();
   // 文件管理器是按实例的，换实例就得回到根目录重新列
   if (tab === "files") loadFiles("");
+  // 内容页也一样：换台服就该看到那台服装了些什么
+  if (tab === "jars") jarsShow();
 }
 
 /* ---------------------------------------------------------------- 指令 */
@@ -1496,9 +1670,12 @@ let jobHideTimer = null;
 
 function showJob(event) {
   const ratio = typeof event.ratio === "number" ? event.ratio : 0;
+  // 不知道总量的任务（插件下载、打包）用扫动的进度条，卡在 0% 会像死机
+  const indet = !!event.indeterminate && !event.done;
   $("joblabel").textContent = event.label || "";
-  $("jobfill").style.width = Math.round(ratio * 100) + "%";
-  $("jobpct").textContent = Math.round(ratio * 100) + "%";
+  $("jobfill").className = indet ? "indet" : "";
+  $("jobfill").style.width = indet ? "" : Math.round(ratio * 100) + "%";
+  $("jobpct").textContent = indet ? "" : Math.round(ratio * 100) + "%";
   $("job").hidden = false;
   if (jobHideTimer) clearTimeout(jobHideTimer);
   if (event.done) {
@@ -1540,8 +1717,422 @@ function uploadWithProgress(url, file, onProgress) {
    这里统一转成异常，调用方一个 catch 就能兜住所有情况。 */
 async function apiOk(path, body) {
   const data = await api(path, body);
-  if (data && data.ok === false) throw new Error(data.message || "error");
+  if (data && data.ok === false) {
+    const err = new Error(data.message || "error");
+    // key 要带出去：「没同意 EULA」这种可恢复的失败，前端得能认出是哪一种
+    err.key = data.key || "";
+    throw err;
+  }
   return data;
+}
+
+/* --------------------------------------------------------- 启动与 EULA */
+
+// 新实例第一次启动前必须同意 EULA。终端里是当场问一句，面板这边先拦在
+// 前端：不然 java 打一行报错就退出，用户还得自己去文件管理器里改 eula.txt。
+function startInstance(item) {
+  if (!item) return;
+  if (item.eula === false) { openEula(item); return; }
+  apiOk("/api/start", { name: item.name }).then(refresh).catch((err) => {
+    if (err && err.key === "web.error.eula_required") openEula(item);
+    else fail(err);
+  });
+}
+
+let eulaTarget = null;
+
+function openEula(item) {
+  eulaTarget = item;
+  $("eulatitle").textContent = strings["web.eula.title"] || "EULA";
+  $("eulabody").textContent = strings["web.eula.body"] || "";
+  $("eulaagree").textContent = strings["web.eula.agree"] || "Accept";
+  $("eulacancel").textContent = strings["web.files.cancel"] || "Cancel";
+  $("eulamodal").hidden = false;
+}
+
+function closeEula() {
+  $("eulamodal").hidden = true;
+  eulaTarget = null;
+}
+
+async function agreeEula() {
+  const item = eulaTarget;
+  if (!item) return;
+  try {
+    await apiOk("/api/eula", { name: item.name });
+    item.eula = true;
+    closeEula();
+    toast(strings["web.eula.accepted"] || "");
+    await apiOk("/api/start", { name: item.name });
+    refresh().catch(() => {});
+  } catch (err) {
+    fail(err);
+  }
+}
+
+/* ------------------------------------------------------- 插件 / 模组 */
+
+let jarKind = "plugins";      // 混合端上用户选的那一边
+let jarEntries = [];
+let jarResults = [];
+let jarSearching = false;
+let jarBusy = false;
+
+function jarInstance() {
+  return instances.find(x => x.name === selected) || null;
+}
+
+function jarKindNow() {
+  const item = jarInstance();
+  if (!item) return "plugins";
+  return item.jar_kind === "both" ? jarKind : (item.jar_kind || "plugins");
+}
+
+function jarsShow() {
+  const item = jarInstance();
+  if (!item) return;
+  $("jkind").hidden = item.jar_kind !== "both";
+  $("jkind-plugins").className = "tab" + (jarKindNow() === "plugins" ? " on" : "");
+  $("jkind-mods").className = "tab" + (jarKindNow() === "mods" ? " on" : "");
+  jarsLoad();
+}
+
+async function jarsLoad() {
+  if (!selected) return;
+  try {
+    const data = await apiOk("/api/jars?name=" + encodeURIComponent(selected) +
+                             "&kind=" + jarKindNow());
+    jarEntries = data.entries || [];
+  } catch (err) {
+    jarEntries = [];
+    fail(err);
+  }
+  jarsRenderList();
+}
+
+function fmtSize(bytes) {
+  const n = Number(bytes) || 0;
+  if (n >= 1024 * 1024) return (n / 1024 / 1024).toFixed(1) + " MB";
+  if (n >= 1024) return Math.round(n / 1024) + " KB";
+  return n + " B";
+}
+
+function jarsRenderList() {
+  const box = $("jlist");
+  box.innerHTML = "";
+  if (!jarEntries.length) {
+    box.innerHTML = '<div class="fempty">' +
+      esc(strings["web.jars.empty"] || "") + "</div>";
+    return;
+  }
+  jarEntries.forEach((entry) => {
+    const row = document.createElement("div");
+    row.className = "jar" + (entry.enabled ? "" : " off");
+
+    const name = document.createElement("span");
+    name.className = "jname";
+    name.textContent = entry.file;
+    name.title = entry.file;
+
+    const meta = document.createElement("span");
+    meta.className = "jmeta";
+    meta.textContent = fmtSize(entry.size);
+
+    const ops = document.createElement("span");
+    ops.className = "jops";
+    const toggle = document.createElement("button");
+    toggle.textContent = strings[entry.enabled ? "web.jars.disable"
+                                              : "web.jars.enable"] || "";
+    toggle.onclick = () => jarsToggle(entry);
+    const del = document.createElement("button");
+    del.textContent = strings["web.files.delete"] || "Delete";
+    del.onclick = () => jarsDelete(entry);
+    ops.appendChild(toggle);
+    ops.appendChild(del);
+
+    row.appendChild(name);
+    row.appendChild(meta);
+    row.appendChild(ops);
+    box.appendChild(row);
+  });
+}
+
+async function jarsToggle(entry) {
+  try {
+    await apiOk("/api/jars/toggle",
+      { name: selected, kind: jarKindNow(), file: entry.file });
+    await jarsLoad();
+  } catch (err) { fail(err); }
+}
+
+async function jarsDelete(entry) {
+  const text = fmt(strings["web.jars.confirm_delete"] || "", { name: entry.file });
+  if (!window.confirm(text)) return;
+  try {
+    await apiOk("/api/jars/delete",
+      { name: selected, kind: jarKindNow(), file: entry.file });
+    await jarsLoad();
+  } catch (err) { fail(err); }
+}
+
+async function jarsSearch() {
+  const query = ($("jq").value || "").trim();
+  if (!selected) return;
+  // 清空输入框再回车 = 收起结果列表，不必为「关掉它」再加一个按钮
+  if (!query) {
+    jarResults = [];
+    $("jresults").hidden = true;
+    $("jresults").innerHTML = "";
+    return;
+  }
+  if (jarSearching) return;
+  jarSearching = true;
+  const box = $("jresults");
+  box.hidden = false;
+  box.innerHTML = '<div class="fempty">' +
+    esc(strings["web.jars.searching"] || "") + "</div>";
+  try {
+    const data = await apiOk("/api/jars/search?name=" + encodeURIComponent(selected) +
+                             "&kind=" + jarKindNow() +
+                             "&q=" + encodeURIComponent(query));
+    jarResults = data.results || [];
+    jarsRenderResults();
+  } catch (err) {
+    box.innerHTML = "";
+    fail(err);
+  } finally {
+    jarSearching = false;
+  }
+}
+
+function jarsRenderResults() {
+  const box = $("jresults");
+  box.innerHTML = "";
+  if (!jarResults.length) {
+    box.innerHTML = '<div class="fempty">' +
+      esc(strings["web.jars.no_results"] || "") + "</div>";
+    return;
+  }
+  jarResults.forEach((result) => {
+    const row = document.createElement("div");
+    row.className = "res";
+
+    const main = document.createElement("div");
+    main.className = "rmain";
+    const title = document.createElement("div");
+    title.className = "rname";
+    title.textContent = result.name || "?";
+    const meta = document.createElement("div");
+    meta.className = "rmeta";
+    const bits = [result.source];
+    if (result.author) bits.push(String(result.author));
+    if (result.downloads) bits.push("↓" + Number(result.downloads).toLocaleString());
+    meta.textContent = bits.filter(Boolean).join(" · ");
+    main.appendChild(title);
+    main.appendChild(meta);
+    if (result.description) {
+      const desc = document.createElement("div");
+      desc.className = "rdesc";
+      desc.textContent = String(result.description);
+      main.appendChild(desc);
+    }
+
+    const btn = document.createElement("button");
+    btn.className = "primary";
+    btn.textContent = strings["web.jars.download"] || "Install";
+    btn.onclick = () => jarsDownload(result, btn);
+
+    row.appendChild(main);
+    row.appendChild(btn);
+    box.appendChild(row);
+  });
+}
+
+async function jarsDownload(result, button) {
+  if (jarBusy) return;
+  jarBusy = true;
+  button.disabled = true;
+  try {
+    const data = await apiOk("/api/jars/download",
+      { name: selected, kind: jarKindNow(), result: result });
+    toast(data.message || "");
+    await jarsLoad();
+  } catch (err) {
+    fail(err);
+  } finally {
+    jarBusy = false;
+    button.disabled = false;
+  }
+}
+
+function jarsUpload() {
+  const input = $("jfile");
+  input.value = "";
+  input.onchange = async () => {
+    const file = input.files && input.files[0];
+    if (!file || !selected) return;
+    const url = "/api/jars/upload?name=" + encodeURIComponent(selected) +
+                "&kind=" + jarKindNow() +
+                "&file=" + encodeURIComponent(file.name);
+    try {
+      await withProgress(file.name, (report) =>
+        uploadWithProgress(url, file, report));
+      toast(strings["web.jars.uploaded"] || "");
+      await jarsLoad();
+    } catch (err) {
+      fail(err);
+    }
+  };
+  input.click();
+}
+
+/* ------------------------------------------------------------- 导出 */
+
+let exportCats = null;
+
+async function openExport() {
+  if (!selected) return;
+  $("exptitle").textContent = strings["web.export.title"] || "Export";
+  $("exphint").textContent = strings["web.export.hint"] || "";
+  $("expstart").textContent = strings["web.export.start"] || "Export";
+  $("expcancel").textContent = strings["web.files.cancel"] || "Cancel";
+  const box = $("expcats");
+  box.innerHTML = '<div class="fempty">…</div>';
+  $("expmodal").hidden = false;
+  try {
+    if (!exportCats) {
+      exportCats = (await apiOk("/api/export")).categories || [];
+    }
+    box.innerHTML = "";
+    exportCats.forEach((cat) => {
+      const label = document.createElement("label");
+      label.className = "ck";
+      const box2 = document.createElement("input");
+      box2.type = "checkbox";
+      box2.value = cat.key;
+      box2.checked = !!cat.default;
+      const text = document.createElement("span");
+      text.textContent = cat.label;
+      label.appendChild(box2);
+      label.appendChild(text);
+      box.appendChild(label);
+    });
+  } catch (err) {
+    box.innerHTML = "";
+    fail(err);
+  }
+}
+
+function closeExport() {
+  $("expmodal").hidden = true;
+}
+
+function startExport() {
+  const picked = Array.from(document.querySelectorAll("#expcats input:checked"))
+    .map(el => el.value);
+  if (!picked.length) {
+    toast(strings["web.export.none"] || "", true);
+    return;
+  }
+  // 直接交给浏览器下载：zip 可能有几个 G，不经过 JS 内存
+  const url = "/api/export?name=" + encodeURIComponent(selected) +
+              "&cats=" + encodeURIComponent(picked.join(","));
+  closeExport();
+  window.location.href = url;
+}
+
+/* --------------------------------------------------------- 全局设置 */
+
+let cfgState = null;
+
+async function openConfig() {
+  $("cfgupdate").textContent = "";
+  $("cfgmodal").hidden = false;
+  try {
+    cfgState = await apiOk("/api/settings");
+    cfgFill(cfgState);
+  } catch (err) {
+    fail(err);
+  }
+}
+
+function cfgFill(data) {
+  const lang = $("cfglang");
+  lang.innerHTML = "";
+  const auto = document.createElement("option");
+  auto.value = "auto";
+  auto.textContent = strings["web.settings.language_auto"] || "Auto";
+  lang.appendChild(auto);
+  (data.languages || []).forEach((item) => {
+    const opt = document.createElement("option");
+    opt.value = item.code;
+    opt.textContent = item.name;
+    lang.appendChild(opt);
+  });
+  lang.value = data.language || "auto";
+  $("cfgthreads").value = String(data.download_threads || 16);
+
+  const autoSel = $("cfgauto");
+  autoSel.innerHTML = "";
+  const none = document.createElement("option");
+  none.value = "";
+  none.textContent = strings["web.settings.auto_start_none"] || "None";
+  autoSel.appendChild(none);
+  instances.forEach((item) => {
+    const opt = document.createElement("option");
+    opt.value = item.name;
+    opt.textContent = item.name;
+    autoSel.appendChild(opt);
+  });
+  autoSel.value = data.auto_start_server || "";
+
+  const startup = data.startup || {};
+  $("cfgstartup").checked = !!startup.enabled;
+  $("cfgstartup").disabled = !startup.supported;
+  $("l-cfgstartup").parentElement.style.opacity = startup.supported ? "1" : "0.45";
+}
+
+async function saveConfig() {
+  const body = {
+    language: $("cfglang").value,
+    download_threads: Number($("cfgthreads").value) || 16,
+    auto_start_server: $("cfgauto").value,
+  };
+  // 只在勾选状态真的变了时才提交：非 Windows 上提交这一项会直接报错，
+  // 而用户可能只是想改个语言
+  const was = !!(cfgState && cfgState.startup && cfgState.startup.enabled);
+  if (was !== $("cfgstartup").checked) body.startup = $("cfgstartup").checked;
+  try {
+    const data = await apiOk("/api/settings", body);
+    cfgState = data;
+    toast(data.message || strings["web.settings.saved"] || "");
+    cfgFill(data);
+    refresh().catch(() => {});   // 语言可能换了，界面文案跟着走
+  } catch (err) {
+    fail(err);
+  }
+}
+
+async function checkUpdate() {
+  $("cfgcheck").disabled = true;
+  $("cfgupdate").textContent = strings["web.settings.update_running"] || "…";
+  try {
+    const data = await apiOk("/api/update");
+    if (data.status === "new") {
+      $("cfgupdate").textContent = fmt(
+        strings["web.settings.update_new"] || "",
+        { latest: data.latest, current: data.current });
+    } else if (data.status === "latest") {
+      $("cfgupdate").textContent = fmt(
+        strings["web.settings.update_latest"] || "", { version: data.current });
+    } else {
+      $("cfgupdate").textContent = strings["web.settings.update_unknown"] || "";
+    }
+  } catch (err) {
+    fail(err);
+  } finally {
+    $("cfgcheck").disabled = false;
+  }
 }
 
 /* ---------------------------------------------------------------- 标签切换 */
@@ -1552,13 +2143,16 @@ function switchTab(name) {
   tab = name;
   const isFiles = name === "files";
   const isAi = name === "ai";
+  const isJars = name === "jars";
   $("tab-console").className = "tab" + (name === "console" ? " on" : "");
   $("tab-files").className = "tab" + (isFiles ? " on" : "");
   $("tab-ai").className = "tab" + (isAi ? " on" : "");
+  $("tab-jars").className = "tab" + (isJars ? " on" : "");
   $("files").hidden = !isFiles;
   $("ai").hidden = !isAi;
-  // 控制台那一列（日志 + 输入条 + 底部按钮）在文件和 AI 下都要让位
-  const hideConsole = isFiles || isAi;
+  $("jars").hidden = !isJars;
+  // 控制台那一列（日志 + 输入条 + 底部按钮）在其它标签下都要让位
+  const hideConsole = isFiles || isAi || isJars;
   $("log").hidden = hideConsole;
   $("bar").hidden = hideConsole;
   $("clear").hidden = hideConsole;
@@ -1566,6 +2160,7 @@ function switchTab(name) {
   $("jump").hidden = true;
   if (isFiles) loadFiles(filesPath);
   if (isAi) aiShow();
+  if (isJars) jarsShow();
 }
 
 /* ------------------------------------------------------------------ AI 助手 */
@@ -2761,6 +3356,33 @@ $("ni-gmode").onchange = genericModeToggle;
 $("ni-gcreate").onclick = createGeneric;
 
 $("instset").onclick = openSettings;
+
+// 内容（插件 / 模组）
+$("tab-jars").onclick = () => switchTab("jars");
+$("jsearch").onclick = jarsSearch;
+$("jq").addEventListener("keydown", (ev) => {
+  if (ev.key === "Enter") jarsSearch();
+});
+$("jupload").onclick = jarsUpload;
+$("jkind-plugins").onclick = () => { jarKind = "plugins"; switchTab("jars"); };
+$("jkind-mods").onclick = () => { jarKind = "mods"; switchTab("jars"); };
+
+// 导出
+$("expopen").onclick = openExport;
+$("expclose").onclick = closeExport;
+$("expcancel").onclick = closeExport;
+$("expstart").onclick = startExport;
+
+// 全局设置
+$("cfgbtn").onclick = openConfig;
+$("cfgclose").onclick = () => { $("cfgmodal").hidden = true; };
+$("cfgsave").onclick = saveConfig;
+$("cfgcheck").onclick = checkUpdate;
+
+// EULA
+$("eulaclose").onclick = closeEula;
+$("eulacancel").onclick = closeEula;
+$("eulaagree").onclick = agreeEula;
 $("setclose").onclick = closeSettings;
 $("setgmode").onchange = setModeToggle;
 $("setautorestart").onchange = syncRestartMax;
@@ -2794,9 +3416,21 @@ $("setmodal").addEventListener("click", (ev) => {
 $("frpmodal").addEventListener("click", (ev) => {
   if (ev.target === $("frpmodal")) closeFrp();
 });
+$("eulamodal").addEventListener("click", (ev) => {
+  if (ev.target === $("eulamodal")) closeEula();
+});
+$("expmodal").addEventListener("click", (ev) => {
+  if (ev.target === $("expmodal")) closeExport();
+});
+$("cfgmodal").addEventListener("click", (ev) => {
+  if (ev.target === $("cfgmodal")) $("cfgmodal").hidden = true;
+});
 document.addEventListener("keydown", (ev) => {
   if (ev.key !== "Escape") return;
   if (!$("editor").hidden) closeEditor();
+  else if (!$("eulamodal").hidden) closeEula();
+  else if (!$("expmodal").hidden) closeExport();
+  else if (!$("cfgmodal").hidden) $("cfgmodal").hidden = true;
   else if (!$("frpmodal").hidden) closeFrp();
   else if (!$("setmodal").hidden) closeSettings();
   else if (!$("modal").hidden) closeNewInstance();

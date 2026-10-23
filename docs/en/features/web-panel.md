@@ -27,9 +27,42 @@ The panel revolves around one loop — see instances → start → watch the con
 - **Instance settings**: memory, extra JVM arguments, process priority, **start with the app**, a generic instance's launch spec, and the OpenFrp tunnel binding
 - **frp tunneling**: edit `frpc.toml`, add and remove tunnels, start and stop frpc, download or update the frpc binary (with a manual upload fallback)
 - **Visible progress**: downloading a server core, downloading frpc and uploading files all show a progress bar along the bottom — a tens-of-megabytes core no longer means staring at a spinning button
+- **Add-ons**: search, install, enable/disable and delete plugins and mods from the panel (see *Add-ons* below)
+- **Export**: pack an instance into a zip by category and hand it to the browser
+- **App settings**: interface language, download threads, the instance to start with the app, launch at login, version check
 - **Dark mode**: follows the system by default; the `◐` button in the top bar cycles auto → dark → light and the choice is remembered in the browser
 
-The console and the file manager are two tabs of the right-hand pane; switching tabs does not drop the SSE connection. Instance settings (`⚙`) and frp (`frp` in the top bar) are separate dialogs.
+The console, the file manager and the add-ons page are three tabs of the right-hand pane; switching tabs does not drop the SSE connection. Instance settings (`⚙`) and frp (`frp` in the top bar) are separate dialogs.
+
+Starting an instance that has not accepted the EULA yet asks first. Approving writes `eula.txt` and starts it, same as the terminal menu; declining does nothing.
+
+## Add-ons
+
+The third tab, shown only on plugin, mod and hybrid cores (vanilla, proxy and Bedrock cores have no such concept, so the tab is hidden).
+
+- **Search**: plugins from SpigotMC (Spiget) / Modrinth / Hangar, mods from Modrinth / CurseForge. Mods are filtered by the instance's MC version and loader, and the search widens automatically when too few results come back
+- **Install**: one button per result, dropped into `plugins/` or `mods/`
+- **Local jar**: the *Upload jar* button; the browser-supplied filename is used as-is (no paths, `.jar` only)
+- **Enable / disable**: flips the `.jar.disabled` suffix, exactly like renaming by hand
+- **Delete**: removes that one file, after a confirmation
+
+On a hybrid core (Arclight and friends) the toolbar gains a *Plugins / Mods* switch.
+
+## Export
+
+In instance settings, *Export* lets you tick categories (world, datapacks, plugins, plugin data, player data, icon, config) and downloads `<name>-export.zip` straight to the browser.
+
+Packing happens in a temporary directory on the server side and only reaches the browser once it succeeds, so a failure leaves neither a half-written file nor a stray zip in the instance folder. A running server may hold world files open, which can make the export fail — stop it first.
+
+## Settings
+
+The `⚙` at the far right of the top bar is **app settings** (the `⚙` on the instance title bar is per-instance; they are different things):
+
+- **Language**: 中文 / English / Русский / Neko, or follow the system. Takes effect immediately — the panel and the terminal menu read the same `config.json`
+- **Download threads**: 1–32, used for cores, plugins and mods
+- **Start with the app**: the same switch as *Settings → start a server on launch* in the terminal menu
+- **Launch at login**: writes the current user's `Run` registry key, Windows only; greyed out elsewhere
+- **Version check**: compares the bundled version with GitHub Releases, and says "could not check" when the network is down
 
 ## File manager
 
@@ -207,6 +240,17 @@ The entire contract between the front end and the back end:
 | `POST` | `/api/frp/start` | Start frpc |
 | `POST` | `/api/frp/stop` | Stop frpc |
 | `POST` | `/api/frp/download` | Download / update the frpc binary |
+| `GET` | `/api/jars` | `?name=&kind=plugins\|mods`, list installed jars |
+| `GET` | `/api/jars/search` | `?name=&kind=&q=`, search plugins or mods |
+| `POST` | `/api/jars/toggle` | `{"name", "kind", "file"}`, enable / disable |
+| `POST` | `/api/jars/delete` | `{"name", "kind", "file"}` |
+| `POST` | `/api/jars/download` | `{"name", "kind", "result"}`, where `result` is a search hit passed back verbatim |
+| `POST` | `/api/jars/upload` | `?name=&kind=&file=`; the body is the jar itself |
+| `GET` | `/api/export` | Without `name` returns the category list; with `name` and `cats` returns a zip |
+| `GET` | `/api/settings` | Language, threads, start-with-app instance, launch-at-login state |
+| `POST` | `/api/settings` | Updates those; `language` takes effect immediately |
+| `GET` | `/api/update` | Compares against GitHub Releases |
+| `POST` | `/api/eula` | `{"name": "..."}`, writes `eula=true` |
 
 Conventions:
 
@@ -217,7 +261,7 @@ Conventions:
 
 ## Known limits
 
-This is the closed loop plus a few everyday panels, not a full operations panel. Not yet done: plugin and mod management, restoring "which servers were running" after a restart, and managing OpenFrp cloud tunnels from the panel (creating and deleting those still goes through the terminal menu).
+This is the closed loop plus a few everyday panels, not a full operations panel. Not yet done: restoring "which servers were running" after a restart, and managing OpenFrp cloud tunnels from the panel (creating and deleting those still goes through the terminal menu).
 
 The file manager keeps deliberate limits too: one file at a time (no multi-select or bulk delete), **empty folders cannot be uploaded** (the directory picker never reports them), extraction covers zip and tar only (7z / rar would need an external tool), there is no disk-usage column and no resumable transfers.
 

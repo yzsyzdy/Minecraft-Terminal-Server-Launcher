@@ -20,6 +20,11 @@ def _is_windows() -> bool:
     return sys.platform.startswith("win")
 
 
+def is_supported() -> bool:
+    """当前平台能不能管开机自启。面板拿它决定这个开关能不能点。"""
+    return _is_windows()
+
+
 def _startup_command() -> str:
     """构建注册表中存储的启动命令。取不到可靠路径时返回空串。
 
