@@ -125,7 +125,12 @@
 
   .dot{width:7px;height:7px;flex:0 0 auto;border-radius:50%;
        background:var(--faint);transition:background .2s,box-shadow .2s}
-  .dot.online{background:var(--ok);box-shadow:0 0 0 3px var(--ok-soft)}
+  .dot.online{background:var(--ok);box-shadow:0 0 0 3px var(--ok-soft);
+              animation:dot-pulse 2.4s ease-out infinite}
+  @keyframes dot-pulse{
+    0%{box-shadow:0 0 0 0 var(--ok-soft)}
+    70%{box-shadow:0 0 0 6px transparent}
+    100%{box-shadow:0 0 0 0 transparent}}
   .dot.connecting{background:var(--warn);box-shadow:0 0 0 3px var(--warn-soft)}
   .dot.offline{background:var(--err);box-shadow:0 0 0 3px var(--err-soft)}
 
@@ -137,7 +142,7 @@
          white-space:nowrap;cursor:pointer;
          transition:background .12s,border-color .12s,color .12s}
   button:hover:not(:disabled){background:var(--hover);border-color:var(--faint)}
-  button:active:not(:disabled){background:var(--line)}
+  button:active:not(:disabled){background:var(--line);transform:translateY(.5px)}
   button:disabled{opacity:.4;cursor:default}
   button:focus-visible{outline:2px solid var(--brand-text);outline-offset:2px}
 
@@ -169,7 +174,14 @@
   #list{overflow:auto;background:var(--bg);border-right:1px solid var(--line)}
   .empty{margin:var(--s3);padding:var(--s5) var(--s4);max-width:34ch;
          border:1px dashed var(--line-strong);border-radius:var(--r-lg);
-         color:var(--dim);font-size:var(--t-meta);line-height:1.8}
+         color:var(--dim);font-size:var(--t-meta);line-height:1.8;
+         display:flex;flex-direction:column;align-items:center;gap:var(--s3);
+         text-align:center}
+  /* 空状态图标：一个「托盘/收件箱」线稿。用 mask 套主题色，深浅主题都跟得上。 */
+  .empty::before{content:"";width:32px;height:30px;opacity:.6;
+                 background:var(--dim);
+                 -webkit-mask:url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.6%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22M22%2012h-6l-2%203h-4l-2-3H2%22%2F%3E%3Cpath%20d%3D%22M5%205h14l3%207v7H2v-7l3-7z%22%2F%3E%3C%2Fsvg%3E") center/contain no-repeat;
+                 mask:url("data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22black%22%20stroke-width%3D%221.6%22%20stroke-linecap%3D%22round%22%20stroke-linejoin%3D%22round%22%3E%3Cpath%20d%3D%22M22%2012h-6l-2%203h-4l-2-3H2%22%2F%3E%3Cpath%20d%3D%22M5%205h14l3%207v7H2v-7l3-7z%22%2F%3E%3C%2Fsvg%3E") center/contain no-repeat}
   .item{padding:var(--s3) var(--s4) var(--s3) 14px;cursor:pointer;
         border-left:2px solid transparent;border-bottom:1px solid var(--line);
         transition:background .12s,border-color .12s}
@@ -238,6 +250,9 @@
        padding:var(--s3) var(--s4);white-space:pre-wrap;word-break:break-all;
        background:var(--sunken);color:var(--fg);
        font:400 12.5px/1.7 var(--mono)}
+  /* 长日志里定位：鼠标悬停的那一行淡淡地亮一下，不喧宾夺主 */
+  #log > div{border-radius:var(--r-sm);padding:0 2px;margin:0 -2px}
+  #log > div:hover{background:var(--hover)}
   #log .note{color:var(--dim)}
   #log .input{color:var(--brand-text);font-weight:600}
   #log .warn{color:var(--warn)}
@@ -313,13 +328,22 @@
          background:var(--surface)}
 
   /* ---------------------------------------------------------------- 对话框 */
-  #modal,#setmodal,#frpmodal{position:fixed;inset:0;z-index:20;display:flex;
+  /* 遮罩统一：eulamodal / expmodal / cfgmodal 是后来加的，漏在这里的话
+     它们打开时既没有半透明遮罩、也不居中。以后再加对话框记得补 id。 */
+  #modal,#setmodal,#frpmodal,#eulamodal,#expmodal,#cfgmodal{
+        position:fixed;inset:0;z-index:20;display:flex;
         align-items:center;justify-content:center;padding:var(--s4);
-        background:rgba(31,36,48,.32)}
+        background:rgba(31,36,48,.32);
+        -webkit-backdrop-filter:blur(2px);backdrop-filter:blur(2px);
+        animation:overlay-in .16s ease}
+  @keyframes overlay-in{from{opacity:0}to{opacity:1}}
   .dialog{width:min(640px,100%);max-height:100%;display:flex;
           flex-direction:column;overflow:hidden;
           background:var(--surface);border:1px solid var(--line-strong);
-          border-radius:var(--r-lg);box-shadow:var(--shadow-float)}
+          border-radius:var(--r-lg);box-shadow:var(--shadow-float);
+          animation:dialog-in .18s cubic-bezier(.2,.7,.3,1)}
+  @keyframes dialog-in{from{opacity:0;transform:translateY(8px) scale(.985)}
+                       to{opacity:1;transform:none}}
   .dhead{display:flex;align-items:center;gap:var(--s2);
          padding:var(--s3) var(--s4);border-bottom:1px solid var(--line)}
   .dhead b{font-size:14px;font-weight:600;letter-spacing:-.01em}
@@ -344,7 +368,10 @@
   #toast{position:fixed;left:50%;bottom:var(--s5);transform:translateX(-50%);
          z-index:40;max-width:min(560px,92vw);padding:9px 14px;
          border-radius:var(--r);background:var(--toast-bg);color:var(--toast-fg);
-         font-size:var(--t-meta);box-shadow:var(--shadow-float)}
+         font-size:var(--t-meta);box-shadow:var(--shadow-float);
+         animation:toast-in .18s ease}
+  @keyframes toast-in{from{opacity:0;transform:translate(-50%,8px)}
+                      to{opacity:1;transform:translate(-50%,0)}}
   #toast.err{background:var(--toast-err-bg);color:var(--toast-err-fg)}
 
   /* 长任务进度条（下载服务端核心、下载 frpc、上传文件） */
@@ -503,6 +530,13 @@
   @media (max-width:520px){
     header b{max-width:7em}
     #head .name{max-width:100%}
+  }
+
+  /* 偏好减少动效的人（晕动症、前庭敏感），把动效压到几乎为零 */
+  @media (prefers-reduced-motion:reduce){
+    *,*::before,*::after{animation-duration:.001s !important;
+                         animation-iteration-count:1 !important;
+                         transition-duration:.001s !important}
   }
 </style>
 </head>
