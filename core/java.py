@@ -21,6 +21,7 @@ from java_tools import (
     JavaInfo,
     _java_major_version,
     _last_selected_path,
+    _run_java_version,
     _search_java_in_roots,
     detect_java_versions,
     get_java_requirement,
@@ -69,6 +70,16 @@ def _pick(javas: list[JavaInfo], requirement: Optional[dict]) -> tuple[Optional[
     return candidates[0], True
 
 
+def _major_of_path(path: str, saved: list[JavaInfo]) -> int:
+    """一个 java 路径的主版本号。先在记录里找，找不到就现场读一次。"""
+    key = os.path.normpath(path)
+    for j in saved:
+        if os.path.normpath(j.path) == key:
+            return _java_major_version(j.version)
+    ver = _run_java_version(path)
+    return _java_major_version(ver) if ver else 0
+
+
 def resolve_java_for_launch(
     configured_path: Optional[str],
     storage_dir: str,
@@ -90,10 +101,17 @@ def resolve_java_for_launch(
         raise CoreError("app.error_java_not_found", path=configured_path)
 
     last = _last_selected_path(storage_dir)
-    if last and os.path.isfile(last):
-        return last
-
     requirement = get_java_requirement(mc_version) if mc_version else None
+
+    if last and os.path.isfile(last):
+        # last 是全局「上次的选择」，可能属于另一台实例、另一个 MC 版本。
+        # 不能无条件拿它去启动：给旧服选的 Java 8，拿去跑要 Java 21 的新服
+        # 会当场崩。先过一遍版本要求，不满足就照常往下挑。
+        if (requirement is None
+                or _major_of_path(last, load_java_list(storage_dir))
+                >= _java_major_version(requirement["min"])):
+            return last
+        # 不满足，接着走下面的 _pick，别硬用它
 
     roots = [r for r in (extra_roots or []) + [storage_dir] if r]
     saved = load_java_list(storage_dir)

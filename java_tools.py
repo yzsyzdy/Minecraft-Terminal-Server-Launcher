@@ -607,7 +607,15 @@ def _check_java_compatibility(
                 if exe:
                     ver = _run_java_version(exe)
                     now = datetime.now(timezone.utc).isoformat()
-                    save_java_list([JavaInfo(path=exe, version=ver or rec, detected_at=now)], storage_dir, last_selected=exe)
+                    new_one = JavaInfo(path=exe, version=ver or rec,
+                                       detected_at=now)
+                    # 别把列表覆盖成只含这一个：机器上可能已经记着好几个 Java，
+                    # 覆盖掉的话，下次启动别的实例时选择器里只剩这一条。
+                    merged = [j for j in load_java_list(storage_dir)
+                              if os.path.isfile(j.path)
+                              and os.path.normpath(j.path) != os.path.normpath(exe)]
+                    merged.append(new_one)
+                    save_java_list(merged, storage_dir, last_selected=exe)
                     print(t("java.downloaded", path=exe, ver=ver or rec))
                     return exe
                 print(); print(t("java.compat.download_failed")); continue
