@@ -385,7 +385,7 @@ def _interactive_select(javas: list[JavaInfo], mc_version: str = "",
     print(t("java.select.cancel"))
     print()
     while True:
-        choice = input(t("java.select.prompt_num", max=len(javas))).strip().lower()
+        choice = input(t("java.select_prompt_num", max=len(javas))).strip().lower()
         if choice == "0":
             raise FileNotFoundError(t("java.compat.cancelled"))
         if choice == "d" and download_ver:

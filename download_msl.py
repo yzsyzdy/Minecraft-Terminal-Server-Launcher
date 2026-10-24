@@ -24,6 +24,7 @@ from constants import MSL_API_BASE, USER_AGENT
 from bmcl import (
     fabric_loader,
     fabric_server_url,
+    fabric_versions,
     vanilla_server,
     vanilla_versions,
 )
