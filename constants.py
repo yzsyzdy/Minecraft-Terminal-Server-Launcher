@@ -20,6 +20,9 @@ HANGAR_BASE = "https://hangar.papermc.io/api/v1"
 # MSL API base
 MSL_API_BASE = "https://api.mslmc.cn/v4"
 
+# BMCLAPI 镜像（国内社区维护，原版与 Fabric 元数据的镜像）
+BMCL_API_BASE = "https://bmclapi2.bangbang93.com"
+
 # CurseForge API bases
 CURSEFORGE_OFFICIAL = "https://api.curseforge.com/v1"
 CURSEFORGE_PROXY = "https://api.curse.tools/v1/cf"

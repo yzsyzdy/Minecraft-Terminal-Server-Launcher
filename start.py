@@ -418,6 +418,13 @@ def main():
     except (TypeError, ValueError):
         pass
 
+    # 下载源偏好同理：菜单里改了只影响当次进程，下次启动得重新应用
+    try:
+        from download_msl import set_source_preference
+        set_source_preference(bool(config.get("prefer_bmcl")))
+    except Exception:  # noqa: BLE001
+        pass
+
     if _dispatch_args(sys.argv[1:]):
         return
 

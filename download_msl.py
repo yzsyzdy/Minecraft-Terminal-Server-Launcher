@@ -21,8 +21,28 @@ from server_manager import save_server_config
 from http_utils import fetch_json, open_url
 from i18n import t
 from constants import MSL_API_BASE, USER_AGENT
+from bmcl import (
+    fabric_loader,
+    fabric_server_url,
+    vanilla_server,
+    vanilla_versions,
+)
 
 MSL_USER_AGENT = USER_AGENT
+
+# 核心下载源偏好。默认先用 MSL（它覆盖的核心类型最多），拿不到再问 BMCL，
+# 最后才回官方。用户可以在设置里改成「优先 BMCL」。
+_PREFER_BMCL = False
+
+
+def set_source_preference(prefer_bmcl: bool) -> None:
+    """改下载源优先级。进程级，和 set_download_threads 一样由启动时应用。"""
+    global _PREFER_BMCL
+    _PREFER_BMCL = bool(prefer_bmcl)
+
+
+def source_preference() -> str:
+    return "bmcl" if _PREFER_BMCL else "msl"
 
 # Windows 文件名里不允许出现的字符，外加控制字符
 _UNSAFE_FILENAME_CHARS = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
@@ -232,6 +252,28 @@ _FALLBACK_SERVER_TYPES = {
 }
 
 
+def _bmcl_versions(server_type: str) -> Optional[dict]:
+    """BMCL 镜像能给的版本列表。它只镜像了原版和 Fabric 的元数据。"""
+    if server_type == "vanilla":
+        return vanilla_versions()
+    if server_type == "fabric":
+        return fabric_versions()
+    return None
+
+
+def _bmcl_download_url(server_type: str, version: str) -> Optional[dict]:
+    """BMCL 能拼出的下载地址。原版是真镜像，Fabric 只借它的元数据。"""
+    if server_type == "vanilla":
+        return vanilla_server(version)
+    if server_type == "fabric":
+        loader = fabric_loader(version)
+        if not loader:
+            return None
+        # jar 本体不在 BMCL 上，回到 meta.fabricmc.net
+        return {"url": fabric_server_url(version, loader), "sha256": ""}
+    return None
+
+
 def _official_versions(server_type: str) -> Optional[dict]:
     """向官方源要版本列表，返回与 MSL 同形的 {"versions": [...]}。
 
@@ -358,8 +400,15 @@ def msl_get_versions(server_type: str, project_dir: str = "") -> Optional[dict]:
     """获取指定服务端类型的可用版本列表。
 
     版本列表会过滤掉 pre/rc/snapshot 等测试版，只显示稳定版。
-    镜像拿不到时向官方源要。
+    顺序是「偏好的镜像 → 另一个镜像 → 官方源」；两个镜像都只覆盖原版与
+    Fabric，其余核心的 BMCL 那一环直接落空，不影响原来的行为。
     """
+    if _PREFER_BMCL:
+        data = _bmcl_versions(server_type)
+        if data:
+            print(t("download.source_bmcl"))
+            return data
+
     key = f"versions_{server_type}"
     if project_dir:
         data = _msl_cache_fetch(key, f"/mirrors/{server_type}",
@@ -368,6 +417,14 @@ def msl_get_versions(server_type: str, project_dir: str = "") -> Optional[dict]:
         data = _msl_request(f"/mirrors/{server_type}")
     if data:
         return data
+
+    if not _PREFER_BMCL:
+        data = _bmcl_versions(server_type)
+        if data:
+            print(t("download.fallback_source", core=server_type))
+            print(t("download.source_bmcl"))
+            return data
+
     fallback = _official_versions(server_type)
     if fallback:
         print(t("download.fallback_source", core=server_type))
@@ -380,13 +437,27 @@ def msl_get_download_url(server_type: str, version: str) -> Optional[dict]:
     注意: 下载 URL 不缓存，因为 MSL API 的限速按请求计（非按响应缓存）。
     返回的 dict 里目前稳定提供 url 与 sha256；size 字段在实测响应中并不存在
     （v4 /download/server/paper/1.21.8 只回了这两个键），所以不要依赖它，
-    需要文件大小时用 HEAD 探测。
+    需要文件大小时用 HEAD 探测。原版从 BMCL 拿时另带一个 sha1。
 
     镜像拿不到时退到官方源；官方源也没有这个核心就返回 None（由调用方报错）。
     """
+    if _PREFER_BMCL:
+        data = _bmcl_download_url(server_type, version)
+        if data:
+            print(t("download.source_bmcl"))
+            return data
+
     data = _msl_request(f"/download/server/{server_type}/{version}")
     if isinstance(data, dict) and data.get("url"):
         return data
+
+    if not _PREFER_BMCL:
+        data = _bmcl_download_url(server_type, version)
+        if data:
+            print(t("download.fallback_source", core=server_type))
+            print(t("download.source_bmcl"))
+            return data
+
     fallback = _official_download_url(server_type, version)
     if fallback:
         print(t("download.fallback_source", core=server_type))
@@ -416,18 +487,22 @@ def file_sha256(path: str) -> str:
     return digest.hexdigest()
 
 
-def _verify_sha256(path: str, expected: str, quiet: bool = False) -> bool:
-    """校验下载结果的 sha256，不匹配就删掉文件并返回 False。
+def file_sha1(path: str) -> str:
+    """流式算 sha1。Mojang（以及 BMCL 镜像过来的那份）只给 sha1。"""
+    digest = hashlib.sha1()
+    with open(path, "rb") as f:
+        for block in iter(lambda: f.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
 
-    MSL 的 /download/server/{type}/{version} 响应里带着 sha256，而这是它唯一
-    提供的完整性信息（没有 size 字段）。以前这个值只被打印出来给用户看，从不
-    参与判断，于是截断、CDN 损坏、在途篡改都要等服务器启动失败才暴露。
-    """
+
+def _verify_digest(path: str, expected: str, algo: str,
+                   quiet: bool = False) -> bool:
     expected = str(expected or "").strip().lower()
     if not expected:
         return True
     try:
-        actual = file_sha256(path)
+        actual = file_sha1(path) if algo == "sha1" else file_sha256(path)
     except OSError as e:
         if not quiet:
             print(f"\n  {t('app.error', msg=f'Cannot hash downloaded file: {e}')}")
@@ -441,6 +516,20 @@ def _verify_sha256(path: str, expected: str, quiet: bool = False) -> bool:
     if not quiet:
         print(f"\n  {t('download.sha256_mismatch', expected=expected, actual=actual)}")
     return False
+
+
+def _verify_sha1(path: str, expected: str, quiet: bool = False) -> bool:
+    return _verify_digest(path, expected, "sha1", quiet)
+
+
+def _verify_sha256(path: str, expected: str, quiet: bool = False) -> bool:
+    """校验下载结果的 sha256，不匹配就删掉文件并返回 False。
+
+    MSL 的 /download/server/{type}/{version} 响应里带着 sha256，而这是它唯一
+    提供的完整性信息（没有 size 字段）。以前这个值只被打印出来给用户看，从不
+    参与判断，于是截断、CDN 损坏、在途篡改都要等服务器启动失败才暴露。
+    """
+    return _verify_digest(path, expected, "sha256", quiet)
 
 
 def _check_range_support(url: str, headers: Optional[dict] = None) -> tuple[bool, int]:
@@ -508,7 +597,8 @@ def download_file_with_progress(url: str, target_path: str, desc: str = "",
                                 headers: Optional[dict] = None,
                                 quiet: bool = False,
                                 on_progress=None,
-                                expected_sha256: Optional[str] = None) -> bool:
+                                expected_sha256: Optional[str] = None,
+                                expected_sha1: Optional[str] = None) -> bool:
     """单线程文件下载（带进度条）。
 
     Args:
@@ -520,6 +610,7 @@ def download_file_with_progress(url: str, target_path: str, desc: str = "",
         on_progress: 进度回调 on_progress(ratio, downloaded, total)，
                      供网页面板把进度推给浏览器
         expected_sha256: 期望的 sha256，给了就校验，不匹配则删除文件并失败
+        expected_sha1: 期望的 sha1。原版核心从 Mojang / BMCL 拿时只有这个值
 
     Returns:
         成功返回 True，失败返回 False
@@ -570,6 +661,8 @@ def download_file_with_progress(url: str, target_path: str, desc: str = "",
             return False
         if expected_sha256 and not _verify_sha256(target_path, expected_sha256, quiet):
             return False
+        if expected_sha1 and not _verify_sha1(target_path, expected_sha1, quiet):
+            return False
         if not quiet:
             print()
         return True
@@ -588,7 +681,8 @@ def multithreaded_download(url: str, target_path: str, desc: str = "",
                            headers: Optional[dict] = None,
                            quiet: bool = False,
                            on_progress=None,
-                           expected_sha256: Optional[str] = None) -> bool:
+                           expected_sha256: Optional[str] = None,
+                           expected_sha1: Optional[str] = None) -> bool:
     """
     Multi-threaded file download.
 
@@ -628,12 +722,14 @@ def multithreaded_download(url: str, target_path: str, desc: str = "",
 
     if file_size < _MIN_CHUNK_SIZE or file_size <= 0:
         return download_file_with_progress(url, target_path, desc, headers,
-                                           quiet, on_progress, expected_sha256)
+                                           quiet, on_progress, expected_sha256,
+                                           expected_sha1)
 
     # 如果服务器明确不支持 Range 请求，直接使用单线程下载
     if not range_supported:
         return download_file_with_progress(url, target_path, desc, headers,
-                                           quiet, on_progress, expected_sha256)
+                                           quiet, on_progress, expected_sha256,
+                                           expected_sha1)
 
     # 这里再夹一次上限：set_download_threads 会挡，但 num_threads 是显式传进来的
     # 参数，调用方可以绕过设置直接给个大数。
@@ -641,7 +737,8 @@ def multithreaded_download(url: str, target_path: str, desc: str = "",
                          max(1, file_size // _MIN_CHUNK_SIZE))
     if actual_threads <= 1:
         return download_file_with_progress(url, target_path, desc, headers,
-                                           quiet, on_progress, expected_sha256)
+                                           quiet, on_progress, expected_sha256,
+                                           expected_sha1)
 
     chunk_size = file_size // actual_threads
 
@@ -730,9 +827,11 @@ def multithreaded_download(url: str, target_path: str, desc: str = "",
             say(f"\n  {t('download.retry_fallback')}")
             return download_file_with_progress(url, target_path, desc, headers,
                                                quiet, on_progress,
-                                               expected_sha256)
+                                               expected_sha256, expected_sha1)
 
     if expected_sha256 and not _verify_sha256(target_path, expected_sha256, quiet):
+        return False
+    if expected_sha1 and not _verify_sha1(target_path, expected_sha1, quiet):
         return False
     final_bar = "\u2588" * bar_width
     say(f"    {desc} [{final_bar}] 100.0%  "

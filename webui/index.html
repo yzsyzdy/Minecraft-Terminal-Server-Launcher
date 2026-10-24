@@ -1163,6 +1163,13 @@
       </div>
       <div class="drow">
         <label class="check">
+          <input type="checkbox" id="cfgprefer">
+          <span id="l-cfgprefer"></span>
+        </label>
+      </div>
+      <div class="hint" id="cfgprefer-hint"></div>
+      <div class="drow">
+        <label class="check">
           <input type="checkbox" id="cfgrestore">
           <span id="l-cfgrestore"></span>
         </label>
@@ -1549,6 +1556,8 @@ function applyStrings() {
   $("cfgstartup-hint").textContent = strings["web.settings.startup_hint"] || "";
   $("l-cfgrestore").textContent = strings["web.settings.restore"] || "";
   $("cfgrestore-hint").textContent = strings["web.settings.restore_hint"] || "";
+  $("l-cfgprefer").textContent = strings["web.settings.prefer_bmcl"] || "";
+  $("cfgprefer-hint").textContent = strings["web.settings.prefer_bmcl_hint"] || "";
   $("cfgcheck").textContent = strings["web.settings.update_check"] || "";
   $("cfgsave").textContent = strings["web.files.save"] || "";
   $("expopen").textContent = strings["web.export.title"] || "";
@@ -2212,6 +2221,7 @@ function cfgFill(data) {
   $("cfgstartup").disabled = !startup.supported;
   $("l-cfgstartup").parentElement.style.opacity = startup.supported ? "1" : "0.45";
   $("cfgrestore").checked = data.restore_running !== false;
+  $("cfgprefer").checked = !!data.prefer_bmcl;
 }
 
 async function saveConfig() {
@@ -2220,6 +2230,7 @@ async function saveConfig() {
     download_threads: Number($("cfgthreads").value) || 16,
     auto_start_server: $("cfgauto").value,
     restore_running: $("cfgrestore").checked,
+    prefer_bmcl: $("cfgprefer").checked,
   };
   // 只在勾选状态真的变了时才提交：非 Windows 上提交这一项会直接报错，
   // 而用户可能只是想改个语言

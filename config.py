@@ -12,6 +12,8 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "language": "",
     "curseforge_api_key": "",
     "download_threads": 16,
+    # 核心下载源：false = MSL 优先（BMCL 兜底），true = BMCL 优先
+    "prefer_bmcl": False,
     "auto_start_server": "",
     "web": {
         "host": "127.0.0.1",

@@ -1251,8 +1251,10 @@ def _settings_menu(project_dir: str) -> None:
         current_lang = config.get("language", "") or "auto"
         current_threads = config.get("download_threads", 16)
         auto_server = config.get("auto_start_server", "") or "-"
+        prefer_bmcl = bool(config.get("prefer_bmcl"))
         from startup import is_startup_enabled
         startup_state = t("settings.on") if is_startup_enabled() else t("settings.off")
+        source_state = t("settings.source_bmcl") if prefer_bmcl else t("settings.source_msl")
 
         clear_screen()
         print()
@@ -1263,6 +1265,7 @@ def _settings_menu(project_dir: str) -> None:
         print(t("settings.update_option", n=3))
         print(t("settings.auto_start_option", n=4, name=auto_server))
         print(t("settings.startup_option", n=5, state=startup_state))
+        print(t("settings.source_option", n=6, val=source_state))
         print(t("settings.back", n=0))
         print()
         choice = input(t("settings.prompt")).strip()
@@ -1381,6 +1384,18 @@ def _settings_menu(project_dir: str) -> None:
                     print(t("settings.startup_disabled"))
             else:
                 print(t("settings.startup_unsupported"))
+            input(t("app.press_enter"))
+
+        elif choice == "6":
+            # 切下载源：MSL 优先 <-> BMCL 优先。两边都另有兵底，不会真的断掉
+            config["prefer_bmcl"] = not bool(config.get("prefer_bmcl"))
+            from download_msl import set_source_preference
+            set_source_preference(config["prefer_bmcl"])
+            save_config(config, project_dir)
+            print()
+            print(t("settings.source_saved",
+                    val=t("settings.source_bmcl") if config["prefer_bmcl"]
+                    else t("settings.source_msl")))
             input(t("app.press_enter"))
 
         else:

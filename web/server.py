@@ -236,6 +236,8 @@ WEB_STRINGS = (
     "web.settings.saved",
     "web.settings.restore",
     "web.settings.restore_hint",
+    "web.settings.prefer_bmcl",
+    "web.settings.prefer_bmcl_hint",
     # OpenFrp
     "web.openfrp.tab",
     "web.openfrp.hint",
@@ -1567,6 +1569,10 @@ def _make_handler(manager: RuntimeManager, servers_dir: str, token: str,
             if changed_language:
                 load_language(config.get("language") or detect_os_language())
 
+            if "prefer_bmcl" in body:
+                from download_msl import set_source_preference
+                set_source_preference(bool(config.get("prefer_bmcl")))
+
             self._json(dict(self._settings_view(),
                             message=t("web.settings.saved")))
 
@@ -2063,6 +2069,15 @@ def build_server(project_dir: str, *, host: str = "127.0.0.1", port: int = 8765,
     # 通常不会自己去 load_language，所以在这里补上。
     config = load_config(project_dir)
     load_language(config.get("language", "") or detect_os_language())
+
+    # 下载设置也在这里应用一次：嵌入方不一定会走 start.py，不补上的话面板里
+    # 下的核心还是默认线程数、默认下载源。
+    from download_msl import set_download_threads, set_source_preference
+    try:
+        set_download_threads(int(config.get("download_threads") or 16))
+    except (TypeError, ValueError):
+        pass
+    set_source_preference(bool(config.get("prefer_bmcl")))
 
     servers_dir = servers_dir or ensure_servers_folder(project_dir)
     manager = manager or shared_manager(project_dir)
