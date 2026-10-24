@@ -228,8 +228,41 @@ def _search_java_from_default_paths() -> list[JavaInfo]:
     return found
 
 
-def detect_java_versions() -> list[JavaInfo]:
-    found = _search_java_from_env() + _search_java_from_default_paths()
+def _search_java_in_roots(roots: list[str]) -> list[JavaInfo]:
+    """扫一批自定义目录里的便携 JDK。
+
+    给两个场合用：MSTL 自己的数据目录（自动下载的 JDK 就装在这里，以前
+    扫描器对它视而不见，下过的 JDK 重启后就「丢」了）和实例目录。便携 JDK
+    是开服机器上很常见的摆法：没有安装权限、或想给不同实例钉不同的 Java，
+    用户把解压好的 JDK 摆在旁边就完事，注册表与环境变量一概不知情。
+    """
+    found: list[JavaInfo] = []
+    seen: set[str] = set()
+    now = datetime.now(timezone.utc).isoformat()
+    java_bin = _java_exe_name()
+    patterns = [
+        f"jdk*/bin/{java_bin}", f"jre*/bin/{java_bin}",
+        f"java*/bin/{java_bin}", f"*/bin/{java_bin}",
+        f"*/jbr/bin/{java_bin}", f"bin/{java_bin}",
+    ]
+    for root in roots:
+        if not root or not os.path.isdir(root):
+            continue
+        for pat in patterns:
+            for exe in glob.glob(os.path.join(root, pat)):
+                norm = os.path.normpath(exe)
+                if norm in seen or not os.path.isfile(norm):
+                    continue
+                ver = _run_java_version(norm)
+                if ver:
+                    seen.add(norm)
+                    found.append(JavaInfo(path=norm, version=ver, detected_at=now))
+    return found
+
+
+def detect_java_versions(extra_roots: Optional[list[str]] = None) -> list[JavaInfo]:
+    found = (_search_java_from_env() + _search_java_from_default_paths()
+             + _search_java_in_roots(extra_roots or []))
     seen = set()
     merged: list[JavaInfo] = []
     for item in found:
@@ -327,16 +360,55 @@ def save_java_list(javas: list[JavaInfo], storage_dir: str, last_selected: str =
         json.dump({"known_javas": [asdict(j) for j in javas], "last_selected": last_selected}, f, ensure_ascii=False, indent=2)
 
 
-def _interactive_select(javas: list[JavaInfo]) -> JavaInfo:
+def _interactive_select(javas: list[JavaInfo], mc_version: str = "",
+                        project_dir: str = "") -> JavaInfo:
+    """让人从列表里挑一个 Java，同时给出「下载」与「手动指定」两个出口。
+
+    以前这里只有数字可选。机器上装的全是旧 Java、而新服要新版本时，用户只能
+    先随便选一个、再在后面的兼容警告里绕一圈才能到下载——更多的人是看到
+    列表里没有想要的就直接退出了。把出口摆到选择器里，一步到位。
+    """
+    req = get_java_requirement(mc_version) if mc_version else None
+    download_ver = (req or {}).get("recommended", "") if req else ""
+    if download_ver and not can_auto_download(download_ver):
+        download_ver = ""
+
     print()
     print(t("java.select_prompt"))
     print()
     for i, j in enumerate(javas, 1):
         print(t("java.select_line", i=i, path=j.path, ver=j.version))
     print()
+    if download_ver:
+        print(t("java.select.download", ver=download_ver))
+    print(t("java.select.manual"))
+    print(t("java.select.cancel"))
+    print()
     while True:
+        choice = input(t("java.select.prompt_num", max=len(javas))).strip().lower()
+        if choice == "0":
+            raise FileNotFoundError(t("java.compat.cancelled"))
+        if choice == "d" and download_ver:
+            exe = _download_jdk(download_ver, project_dir)
+            if exe:
+                ver = _run_java_version(exe) or download_ver
+                return JavaInfo(path=exe, version=ver,
+                                detected_at=datetime.now(timezone.utc).isoformat())
+            print(t("java.compat.download_failed"))
+            continue
+        if choice == "m":
+            raw = input(t("java.select.manual_prompt")).strip().strip('"')
+            if not raw:
+                continue
+            ap = os.path.abspath(raw)
+            if os.path.isfile(ap):
+                ver = _run_java_version(ap)
+                if ver:
+                    return JavaInfo(path=ap, version=ver,
+                                    detected_at=datetime.now(timezone.utc).isoformat())
+            print(t("java.manual_bad", path=raw))
+            continue
         try:
-            choice = input(t("java.select_prompt_num", max=len(javas))).strip()
             idx = int(choice) - 1
             if 0 <= idx < len(javas):
                 return javas[idx]
@@ -715,8 +787,14 @@ def resolve_java(
     storage_dir: Optional[str] = None,
     mc_version: str = "",
     project_dir: str = "",
+    extra_roots: Optional[list[str]] = None,
 ) -> str:
-    """Resolve Java path with caching, scanning, compat checking, and auto-download."""
+    """Resolve Java path with caching, scanning, compat checking, and auto-download.
+
+    extra_roots 是额外要扫的目录（通常是实例目录）：便携 JDK 摆在实例里的
+    摆法靠它才能被看到。MSTL 自己的数据目录（project_dir / storage_dir）
+    永远会扫——自动下载的 JDK 就落在那里。
+    """
     if configured_path:
         ap = os.path.abspath(configured_path)
         if os.path.isfile(ap):
@@ -728,6 +806,16 @@ def resolve_java(
         # 一个和用户数据毫不相干的地方。项目里其它地方一律用 app_dir()。
         from paths import app_dir
         storage_dir = app_dir()
+
+    # 额外扫描根：实例目录（extra_roots）+ MSTL 自己的数据目录。后者永远在：
+    # 自动下载的 JDK 就装在这里，不扫的话重启后它就从列表里消失了。
+    scan_roots: list[str] = []
+    for root in list(extra_roots or []) + [project_dir, storage_dir]:
+        if not root:
+            continue
+        key = os.path.normcase(os.path.abspath(root))
+        if key not in {os.path.normcase(os.path.abspath(r)) for r in scan_roots}:
+            scan_roots.append(root)
 
     saved = load_java_list(storage_dir)
     valid_saved = [j for j in saved if os.path.isfile(j.path)]
@@ -745,14 +833,23 @@ def resolve_java(
                 selected = matches[0]
                 print(t("java.detect_last", path=selected.path, ver=selected.version))
         if selected is None:
+            # 本地记录里没有的便携 JDK（摆在实例目录或 MSTL 目录里的）也该
+            # 出现在选择器里，否则用户看到的永远是那份过时的清单
+            known = {os.path.normpath(j.path) for j in valid_saved}
+            fresh = [j for j in _search_java_in_roots(scan_roots)
+                     if os.path.normpath(j.path) not in known]
+            if fresh:
+                valid_saved = valid_saved + fresh
+                valid_saved.sort(key=lambda j: _version_sort_key(j.version), reverse=True)
+                print(t("java.found_portable", count=len(fresh)))
             print(t("java.detect_multiple", count=len(valid_saved)))
-            selected = _interactive_select(valid_saved)
+            selected = _interactive_select(valid_saved, mc_version, project_dir or storage_dir)
     else:
         need_scan = True
 
     if need_scan:
         print(t("java.scanning"))
-        found = detect_java_versions()
+        found = detect_java_versions(scan_roots)
         if not found:
             req = get_java_requirement(mc_version) if mc_version else None
             print(t("java.none_found"))
@@ -779,12 +876,22 @@ def resolve_java(
             if not found:
                 raise FileNotFoundError("No Java installation found.\n  Install JDK 21 or later: https://adoptium.net/")
 
-        selected = found[0] if len(found) == 1 else _interactive_select(found)
+        selected = found[0] if len(found) == 1 else _interactive_select(
+            found, mc_version, project_dir or storage_dir)
         seen = {os.path.normpath(j.path) for j in found}
         extra = [j for j in saved if os.path.isfile(j.path) and os.path.normpath(j.path) not in seen]
         save_java_list(found + extra, storage_dir, last_selected=selected.path)
     else:
-        save_java_list(saved, storage_dir, last_selected=selected.path)
+        # 选择器里可能出现两个本地记录里没有的条目：额外目录里新扫到的便携
+        # JDK、当场下载的 JDK。把选中的那个并进记录，下次就不必再扫。
+        merged = [j for j in saved if os.path.isfile(j.path)]
+        known = {os.path.normpath(j.path) for j in merged}
+        for cand in valid_saved + [selected]:
+            key = os.path.normpath(cand.path)
+            if key not in known:
+                known.add(key)
+                merged.append(cand)
+        save_java_list(merged, storage_dir, last_selected=selected.path)
 
     new_path = _check_java_compatibility(selected.version, mc_version, storage_dir, project_dir)
     return new_path if new_path else selected.path

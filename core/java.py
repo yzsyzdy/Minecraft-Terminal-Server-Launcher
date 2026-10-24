@@ -21,6 +21,7 @@ from java_tools import (
     JavaInfo,
     _java_major_version,
     _last_selected_path,
+    _search_java_in_roots,
     detect_java_versions,
     get_java_requirement,
     load_java_list,
@@ -34,6 +35,18 @@ def _usable(java: JavaInfo) -> bool:
 
 def _sorted(javas: list[JavaInfo]) -> list[JavaInfo]:
     return sorted(javas, key=lambda j: _java_major_version(j.version), reverse=True)
+
+
+def _dedupe(javas: list[JavaInfo]) -> list[JavaInfo]:
+    """按路径去重，保留先出现的那个（先保存的记录 > 新扫到的）。"""
+    seen: set[str] = set()
+    out: list[JavaInfo] = []
+    for j in javas:
+        key = os.path.normpath(j.path)
+        if key not in seen and j.path:
+            seen.add(key)
+            out.append(j)
+    return out
 
 
 def _pick(javas: list[JavaInfo], requirement: Optional[dict]) -> tuple[Optional[JavaInfo], bool]:
@@ -62,8 +75,13 @@ def resolve_java_for_launch(
     mc_version: str = "",
     *,
     reporter: Optional[Reporter] = None,
+    extra_roots: Optional[list[str]] = None,
 ) -> str:
-    """解析出一个可以直接拿去启动服务端的 java 可执行文件路径。"""
+    """解析出一个可以直接拿去启动服务端的 java 可执行文件路径。
+
+    extra_roots 是额外要扫的目录（通常是实例目录）。便携 JDK 摆在实例里时，
+    只有靠它才能被看到。MSTL 自己的数据目录由 storage_dir 传入，也一并扫。
+    """
     reporter = as_reporter(reporter)
 
     if configured_path:
@@ -77,13 +95,30 @@ def resolve_java_for_launch(
 
     requirement = get_java_requirement(mc_version) if mc_version else None
 
-    chosen, satisfied = _pick(load_java_list(storage_dir), requirement)
+    roots = [r for r in (extra_roots or []) + [storage_dir] if r]
+    saved = load_java_list(storage_dir)
+    chosen, satisfied = _pick(saved, requirement)
+
+    # 本地记录里一个都没有：整套扫（环境变量 + 默认路径 + 额外目录）
     if chosen is None:
         reporter.log("java.scanning")
-        scanned = detect_java_versions()
-        chosen, satisfied = _pick(scanned, requirement)
-        if chosen is not None:
-            save_java_list(scanned, storage_dir, chosen.path)
+        scanned = detect_java_versions(roots)
+        merged = _dedupe(saved + scanned)
+        chosen, satisfied = _pick(merged, requirement)
+        if scanned:
+            save_java_list(merged, storage_dir, chosen.path if chosen else "")
+    elif requirement and not satisfied:
+        # 记录里挑出来的版本不够新，但实例目录/MSTL 目录里可能摆着更合适的
+        # 便携 JDK。这一扫比整套轻（只 glob 那几个目录），不会把系统又翻一遍。
+        fresh = [j for j in _search_java_in_roots(roots)
+                 if os.path.normpath(j.path) not in {
+                     os.path.normpath(x.path) for x in saved}]
+        if fresh:
+            merged = _dedupe(saved + fresh)
+            better, better_ok = _pick(merged, requirement)
+            if better_ok:
+                chosen, satisfied = better, True
+                save_java_list(merged, storage_dir, chosen.path)
 
     if chosen is None:
         if requirement:

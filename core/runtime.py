@@ -276,6 +276,7 @@ def build_launch_plan(
         project_dir,
         server_cfg.get("mc_version", ""),
         reporter=reporter,
+        extra_roots=[server_dir],
     )
 
     jar_rel = server_cfg.get("jar", "server.jar")

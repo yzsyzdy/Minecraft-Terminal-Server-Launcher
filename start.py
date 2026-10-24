@@ -192,6 +192,7 @@ def _start_server(server_cfg: dict, server_path: str,
             storage_dir=project_dir,
             mc_version=mc_ver,
             project_dir=project_dir,
+            extra_roots=[server_path],
         )
     except FileNotFoundError as e:
         print(t("app.error_file_not_found", msg=str(e)))
