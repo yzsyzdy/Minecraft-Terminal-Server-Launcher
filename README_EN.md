@@ -253,7 +253,9 @@ The **Add-ons** tab manages plugins and mods: search SpigotMC / Modrinth / Hanga
 
 A **generic instance** runs something of your own instead of Minecraft: an executable (`exec`, no shell involved) or a command handed to `cmd` / `powershell`. It still gets start/stop, a live console, a log file, the ability to receive input, and an optional tunnel — it just skips Java resolution and the jar check. The terminal menu has the same entry point (`[3] New instance`). Select an instance and press `⚙` to edit it, or edit `.server.json` through the file manager.
 
-The `frp` button in the top bar configures vanilla frp from the panel: connection settings in `frpc.toml`, adding and removing tunnels, starting and stopping frpc, and downloading or updating the frpc binary (with a manual upload fallback).
+The `frp` button in the top bar configures vanilla frp from the panel: connection settings in `frpc.toml`, adding and removing tunnels, starting and stopping frpc, and downloading or updating the frpc binary (with a manual upload fallback). The second tab of the same dialog is **OpenFrp**: the user token lists your tunnels, the Authorization creates them and loads nodes, and there is a separate download for the OpenFrp build of frpc (it is not in the vanilla frp repository). Each tunnel row shows which instance it is bound to.
+
+**Restore after a restart**: instances that were running at the last exit are started again on the next launch. If the old process is still alive (common after a forced kill) it is skipped, so two servers never fight over one port. The switch lives in `⚙` in the top bar and is on by default.
 
 Downloading a server core, downloading frpc and uploading files all show a progress bar along the bottom of the panel. Instance settings also gained "start with the app", which raises that instance in the background when the app starts.
 

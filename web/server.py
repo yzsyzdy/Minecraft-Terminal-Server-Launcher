@@ -145,6 +145,7 @@ WEB_STRINGS = (
     "web.panel.follow",
     "web.panel.jump_bottom",
     "web.panel.quick",
+    "web.panel.theme",
     "web.detail.memory",
     "web.detail.pid",
     "web.detail.exit_code",
@@ -233,6 +234,39 @@ WEB_STRINGS = (
     "web.settings.update_latest",
     "web.settings.update_unknown",
     "web.settings.saved",
+    "web.settings.restore",
+    "web.settings.restore_hint",
+    # OpenFrp
+    "web.openfrp.tab",
+    "web.openfrp.hint",
+    "web.openfrp.token",
+    "web.openfrp.token_required",
+    "web.openfrp.load",
+    "web.openfrp.fetching",
+    "web.openfrp.fetch_failed",
+    "web.openfrp.empty",
+    "web.openfrp.total",
+    "web.openfrp.bound",
+    "web.openfrp.frpc",
+    "web.openfrp.frpc_ready",
+    "web.openfrp.frpc_missing",
+    "web.openfrp.download",
+    "web.openfrp.downloaded",
+    "web.openfrp.create_title",
+    "web.openfrp.auth",
+    "web.openfrp.auth_required",
+    "web.openfrp.nodes",
+    "web.openfrp.nodes_failed",
+    "web.openfrp.no_nodes",
+    "web.openfrp.node",
+    "web.openfrp.name",
+    "web.openfrp.local_port",
+    "web.openfrp.remote_port",
+    "web.openfrp.encrypt",
+    "web.openfrp.compress",
+    "web.openfrp.create",
+    "web.openfrp.created",
+    "web.openfrp.realname",
     # 新建实例
     "web.new.title",
     # 新建实例时的前端校验文案：后端本来就有这两句翻译，但没下发到前端，
@@ -395,6 +429,25 @@ def web_auto_start(config: dict) -> bool:
 
 _manager_lock = threading.Lock()
 _shared_manager: Optional[RuntimeManager] = None
+
+
+def restore_instances(project_dir: str) -> list[str]:
+    """按上次的记录把实例拉回来。开关是 config.web.restore_running。
+
+    多个入口会调它（后台面板、前台面板、终端菜单），RuntimeManager 里带了
+    一次性开关，重复调用只有第一次真干活。
+    """
+    config = load_config(project_dir)
+    web = config.get("web") if isinstance(config.get("web"), dict) else {}
+    if web.get("restore_running") is False:
+        return []
+    try:
+        manager = shared_manager(project_dir)
+        return manager.restore_last(ensure_servers_folder(project_dir))
+    except Exception as e:  # noqa: BLE001
+        # 恢复是锦上添花，不能因为它把面板本身拦下来
+        print("  [警告] 恢复上次运行的实例失败: %s" % e)
+        return []
 
 
 def shared_manager(project_dir: str) -> RuntimeManager:
@@ -950,6 +1003,8 @@ def _make_handler(manager: RuntimeManager, servers_dir: str, token: str,
                 return self._guard(lambda: self._json(self._settings_view()))
             if path == "/api/update":
                 return self._guard(self._update_check)
+            if path == "/api/openfrp/frpc":
+                return self._guard(self._openfrp_frpc)
             self._json({"ok": False, "message": "not found"}, HTTPStatus.NOT_FOUND)
 
         def do_POST(self) -> None:  # noqa: N802
@@ -1316,6 +1371,128 @@ def _make_handler(manager: RuntimeManager, servers_dir: str, token: str,
             self._json({"ok": True, "file": filename,
                         "message": t("web.jars.installed", name=filename)})
 
+        # -- OpenFrp 云端隧道 ------------------------------------------------
+
+        def _openfrp_frpc(self) -> None:
+            """本机 OpenFrp 版 frpc 的状态。和原版 frp 的那份是两个文件。"""
+            from openfrp.tunnel_manager import get_frpc_local_path
+            path = get_frpc_local_path(project_dir)
+            installed = os.path.isfile(path)
+            self._json({"ok": True, "frpc": {
+                "installed": installed,
+                "path": path,
+                "size": os.path.getsize(path) if installed else 0,
+            }})
+
+        def _openfrp_tunnels(self, body: dict) -> None:
+            """按用户 token 列账号下的隧道，并标出哪条已经绑给了哪台实例。"""
+            token = str(body.get("token") or "").strip()
+            if not token:
+                raise CoreError("web.openfrp.token_required")
+            from openfrp.tunnel_manager import get_tunnels_by_token
+            groups = get_tunnels_by_token(token)
+            if groups is None:
+                raise CoreError("web.openfrp.fetch_failed")
+
+            bound: dict[str, str] = {}
+            for entry in list_servers(servers_dir):
+                of = entry.get("openfrp") or {}
+                pid = int(of.get("proxy_id") or 0)
+                if pid:
+                    name = entry.get("name") or os.path.basename(
+                        os.path.normpath(entry["_path"]))
+                    bound[str(pid)] = name
+
+            rows = []
+            for node, tunnels in groups:
+                for tun in tunnels:
+                    rows.append({
+                        "id": tun.proxy_id,
+                        "name": tun.name,
+                        "type": tun.proxy_type,
+                        "node": node,
+                        "local": f"{tun.local_addr}:{tun.local_port}",
+                        "remote": tun.remote_addr,
+                        "online": bool(tun.online),
+                        "bound_to": bound.get(str(tun.proxy_id), ""),
+                    })
+            self._json({"ok": True, "tunnels": rows, "bound": bound})
+
+        def _openfrp_nodes(self, body: dict) -> None:
+            """建隧道前选节点。只把能用的标出来，不替用户过滤。"""
+            auth = str(body.get("auth") or "").strip()
+            if not auth:
+                raise CoreError("web.openfrp.auth_required")
+            from openfrp.tunnel_manager import get_node_list
+            nodes = get_node_list(auth)
+            if nodes is None:
+                raise CoreError("web.openfrp.nodes_failed")
+            rows = [{
+                "id": n.node_id,
+                "name": n.name,
+                "classify": n.classify,
+                "need_realname": bool(n.need_realname),
+                "usable": bool(n.protocol_support.get("tcp")) and not n.fully_loaded
+                          and n.status == 200,
+            } for n in nodes]
+            self._json({"ok": True, "nodes": rows})
+
+        def _openfrp_create(self, body: dict) -> None:
+            """新建一条 TCP 隧道。参数跟终端菜单里那套一模一样。"""
+            auth = str(body.get("auth") or "").strip()
+            if not auth:
+                raise CoreError("web.openfrp.auth_required")
+            try:
+                node_id = int(body.get("node_id") or 0)
+                local_port = int(body.get("local_port") or 25565)
+            except (TypeError, ValueError):
+                raise CoreError("web.error.bad_request") from None
+            if node_id <= 0 or not (0 < local_port < 65536):
+                raise CoreError("web.error.bad_request")
+
+            name = str(body.get("name") or "").strip() or f"mc-{node_id}"
+            params = {
+                "type": "tcp",
+                "name": name,
+                "local_addr": "127.0.0.1",
+                "local_port": str(local_port),
+                "node_id": node_id,
+                "dataEncrypt": bool(body.get("encrypt", True)),
+                "dataGzip": bool(body.get("compress", True)),
+                "domain_bind": "",
+                "autoTls": "false",
+                "forceHttps": False,
+                "proxyProtocolVersion": False,
+                "custom": "",
+            }
+            remote = body.get("remote_port")
+            if remote not in (None, ""):
+                try:
+                    params["remote_port"] = int(remote)
+                except (TypeError, ValueError):
+                    raise CoreError("web.error.bad_request") from None
+
+            from openfrp.tunnel_manager import create_tunnel
+            message = create_tunnel(auth, params)
+            if message is None:
+                raise CoreError("web.openfrp.create_failed")
+            self._json({"ok": True, "message": message})
+
+        def _openfrp_download(self) -> None:
+            """下载 / 更新 OpenFrp 版 frpc。这东西不在原版 frp 的仓库里。"""
+            from openfrp.tunnel_manager import download_frpc
+            label = t("web.openfrp.downloading")
+            start_job(label)
+            try:
+                path = download_frpc(project_dir)
+            finally:
+                finish_job(label)
+            if not path:
+                raise CoreError("web.openfrp.download_failed")
+            self._json({"ok": True, "path": path,
+                        "size": os.path.getsize(path),
+                        "message": t("web.openfrp.downloaded")})
+
         # -- 全局设置 ---------------------------------------------------
 
         def _settings_view(self) -> dict:
@@ -1335,6 +1512,8 @@ def _make_handler(manager: RuntimeManager, servers_dir: str, token: str,
                               for code, name in available_languages()],
                 "startup": {"enabled": startup_state,
                             "supported": is_supported()},
+                "restore_running": (config.get("web") or {}).get(
+                    "restore_running", True) is not False,
             }
 
         def _settings_save(self, body: dict) -> None:
@@ -1367,6 +1546,12 @@ def _make_handler(manager: RuntimeManager, servers_dir: str, token: str,
                 if target:
                     self._instance_dir(target)   # 不存在的实例名直接报错
                 config["auto_start_server"] = target
+
+            if "restore_running" in body:
+                web = config.get("web")
+                web = dict(web) if isinstance(web, dict) else {}
+                web["restore_running"] = bool(body.get("restore_running"))
+                config["web"] = web
 
             save_config(config, project_dir)
 
@@ -1471,6 +1656,18 @@ def _make_handler(manager: RuntimeManager, servers_dir: str, token: str,
 
             if path == "/api/jars/download":
                 return self._jar_download(body)
+
+            if path == "/api/openfrp/tunnels":
+                return self._openfrp_tunnels(body)
+
+            if path == "/api/openfrp/nodes":
+                return self._openfrp_nodes(body)
+
+            if path == "/api/openfrp/create":
+                return self._openfrp_create(body)
+
+            if path == "/api/openfrp/download":
+                return self._openfrp_download()
 
             if path == "/api/file/write":
                 root = self._instance_dir(name)
@@ -1972,6 +2169,10 @@ def start_background(project_dir: str, host: Optional[str] = None,
             url=f"http://{shown_host}:{httpd.server_address[1]}/?token={token}"))
     if bind_host in ("0.0.0.0", "::"):
         print(t("web.cli.external_warning"))
+    # 后台面板也负责把上次还在跑的实例拉回来；已经拉过的进程里这一调用是空转
+    restored = restore_instances(project_dir)
+    if restored:
+        print(t("web.cli.restored", names="\u3001".join(restored)))
     return httpd
 
 
@@ -2013,12 +2214,25 @@ def run_web(project_dir: str, host: Optional[str] = None,
     if bind_host in ("0.0.0.0", "::"):
         print(t("web.cli.external_warning"))
     print()
+    # 先把上次还在跑的实例拉回来，再进事件循环：拉的过程会往 SSE 推日志，
+    # 这一步放在 serve_forever 前面，用户一打开页面就能看到它们已经在启动了
+    restored = restore_instances(project_dir)
+    if restored:
+        print(t("web.cli.restored", names="\u3001".join(restored)))
+        print()
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:
         print()
     finally:
         httpd.server_close()
+        # 从终端启动的面板退出时，把它拉起来的实例也停掉：不退的话它们会
+        # 成为没人管得到的孤儿进程（stdin 在我们这条管道里），下次启动只能
+        # 当“还活着”跳过。记录会留着，下次启动重新拉起。
+        try:
+            shared_manager(project_dir).stop_all(timeout=10)
+        except Exception:  # noqa: BLE001
+            pass
     return True
 
 

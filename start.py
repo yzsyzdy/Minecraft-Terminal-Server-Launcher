@@ -359,6 +359,10 @@ def _auto_start_instances(servers_dir: str, project_dir: str, config: dict) -> N
         path = entry["_path"]
         name = entry.get("name") or os.path.basename(os.path.normpath(path))
         cfg = load_server_config(path)
+        # 恢复上次在跑的实例可能已经先它一步拉起来了，别又启一遍
+        current = manager.state_of(name)
+        if current and current.get("state") != "stopped":
+            continue
         try:
             manager.start(cfg, path)
             started.append(name)
@@ -452,6 +456,15 @@ def main():
 
     # 实例自己的「随软件启动」：后台拉起，面板里能看能管
     _auto_start_instances(servers_dir, project_dir, config)
+
+    # 上次退出时还在跑的实例也拉回来。两个入口（这里和 start_background）
+    # 都可能调到，RuntimeManager 只管第一次。
+    from web.server import restore_instances
+
+    restored = restore_instances(project_dir)
+    if restored:
+        print(t("web.cli.restored", names="\u3001".join(restored)))
+        print()
 
     # 如果配置了自动启动的服务器，直接跳过主菜单
     selected = None

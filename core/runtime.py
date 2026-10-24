@@ -24,6 +24,7 @@ from typing import Callable, Optional
 from .errors import CoreError
 from .java import resolve_java_for_launch
 from .report import Reporter, as_reporter
+from . import runstate
 from server_launcher import build_jvm_command, spawn_priority_process, PRIORITY_CHOICES
 from server_manager import (
     KIND_GENERIC,
@@ -688,6 +689,7 @@ class RuntimeManager:
         self._runtimes: dict[str, ServerRuntime] = {}
         self._subs: list[OnEvent] = []
         self._lock = threading.RLock()
+        self._restored = False
 
     # -- 事件流 ------------------------------------------------------------
 
@@ -744,11 +746,46 @@ class RuntimeManager:
             # 没人管得住——同一台服被拉起两次，端口和内存都要打架。
             self._runtimes[name] = runtime
             runtime.start()
+        # 记住「这台是我拉起来的」：软件重启后据此再拉一遍。写在锁外，
+        # 发盘失败不该把一次成功的启动变成异常
+        runstate.remember(self.project_dir, name,
+                          (runtime.snapshot() or {}).get("pid"))
         return runtime
 
     def start_by_name(self, servers_dir: str, name: str) -> ServerRuntime:
         server_cfg, server_dir = self.find(servers_dir, name)
         return self.start(server_cfg, server_dir)
+
+    def restore_last(self, servers_dir: str) -> list[str]:
+        """把上次退出时还在跑的实例重新拉起来。返回真正拉起来的实例名。
+
+        每个进程只干一次：面板可能既是前台起的、又被 start.py 顺手拉了一把，
+        两个入口都调到这里的话，不拦一下就会重复启动。
+
+        跳过两种：已经在自己名下的（比如同时勾了「随软件启动」），和 pid 还
+        活着的——后者说明上一轮的子进程没被带走，我们没有它的 stdin，再拉一遍
+        只会撞端口。
+        """
+        if self._restored:
+            return []
+        self._restored = True
+
+        started: list[str] = []
+        for name, info in runstate.load(self.project_dir).items():
+            current = self._runtimes.get(name)
+            if current is not None and current.state() != STATE_STOPPED:
+                continue
+            if runstate.pid_alive((info or {}).get("pid")):
+                runstate.forget(self.project_dir, name)
+                continue
+            try:
+                self.start_by_name(servers_dir, name)
+                started.append(name)
+            except Exception:  # noqa: BLE001
+                # 实例被删了、jar 没了、Java 环境变了……任何一种都不该让
+                # 剩下的实例跟着不启动，也不该把死记录一直留在那里
+                runstate.forget(self.project_dir, name)
+        return started
 
     def get(self, name: str) -> Optional[ServerRuntime]:
         return self._runtimes.get(name)
@@ -761,6 +798,8 @@ class RuntimeManager:
 
     def stop(self, name: str) -> None:
         self.require(name).stop()
+        # 用户主动停的，不该在下次启动时被拉回来
+        runstate.forget(self.project_dir, name)
 
     def send(self, name: str, command: str) -> None:
         self.require(name).send(command)
@@ -775,10 +814,16 @@ class RuntimeManager:
                 if rt.state() != STATE_STOPPED]
 
     def stop_all(self, timeout: float = 20.0) -> None:
-        """把所有还在跑的实例停掉。进程退出时收尾用。"""
+        """把所有还在跑的实例停掉。进程退出时收尾用。
+
+        故意不走 self.stop()：那会把实例从恢复记录里抹掉，而软件退出前还在
+        跑的实例，正是下次启动该拉回来的那批。
+        """
         for name in self.running():
             try:
-                self.stop(name)
+                runtime = self._runtimes.get(name)
+                if runtime is not None:
+                    runtime.stop(timeout)
             except CoreError:
                 pass
             except Exception:  # noqa: BLE001

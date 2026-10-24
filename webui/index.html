@@ -462,6 +462,27 @@
   label.check{display:flex;align-items:center;gap:8px;
               font-size:var(--t-ui);cursor:pointer}
 
+  /* OpenFrp 隧道行 */
+  #oftunnels{margin-top:var(--s2)}
+  .ofrow{display:flex;align-items:center;gap:var(--s2);padding:7px 2px;
+         border-bottom:1px solid var(--line);font-size:var(--t-meta)}
+  .ofrow .ofid{flex:0 0 auto;min-width:3.6em;color:var(--dim);
+               font:400 var(--t-label)/1 var(--mono)}
+  .ofrow .ofname{font-weight:600;overflow:hidden;text-overflow:ellipsis;
+                 white-space:nowrap}
+  .ofrow .oftag{flex:0 0 auto;color:var(--dim);
+                font:400 var(--t-label)/1 var(--mono)}
+  .ofrow .ofremote{flex:1;min-width:0;color:var(--dim);
+                   font:400 11.5px/1.4 var(--mono);
+                   overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .ofrow .ofbound{flex:0 0 auto;color:var(--brand-text);
+                  font:400 var(--t-label)/1 var(--mono)}
+  .ofdot{width:6px;height:6px;flex:0 0 auto;border-radius:50%;
+         background:var(--faint)}
+  .ofdot.on{background:var(--ok)}
+  .ofmeta{padding:6px 2px;color:var(--dim);
+          font:400 var(--t-label)/1 var(--mono)}
+
   /* 不知道总量的任务：一条来回扫的进度条 */
   #jobfill.indet{width:32%;animation:jobslide 1.2s ease-in-out infinite}
   @keyframes jobslide{
@@ -921,7 +942,11 @@
       <span style="flex:1"></span>
       <button class="ghost" id="frpclose">✕</button>
     </div>
-    <div class="dbody">
+    <div class="dtabs">
+      <button class="tab on" id="frptab-frp"></button>
+      <button class="tab" id="frptab-openfrp"></button>
+    </div>
+    <div class="dbody" id="frppane-frp">
       <div class="drow" style="align-items:center">
         <span class="hint" id="frpstatus" style="margin:0"></span>
         <span style="flex:1"></span>
@@ -998,6 +1023,74 @@
         <button class="primary" id="frpadd"></button>
       </div>
     </div>
+
+    <div class="dbody" id="frppane-openfrp" hidden>
+      <div class="hint" id="of-hint"></div>
+      <div class="drow">
+        <div class="field" style="flex:2">
+          <label id="l-of-token"></label>
+          <input id="oftoken" autocomplete="off" spellcheck="false">
+        </div>
+        <div style="display:flex;align-items:flex-end">
+          <button class="primary" id="ofload"></button>
+        </div>
+      </div>
+      <div id="oftunnels"></div>
+
+      <div class="drow" style="margin-top:14px">
+        <b id="l-of-client" style="font-size:13px"></b>
+      </div>
+      <div class="drow" style="align-items:center">
+        <span class="hint" id="of-client" style="margin:0"></span>
+        <span style="flex:1"></span>
+        <button id="ofdownload"></button>
+      </div>
+
+      <div class="drow" style="margin-top:14px">
+        <b id="l-of-create" style="font-size:13px"></b>
+      </div>
+      <div class="drow">
+        <div class="field" style="flex:2">
+          <label id="l-of-auth"></label>
+          <input id="ofauth" autocomplete="off" spellcheck="false">
+        </div>
+        <div style="display:flex;align-items:flex-end">
+          <button id="ofnodes"></button>
+        </div>
+      </div>
+      <div class="drow">
+        <div class="field">
+          <label id="l-of-node"></label>
+          <select id="ofnode"></select>
+        </div>
+        <div class="field">
+          <label id="l-of-name"></label>
+          <input id="ofname" placeholder="mc">
+        </div>
+      </div>
+      <div class="drow">
+        <div class="field">
+          <label id="l-of-local"></label>
+          <input id="oflocal" value="25565">
+        </div>
+        <div class="field">
+          <label id="l-of-remote"></label>
+          <input id="ofremote">
+        </div>
+      </div>
+      <div class="drow" style="align-items:center;gap:18px">
+        <label class="check">
+          <input type="checkbox" id="ofencrypt" checked>
+          <span id="l-of-encrypt"></span>
+        </label>
+        <label class="check">
+          <input type="checkbox" id="ofcompress" checked>
+          <span id="l-of-compress"></span>
+        </label>
+        <span style="flex:1"></span>
+        <button class="primary" id="ofcreate"></button>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -1068,6 +1161,13 @@
           <select id="cfgauto"></select>
         </div>
       </div>
+      <div class="drow">
+        <label class="check">
+          <input type="checkbox" id="cfgrestore">
+          <span id="l-cfgrestore"></span>
+        </label>
+      </div>
+      <div class="hint" id="cfgrestore-hint"></div>
       <div class="drow">
         <label class="check">
           <input type="checkbox" id="cfgstartup">
@@ -1411,6 +1511,25 @@ function applyStrings() {
   $("frpupload").textContent = strings["web.frp.upload"] || "";
   renderFrpManual();
 
+  // OpenFrp
+  $("frptab-frp").textContent = "frp";
+  $("frptab-openfrp").textContent = strings["web.openfrp.tab"] || "OpenFrp";
+  $("of-hint").textContent = strings["web.openfrp.hint"] || "";
+  $("l-of-token").textContent = strings["web.openfrp.token"] || "";
+  $("ofload").textContent = strings["web.openfrp.load"] || "";
+  $("l-of-client").textContent = strings["web.openfrp.frpc"] || "";
+  $("ofdownload").textContent = strings["web.openfrp.download"] || "";
+  $("l-of-create").textContent = strings["web.openfrp.create_title"] || "";
+  $("l-of-auth").textContent = strings["web.openfrp.auth"] || "";
+  $("ofnodes").textContent = strings["web.openfrp.nodes"] || "";
+  $("l-of-node").textContent = strings["web.openfrp.node"] || "";
+  $("l-of-name").textContent = strings["web.openfrp.name"] || "";
+  $("l-of-local").textContent = strings["web.openfrp.local_port"] || "";
+  $("l-of-remote").textContent = strings["web.openfrp.remote_port"] || "";
+  $("l-of-encrypt").textContent = strings["web.openfrp.encrypt"] || "";
+  $("l-of-compress").textContent = strings["web.openfrp.compress"] || "";
+  $("ofcreate").textContent = strings["web.openfrp.create"] || "";
+
   // 内容（插件 / 模组）
   $("tab-jars").textContent = strings["web.jars.tab"] || "Add-ons";
   $("jsearch").textContent = strings["web.jars.search"] || "";
@@ -1428,6 +1547,8 @@ function applyStrings() {
   $("l-cfgauto").textContent = strings["web.settings.auto_start_server"] || "";
   $("l-cfgstartup").textContent = strings["web.settings.startup"] || "";
   $("cfgstartup-hint").textContent = strings["web.settings.startup_hint"] || "";
+  $("l-cfgrestore").textContent = strings["web.settings.restore"] || "";
+  $("cfgrestore-hint").textContent = strings["web.settings.restore_hint"] || "";
   $("cfgcheck").textContent = strings["web.settings.update_check"] || "";
   $("cfgsave").textContent = strings["web.files.save"] || "";
   $("expopen").textContent = strings["web.export.title"] || "";
@@ -2090,6 +2211,7 @@ function cfgFill(data) {
   $("cfgstartup").checked = !!startup.enabled;
   $("cfgstartup").disabled = !startup.supported;
   $("l-cfgstartup").parentElement.style.opacity = startup.supported ? "1" : "0.45";
+  $("cfgrestore").checked = data.restore_running !== false;
 }
 
 async function saveConfig() {
@@ -2097,6 +2219,7 @@ async function saveConfig() {
     language: $("cfglang").value,
     download_threads: Number($("cfgthreads").value) || 16,
     auto_start_server: $("cfgauto").value,
+    restore_running: $("cfgrestore").checked,
   };
   // 只在勾选状态真的变了时才提交：非 Windows 上提交这一项会直接报错，
   // 而用户可能只是想改个语言
@@ -2132,6 +2255,187 @@ async function checkUpdate() {
     fail(err);
   } finally {
     $("cfgcheck").disabled = false;
+  }
+}
+
+/* ------------------------------------------------------------- OpenFrp */
+
+let ofNodes = [];
+
+function frpTab(name) {
+  $("frppane-frp").hidden = name !== "frp";
+  $("frppane-openfrp").hidden = name !== "openfrp";
+  $("frptab-frp").className = "tab" + (name === "frp" ? " on" : "");
+  $("frptab-openfrp").className = "tab" + (name === "openfrp" ? " on" : "");
+  if (name === "openfrp") ofShow();
+}
+
+async function ofShow() {
+  try {
+    const data = await apiOk("/api/openfrp/frpc");
+    ofRenderFrpc(data.frpc || {});
+  } catch (err) {
+    fail(err);
+  }
+}
+
+function ofRenderFrpc(frpc) {
+  const box = $("of-client");
+  if (frpc.installed) {
+    box.textContent = fmt(strings["web.openfrp.frpc_ready"] || "", {
+      path: frpc.path || "",
+      size: ((Number(frpc.size) || 0) / 1024 / 1024).toFixed(1),
+    });
+  } else {
+    box.textContent = strings["web.openfrp.frpc_missing"] || "";
+  }
+}
+
+async function ofLoadTunnels() {
+  const token = ($("oftoken").value || "").trim();
+  if (!token) {
+    toast(strings["web.openfrp.token_required"] || "", true);
+    return;
+  }
+  const box = $("oftunnels");
+  box.innerHTML = '<div class="fempty">' +
+    esc(strings["web.openfrp.fetching"] || "") + "</div>";
+  try {
+    const data = await apiOk("/api/openfrp/tunnels", { token: token });
+    ofRenderTunnels(data.tunnels || []);
+  } catch (err) {
+    box.innerHTML = "";
+    fail(err);
+  }
+}
+
+function ofRenderTunnels(rows) {
+  const box = $("oftunnels");
+  box.innerHTML = "";
+  if (!rows.length) {
+    box.innerHTML = '<div class="fempty">' +
+      esc(strings["web.openfrp.empty"] || "") + "</div>";
+    return;
+  }
+  rows.forEach((row) => {
+    const el = document.createElement("div");
+    el.className = "ofrow";
+
+    const dot = document.createElement("span");
+    dot.className = "ofdot" + (row.online ? " on" : "");
+
+    const id = document.createElement("span");
+    id.className = "ofid";
+    id.textContent = "#" + row.id;
+
+    const name = document.createElement("span");
+    name.className = "ofname";
+    name.textContent = row.name || "?";
+    name.title = row.name || "";
+
+    const tag = document.createElement("span");
+    tag.className = "oftag";
+    tag.textContent = row.type || "tcp";
+
+    const remote = document.createElement("span");
+    remote.className = "ofremote";
+    remote.textContent = row.remote || "";
+    remote.title = (row.node || "") + " · " + (row.remote || "");
+
+    el.appendChild(dot);
+    el.appendChild(id);
+    el.appendChild(name);
+    el.appendChild(tag);
+    el.appendChild(remote);
+    if (row.bound_to) {
+      const bound = document.createElement("span");
+      bound.className = "ofbound";
+      bound.textContent = fmt(strings["web.openfrp.bound"] || "",
+                              { name: row.bound_to });
+      el.appendChild(bound);
+    }
+    box.appendChild(el);
+  });
+
+  const total = document.createElement("div");
+  total.className = "ofmeta";
+  total.textContent = fmt(strings["web.openfrp.total"] || "",
+                          { count: rows.length });
+  box.appendChild(total);
+}
+
+async function ofLoadNodes() {
+  const auth = ($("ofauth").value || "").trim();
+  if (!auth) {
+    toast(strings["web.openfrp.auth_required"] || "", true);
+    return;
+  }
+  const select = $("ofnode");
+  select.innerHTML = "";
+  try {
+    const data = await apiOk("/api/openfrp/nodes", { auth: auth });
+    ofNodes = data.nodes || [];
+    const usable = ofNodes.filter(n => n.usable);
+    if (!usable.length) {
+      toast(strings["web.openfrp.no_nodes"] || "", true);
+      return;
+    }
+    usable.forEach((node) => {
+      const opt = document.createElement("option");
+      opt.value = String(node.id);
+      const region = { 1: "中国大陆", 2: "港澳台", 3: "海外" }[node.classify] || "?";
+      opt.textContent = node.name + " (" + region + ")" +
+        (node.need_realname ? " · " + (strings["web.openfrp.realname"] || "") : "");
+      select.appendChild(opt);
+    });
+  } catch (err) {
+    fail(err);
+  }
+}
+
+async function ofCreate() {
+  const auth = ($("ofauth").value || "").trim();
+  if (!auth) {
+    toast(strings["web.openfrp.auth_required"] || "", true);
+    return;
+  }
+  const nodeId = Number($("ofnode").value || 0);
+  if (!nodeId) {
+    toast(strings["web.openfrp.no_nodes"] || "", true);
+    return;
+  }
+  const body = {
+    auth: auth,
+    node_id: nodeId,
+    name: ($("ofname").value || "").trim(),
+    local_port: Number($("oflocal").value || 25565),
+    remote_port: ($("ofremote").value || "").trim(),
+    encrypt: $("ofencrypt").checked,
+    compress: $("ofcompress").checked,
+  };
+  $("ofcreate").disabled = true;
+  try {
+    const data = await apiOk("/api/openfrp/create", body);
+    toast(fmt(strings["web.openfrp.created"] || "", { msg: data.message || "" }));
+    // 建完直接刷一遍列表，用户能马上看到新建的那条
+    if (($("oftoken").value || "").trim()) ofLoadTunnels();
+  } catch (err) {
+    fail(err);
+  } finally {
+    $("ofcreate").disabled = false;
+  }
+}
+
+async function ofDownload() {
+  $("ofdownload").disabled = true;
+  try {
+    const data = await apiOk("/api/openfrp/download");
+    toast(data.message || strings["web.openfrp.downloaded"] || "");
+    ofRenderFrpc({ installed: true, path: data.path, size: data.size });
+  } catch (err) {
+    fail(err);
+  } finally {
+    $("ofdownload").disabled = false;
   }
 }
 
@@ -3173,6 +3477,7 @@ async function loadFrp() {
 
 function openFrp() {
   $("frpmodal").hidden = false;
+  frpTab("frp");
   frpToggleTypeFields();
   loadFrp();
 }
@@ -3390,6 +3695,12 @@ $("setsave").onclick = saveSettings;
 
 $("frpbtn").onclick = openFrp;
 $("frpclose").onclick = closeFrp;
+$("frptab-frp").onclick = () => frpTab("frp");
+$("frptab-openfrp").onclick = () => frpTab("openfrp");
+$("ofload").onclick = ofLoadTunnels;
+$("ofnodes").onclick = ofLoadNodes;
+$("ofcreate").onclick = ofCreate;
+$("ofdownload").onclick = ofDownload;
 $("frpsave").onclick = frpSave;
 $("frpstart").onclick = frpStart;
 $("frpstop").onclick = frpStop;

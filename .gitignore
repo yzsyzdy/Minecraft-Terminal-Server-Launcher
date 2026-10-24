@@ -59,3 +59,7 @@ _*.txt
 
 # AI 助手的操作审计日志（本机行为，含实例名与改动内容）
 .mstl-ai-audit.log
+
+# 上次退出时还在跑的实例名单（本机运行时状态）
+.mstl-running.json
+.mstl-running.json.tmp

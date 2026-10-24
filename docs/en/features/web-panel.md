@@ -26,6 +26,8 @@ The panel revolves around one loop — see instances → start → watch the con
 - **New instance**: download a server core from the MSL mirror, use a local jar, import an existing server zip archive, or create a **generic instance**
 - **Instance settings**: memory, extra JVM arguments, process priority, **start with the app**, a generic instance's launch spec, and the OpenFrp tunnel binding
 - **frp tunneling**: edit `frpc.toml`, add and remove tunnels, start and stop frpc, download or update the frpc binary (with a manual upload fallback)
+- **OpenFrp**: the second tab of the same dialog — list your account's tunnels, create a new one, download the OpenFrp build of frpc
+- **Restore after a restart**: instances that were running at the last exit come back on the next launch (can be turned off in settings)
 - **Visible progress**: downloading a server core, downloading frpc and uploading files all show a progress bar along the bottom — a tens-of-megabytes core no longer means staring at a spinning button
 - **Add-ons**: search, install, enable/disable and delete plugins and mods from the panel (see *Add-ons* below)
 - **Export**: pack an instance into a zip by category and hand it to the browser
@@ -153,7 +155,28 @@ The panel only touches those keys; everything else already in `frpc.toml` is rea
 
 The upload fallback sniffs the **content**, not the filename (browsers rename things): a zip / tar.gz gets unpacked, a bare binary is taken as-is. It does check that what comes out **looks like an executable for this platform** — grabbing the wrong platform's archive (say a linux tarball on Windows) is refused on the spot and the half-written file is removed, rather than installing an `frpc.exe` that dies with a format error on first run.
 
-> The panel manages **vanilla frp**. OpenFrp's cloud tunnels use a different API, and the panel only covers the small "bind it to an instance" step: fill in the user token and tunnel id under instance settings, and decide whether to raise the tunnel with the instance.
+> The panel manages **vanilla frp**. OpenFrp's cloud tunnels use a different API.
+
+### OpenFrp
+
+The second tab of the same dialog. OpenFrp has two credentials and they are not interchangeable, so the panel keeps them apart:
+
+- **User token**: only used to list the tunnels on your account; fill it and press *Load tunnels*
+- **Authorization**: copied whole from your OpenFrp profile page; needed to load nodes and create tunnels
+- **New tunnel**: pick a node (only usable TCP nodes are listed, real-name ones are flagged), then name, local port, remote port (leave empty to let the server allocate), encryption and compression
+- **Client**: the OpenFrp build of frpc is not in the vanilla frp repository, so the panel offers its own *Download / update frpc*
+
+Each tunnel row shows which instance it is already bound to (the `proxy_id` from instance settings), so you do not have to match numbers by hand.
+
+Neither credential is written to disk; a page reload means typing them again.
+
+## Restore after a restart
+
+Instances that were running when the app last exited are started again on the next launch.
+
+- The record is "running at exit", not "ran at some point" — what you stopped by hand stays stopped
+- If the old child process is still alive (common after a forced kill), that instance is skipped and its record dropped, otherwise two servers would fight over one port
+- The switch is `⚙` in the top bar → *Restore running instances after a restart*, on by default
 
 ## Signing in
 
@@ -251,6 +274,11 @@ The entire contract between the front end and the back end:
 | `POST` | `/api/settings` | Updates those; `language` takes effect immediately |
 | `GET` | `/api/update` | Compares against GitHub Releases |
 | `POST` | `/api/eula` | `{"name": "..."}`, writes `eula=true` |
+| `GET` | `/api/openfrp/frpc` | Whether the OpenFrp build of frpc is present |
+| `POST` | `/api/openfrp/tunnels` | `{"token"}` — lists tunnels, marking bound instances |
+| `POST` | `/api/openfrp/nodes` | `{"auth"}` — lists usable nodes |
+| `POST` | `/api/openfrp/create` | Create a tunnel: `{"auth", "node_id", "name", "local_port", "remote_port"?, "encrypt"?, "compress"?}` |
+| `POST` | `/api/openfrp/download` | Download / update the OpenFrp frpc |
 
 Conventions:
 
@@ -261,7 +289,7 @@ Conventions:
 
 ## Known limits
 
-This is the closed loop plus a few everyday panels, not a full operations panel. Not yet done: restoring "which servers were running" after a restart, and managing OpenFrp cloud tunnels from the panel (creating and deleting those still goes through the terminal menu).
+This release moves the everyday work into the panel; what is left are deliberate limits: instances can be created but not deleted (remove the folder under `servers/` by hand), the file manager has no bulk operations, extraction covers zip and tar only (7z / rar need an external tool), there is no disk-usage column and no resumable transfers.
 
 The file manager keeps deliberate limits too: one file at a time (no multi-select or bulk delete), **empty folders cannot be uploaded** (the directory picker never reports them), extraction covers zip and tar only (7z / rar would need an external tool), there is no disk-usage column and no resumable transfers.
 
