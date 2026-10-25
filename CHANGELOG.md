@@ -23,7 +23,9 @@
   新增 `/api/file/preview` 接口（仅图片、inline、nosniff）。
 - **面板图标换成一套黑白图标**：设置按钮、YAML、JSON、jar（Java）、图片与「通用文件」各有一枚；
   原图是纯黑白，构建时转成蒙版交给 CSS 着色，深色主题自动反色，不必维护两套图。
-  来源与许可记在 `webui/icons/CREDITS.md`（Apache 2.0 / MIT，原始归属待补）。
+  来源与许可记在 `webui/icons/CREDITS.md`：AppIcon Forge（MIT）生成，底层图标集为
+  Material Icons / Material Symbols / Material Design Icons / Remix Icon（Apache 2.0）
+  与 Fluent UI System Icons（MIT）。
   新增只读路由 `/icons/<name>.png`（只认单层 .png，挡住穿越）。
 
 ## [1.1.40] - 2026-10-23
