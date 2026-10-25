@@ -63,8 +63,12 @@
     /* 圆角三档 */
     --r-sm:4px; --r:6px; --r-lg:10px;
 
-    /* 字号：11 标注 / 12 次文 / 13 正文 / 15 标题 */
-    --t-label:11px; --t-meta:12px; --t-ui:13px; --t-title:15px;
+    /* 字号：11 标注 / 12 次文 / 13 正文 / 15 标题。
+       乘 --ui-scale：设置里的「界面字号」直接改这个变量，全站跟着走。 */
+    --ui-scale:1;
+    --btn-scale:1;
+    --t-label:calc(11px * var(--ui-scale)); --t-meta:calc(12px * var(--ui-scale));
+    --t-ui:calc(13px * var(--ui-scale)); --t-title:calc(15px * var(--ui-scale));
 
     --font:"Microsoft YaHei UI","Segoe UI",system-ui,-apple-system,sans-serif;
     --mono:"Cascadia Code",Consolas,"DejaVu Sans Mono",monospace;
@@ -89,6 +93,15 @@
     --toast-err-bg:#8c1f28; --toast-err-fg:#ffffff;
     --shadow-float:0 1px 2px rgba(0,0,0,.5),0 12px 32px rgba(0,0,0,.55);
   }
+  /* 界面缩放：设置里的「字号 / 按钮大小」写在这两个属性上。
+     属性放在 <html> 上，刷新后由 JS 先读 config 再写入，避免整页 zoom
+     那种「连图片一起放大」的副作用。 */
+  html[data-uifont="s"]{--ui-scale:.94}
+  html[data-uifont="l"]{--ui-scale:1.08}
+  html[data-uifont="xl"]{--ui-scale:1.18}
+  html[data-uibtn="l"]{--btn-scale:1.2}
+  html[data-uibtn="xl"]{--btn-scale:1.42}
+
   *{box-sizing:border-box}
   /* 作者样式优先于浏览器默认样式，所以下面那些 display:flex 会把 UA 的
      [hidden]{display:none} 顶掉——被隐藏的面板反而一直看得见。这条兜住它。 */
@@ -110,7 +123,7 @@
   .sp{flex:1}
 
   /* ------------------------------------------------------------------ 顶栏 */
-  header{flex:0 0 auto;height:48px;padding:0 var(--s4);
+  header{flex:0 0 auto;min-height:48px;padding:6px var(--s4);
          display:flex;align-items:center;gap:var(--s2);
          background:var(--surface);border-bottom:1px solid var(--line)}
   header b{font:700 var(--t-ui)/1 var(--mono);letter-spacing:.09em;
@@ -135,10 +148,12 @@
   .dot.offline{background:var(--err);box-shadow:0 0 0 3px var(--err-soft)}
 
   /* ------------------------------------------------------------ 按钮三档 */
+  /* 尺寸全部乘 --btn-scale：默认已经比旧版大一圈（30px 高），设置里还能再放大。 */
   button{display:inline-flex;align-items:center;justify-content:center;gap:6px;
-         height:28px;padding:0 10px;border-radius:var(--r);
+         height:calc(30px * var(--btn-scale));
+         padding:0 calc(12px * var(--btn-scale));border-radius:var(--r);
          border:1px solid var(--line-strong);background:var(--surface);
-         color:var(--fg);font:500 var(--t-meta)/1 var(--font);
+         color:var(--fg);font:500 calc(var(--t-meta) * var(--btn-scale))/1 var(--font);
          white-space:nowrap;cursor:pointer;
          transition:background .12s,border-color .12s,color .12s}
   button:hover:not(:disabled){background:var(--hover);border-color:var(--faint)}
@@ -152,7 +167,8 @@
 
   /* 图标按钮：平时不占视觉重量，悬停才浮出来 */
   button.ghost{border-color:transparent;background:transparent;
-               color:var(--dim);width:28px;padding:0;font-size:13px}
+               color:var(--dim);width:calc(30px * var(--btn-scale));padding:0;
+               font-size:calc(13px * var(--btn-scale))}
   button.ghost:hover:not(:disabled){background:var(--hover);color:var(--fg);
                                     border-color:transparent}
 
@@ -195,9 +211,10 @@
         color:var(--dim);
         overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .item > .row:last-child{justify-content:flex-start;gap:6px}
-  .item > .row:last-child button{height:24px;padding:0 9px;
+  .item > .row:last-child button{height:calc(26px * var(--btn-scale));
+        padding:0 calc(10px * var(--btn-scale));
         border-color:var(--line-strong);background:transparent;
-        color:var(--dim);font-size:var(--t-label)}
+        color:var(--dim);font-size:calc(var(--t-label) * var(--btn-scale))}
   .item > .row:last-child button:hover:not(:disabled){background:var(--hover);
         border-color:var(--faint);color:var(--fg)}
   .item > .row:last-child button.primary,
@@ -330,7 +347,7 @@
   /* ---------------------------------------------------------------- 对话框 */
   /* 遮罩统一：eulamodal / expmodal / cfgmodal 是后来加的，漏在这里的话
      它们打开时既没有半透明遮罩、也不居中。以后再加对话框记得补 id。 */
-  #modal,#setmodal,#frpmodal,#eulamodal,#expmodal,#cfgmodal{
+  #modal,#setmodal,#frpmodal,#eulamodal,#expmodal,#cfgmodal,#imgmodal,#askmodal{
         position:fixed;inset:0;z-index:20;display:flex;
         align-items:center;justify-content:center;padding:var(--s4);
         background:rgba(31,36,48,.32);
@@ -578,6 +595,8 @@
         <span class="sp" style="flex:1"></span>
         <button id="fnewfile"></button>
         <button id="fnewdir"></button>
+        <button id="fpaste" disabled></button>
+        <button id="fcompress"></button>
         <button id="fupload"></button>
         <button id="fuploaddir"></button>
         <button class="ghost" id="frefresh">⟳</button>
@@ -1134,6 +1153,40 @@
   <span id="jobpct"></span>
 </div>
 
+<div id="imgmodal" hidden>
+  <div class="dialog" style="width:min(1100px,96vw);max-height:92vh">
+    <div class="dhead">
+      <b id="imgtitle"></b>
+      <span style="flex:1"></span>
+      <button class="ghost" id="imgclose">✕</button>
+    </div>
+    <div class="dbody" style="display:flex;justify-content:center;overflow:auto">
+      <img id="imgview" alt="" style="max-width:100%;max-height:70vh;border-radius:var(--r);background:var(--sunken)">
+    </div>
+  </div>
+</div>
+
+<div id="askmodal" hidden>
+  <div class="dialog" style="width:min(460px,100%)">
+    <div class="dhead">
+      <b id="asktitle"></b>
+      <span style="flex:1"></span>
+      <button class="ghost" id="askclose">✕</button>
+    </div>
+    <div class="dbody">
+      <div class="hint" id="askhint"></div>
+      <div class="field" style="margin-top:10px">
+        <label id="l-askinput"></label>
+        <input id="askinput" spellcheck="false" autocomplete="off">
+      </div>
+      <div class="dactions">
+        <button id="askcancel"></button>
+        <button class="primary" id="askok"></button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <div id="toast" hidden></div>
 <div id="eulamodal" hidden>
   <div class="dialog" style="width:min(520px,100%)">
@@ -1189,6 +1242,26 @@
         </div>
       </div>
       <div class="hint" id="cfgthreads-hint"></div>
+      <div class="drow">
+        <div class="field">
+          <label id="l-cfgfont"></label>
+          <select id="cfgfont">
+            <option value="s"></option>
+            <option value="m"></option>
+            <option value="l"></option>
+            <option value="xl"></option>
+          </select>
+        </div>
+        <div class="field">
+          <label id="l-cfguibtn"></label>
+          <select id="cfguibtn">
+            <option value="m"></option>
+            <option value="l"></option>
+            <option value="xl"></option>
+          </select>
+        </div>
+      </div>
+      <div class="hint" id="cfgui-hint"></div>
       <div class="drow">
         <div class="field">
           <label id="l-cfgauto"></label>
@@ -1434,6 +1507,8 @@ function applyStrings() {
   $("fupload").textContent = strings["web.files.upload"] || "Upload";
   $("fuploaddir").textContent = strings["web.files.upload_folder"] || "Upload folder";
   $("frefresh").title = strings["web.files.refresh"] || "Refresh";
+  $("fpaste").textContent = strings["web.files.paste"] || "Paste";
+  $("fcompress").textContent = strings["web.files.compress"] || "Compress";
   $("esave").textContent = strings["web.files.save"] || "Save";
   $("ecancel").textContent = strings["web.files.cancel"] || "Cancel";
 
@@ -1585,6 +1660,17 @@ function applyStrings() {
   $("l-cfglang").textContent = strings["web.settings.language"] || "";
   $("l-cfgthreads").textContent = strings["web.settings.threads"] || "";
   $("cfgthreads-hint").textContent = strings["web.settings.threads_hint"] || "";
+  $("l-cfgfont").textContent = strings["web.settings.ui_font"] || "";
+  $("l-cfguibtn").textContent = strings["web.settings.ui_button"] || "";
+  $("cfgui-hint").textContent = strings["web.settings.ui_hint"] || "";
+  const uiNames = {
+    s: strings["web.settings.ui_s"] || "Small",
+    m: strings["web.settings.ui_m"] || "Normal",
+    l: strings["web.settings.ui_l"] || "Large",
+    xl: strings["web.settings.ui_xl"] || "Extra large",
+  };
+  [...$("cfgfont").options].forEach((opt) => { opt.textContent = uiNames[opt.value] || opt.value; });
+  [...$("cfguibtn").options].forEach((opt) => { opt.textContent = uiNames[opt.value] || opt.value; });
   $("l-cfgauto").textContent = strings["web.settings.auto_start_server"] || "";
   $("l-cfgstartup").textContent = strings["web.settings.startup"] || "";
   $("cfgstartup-hint").textContent = strings["web.settings.startup_hint"] || "";
@@ -1783,6 +1869,7 @@ function select(name) {
   if (tab === "files") loadFiles("");
   // 内容页也一样：换台服就该看到那台服装了些什么
   if (tab === "jars") jarsShow();
+  updatePasteButton();
 }
 
 /* ---------------------------------------------------------------- 指令 */
@@ -2256,15 +2343,23 @@ function cfgFill(data) {
   $("l-cfgstartup").parentElement.style.opacity = startup.supported ? "1" : "0.45";
   $("cfgrestore").checked = data.restore_running !== false;
   $("cfgprefer").checked = !!data.prefer_bmcl;
+  $("cfgfont").value = nearestScaleKey(FONT_SCALE_STEPS, data.ui_font_scale);
+  $("cfguibtn").value = nearestScaleKey(BTN_SCALE_STEPS, data.ui_button_scale);
 }
 
 async function saveConfig() {
+  const fontKey = $("cfgfont").value;
+  const btnKey = $("cfguibtn").value;
+  const fontScale = (FONT_SCALE_STEPS.find((s) => s[0] === fontKey) || ["m", 1])[1];
+  const btnScale = (BTN_SCALE_STEPS.find((s) => s[0] === btnKey) || ["m", 1])[1];
   const body = {
     language: $("cfglang").value,
     download_threads: Number($("cfgthreads").value) || 16,
     auto_start_server: $("cfgauto").value,
     restore_running: $("cfgrestore").checked,
     prefer_bmcl: $("cfgprefer").checked,
+    ui_font_scale: fontScale,
+    ui_button_scale: btnScale,
   };
   // 只在勾选状态真的变了时才提交：非 Windows 上提交这一项会直接报错，
   // 而用户可能只是想改个语言
@@ -2273,6 +2368,7 @@ async function saveConfig() {
   try {
     const data = await apiOk("/api/settings", body);
     cfgState = data;
+    applyUiScale(data.ui_font_scale, data.ui_button_scale);
     toast(data.message || strings["web.settings.saved"] || "");
     cfgFill(data);
     refresh().catch(() => {});   // 语言可能换了，界面文案跟着走
@@ -2803,13 +2899,16 @@ function buildFileRow(entry, isUp) {
   nameBox.className = "fname" + (entry.dir ? " fdir" : "");
   const icon = document.createElement("span");
   icon.className = "fico";
-  icon.textContent = entry.dir ? "📁" : (entry.editable ? "📄" : "📦");
+  icon.textContent = entry.dir ? "📁"
+    : entry.image ? "🖼"
+    : (entry.editable ? "📄" : "📦");
   const label = document.createElement("span");
   label.textContent = entry.name;
   nameBox.appendChild(icon);
   nameBox.appendChild(label);
   nameBox.onclick = () => {
     if (entry.dir) loadFiles(entry.path);
+    else if (entry.image) previewImage(entry);
     else if (entry.editable) openEditor(entry.path);
     else downloadFile(entry);
   };
@@ -2832,6 +2931,10 @@ function buildFileRow(entry, isUp) {
   if (!isUp) {
     if (!entry.dir) {
       ops.appendChild(opButton("⭳", strings["web.files.download"], () => downloadFile(entry)));
+      if (entry.image) {
+        ops.appendChild(opButton("👁", strings["web.files.preview"] || "Preview",
+                                 () => previewImage(entry)));
+      }
       if (entry.archive) {
         ops.appendChild(opButton("⇲", strings["web.files.extract"], () => extractEntry(entry)));
       }
@@ -2839,6 +2942,12 @@ function buildFileRow(entry, isUp) {
         ops.appendChild(opButton("✎", strings["web.files.edit"], () => openEditor(entry.path)));
       }
     }
+    ops.appendChild(opButton("⧉", strings["web.files.copy"] || "Copy",
+                             () => setClipboard("copy", entry)));
+    ops.appendChild(opButton("✂", strings["web.files.cut"] || "Cut",
+                             () => setClipboard("move", entry)));
+    ops.appendChild(opButton("🗜", strings["web.files.compress"] || "Compress",
+                             () => compressEntry(entry)));
     ops.appendChild(opButton("⇄", strings["web.files.rename"], () => renameEntry(entry)));
     ops.appendChild(opButton("✕", strings["web.files.delete"], () => deleteEntry(entry)));
   }
@@ -2869,6 +2978,7 @@ async function loadFiles(path) {
     filesPath = data.path || "";
     filesParent = data.parent || "";
     renderFiles(data.entries || [], filesParent);
+    updatePasteButton();
   } catch (err) {
     if (mine !== filesSeq) return;
     fail(err);
@@ -3029,17 +3139,138 @@ async function uploadFolder(fileList) {
 }
 
 /* 在线解压：解到压缩包自己所在的目录，已存在的文件跳过不覆盖 */
-async function extractEntry(entry) {
+async function extractEntry(entry, password) {
   if (!selected) return;
-  const ask = fmt(strings["web.files.extract_confirm"] || "Extract {name}?",
-                  { name: entry.name });
-  if (!window.confirm(ask)) return;
+  if (password === undefined) {
+    const ask = fmt(strings["web.files.extract_confirm"] || "Extract {name}?",
+                    { name: entry.name });
+    if (!window.confirm(ask)) return;
+  }
   const label = fmt(strings["web.files.extracting"] || "{name}", { name: entry.name });
   showJob({ label: label, ratio: 0 });
   try {
     // 解压是同步 POST，进度条的收尾由服务端的 job 事件负责；这里只兜底
     const data = await apiOk("/api/file/extract",
-                             { name: selected, path: entry.path });
+                             { name: selected, path: entry.path,
+                               password: password || "" });
+    toast(data.message || "");
+    loadFiles();
+  } catch (err) {
+    // 加密包：服务端会回 web.error.archive_password，问一次密码再重试。
+    // 已经带密码还失败就不再追问，否则密码输错会无限弹窗。
+    if (err.key === "web.error.archive_password" && !password) {
+      const pwd = await askModal({
+        title: strings["web.files.password_title"] || "Password required",
+        hint: strings["web.files.password_hint"] || "",
+        label: strings["web.files.password"] || "Password",
+        value: "",
+        password: true,
+      });
+      if (pwd === null) return;
+      showJob({ label: label, ratio: 1, done: true });
+      return extractEntry(entry, pwd);
+    }
+    fail(err);
+  } finally {
+    showJob({ label: label, ratio: 1, done: true });
+  }
+}
+
+/* ------------------------------------------------ 剪切 / 复制 / 粘贴 */
+
+let fileClip = null;   // { op: "copy" | "move", path, name }
+
+function updatePasteButton() {
+  const btn = $("fpaste");
+  if (!btn) return;
+  btn.disabled = !fileClip || !selected;
+  btn.title = fileClip ? (fileClip.op === "move"
+    ? fmt(strings["web.files.clip_cut"] || "{name}", { name: fileClip.name })
+    : fmt(strings["web.files.clip_copy"] || "{name}", { name: fileClip.name })) : "";
+}
+
+function setClipboard(op, entry) {
+  fileClip = { op: op, path: entry.path, name: entry.name };
+  updatePasteButton();
+  toast(fmt(strings[op === "move" ? "web.files.clip_cut" : "web.files.clip_copy"]
+            || "{name}", { name: entry.name }));
+}
+
+async function pasteEntry() {
+  if (!selected || !fileClip) return;
+  const target = fileClip;
+  const send = (overwrite) => apiOk(
+    target.op === "move" ? "/api/file/move" : "/api/file/copy",
+    { name: selected, path: target.path, dest: filesPath, overwrite: !!overwrite });
+
+  try {
+    try {
+      await send(false);
+    } catch (err) {
+      // 同名文件：问一句再覆盖。剪切时覆盖等于「替换粘贴」。
+      if (err.key !== "web.error.already_exists") throw err;
+      const ask = fmt(strings["web.files.confirm_overwrite"]
+                      || "Overwrite {name}?", { name: target.name });
+      if (!window.confirm(ask)) return;
+      await send(true);
+    }
+    toast(fmt(strings["web.files.pasted"] || "{name}", { name: target.name }));
+    if (target.op === "move") {
+      fileClip = null;          // 剪切只能粘一次
+      updatePasteButton();
+    }
+    loadFiles();
+  } catch (err) {
+    fail(err);
+  }
+}
+
+/* ------------------------------------------------------------ 压缩 */
+
+function archiveFormatOf(name) {
+  const low = String(name || "").toLowerCase();
+  if (low.endsWith(".tar.gz") || low.endsWith(".tgz")) return "tar.gz";
+  if (low.endsWith(".7z")) return "7z";
+  return "zip";
+}
+
+async function compressEntry(entry, destDir) {
+  if (!selected) return;
+  const targetDir = (destDir === undefined || destDir === null) ? filesPath : destDir;
+  const base = String(entry.name || "archive").replace(/\.[^.]+$/, "") || "archive";
+  const name = await askModal({
+    title: strings["web.files.compress"] || "Compress",
+    hint: strings["web.files.compress_prompt"] || "",
+    label: strings["web.files.compress_prompt"] || "Archive name",
+    value: base + ".zip",
+  });
+  if (!name || !name.trim()) return;
+
+  const fileName = name.trim();
+  const format = archiveFormatOf(fileName);
+  let password = "";
+  if (format === "7z") {
+    const pwd = await askModal({
+      title: strings["web.files.compress"] || "Compress",
+      hint: strings["web.files.password_hint"] || "",
+      label: strings["web.files.password"] || "Password",
+      value: "",
+      password: true,
+    });
+    if (pwd === null) return;
+    password = pwd;
+  }
+
+  const label = fmt(strings["web.files.compressing"] || "{name}", { name: fileName });
+  showJob({ label: label, ratio: 0 });
+  try {
+    const data = await apiOk("/api/file/compress", {
+      name: selected,
+      paths: [entry.path],
+      dest: joinPath(targetDir, fileName),
+      format: format,
+      password: password,
+    });
     toast(data.message || "");
     loadFiles();
   } catch (err) {
@@ -3048,6 +3279,22 @@ async function extractEntry(entry) {
     showJob({ label: label, ratio: 1, done: true });
   }
 }
+
+/* --------------------------------------------------------- 图片预览 */
+
+function previewImage(entry) {
+  if (!selected) return;
+  $("imgtitle").textContent = entry.name;
+  $("imgview").src = "/api/file/preview?name=" + encodeURIComponent(selected) +
+                     "&path=" + encodeURIComponent(entry.path);
+  $("imgmodal").hidden = false;
+}
+
+function closeImage() {
+  $("imgmodal").hidden = true;
+  $("imgview").removeAttribute("src");
+}
+
 
 /* ---------------------------------------------------------------- 新建实例 */
 
@@ -3675,6 +3922,12 @@ $("froot").onclick = () => loadFiles("");
 $("frefresh").onclick = () => loadFiles();
 $("fnewfile").onclick = () => newEntry(false);
 $("fnewdir").onclick = () => newEntry(true);
+$("fpaste").onclick = pasteEntry;
+$("fcompress").onclick = () => {
+  if (!selected || !filesPath) return;
+  const base = filesPath.split("/").filter(Boolean).pop() || "archive";
+  compressEntry({ name: base, path: filesPath }, filesParent);
+};
 $("fupload").onclick = () => $("fupload-input").click();
 $("fupload-input").onchange = (ev) => {
   const file = ev.target.files && ev.target.files[0];
@@ -3825,6 +4078,88 @@ if (THEME_MQ.addEventListener) THEME_MQ.addEventListener("change", themeFollow);
 else if (THEME_MQ.addListener) THEME_MQ.addListener(themeFollow);
 
 applyTheme(themeMode());
+
+/* ------------------------------------------------------------ 界面缩放 */
+
+// 服务端存的是倍率，属性只认档位；取最接近的一档，避免浮点误差把 1.08
+// 判成「自定义」而落回默认。
+const FONT_SCALE_STEPS = [["s", 0.94], ["m", 1], ["l", 1.08], ["xl", 1.18]];
+const BTN_SCALE_STEPS = [["m", 1], ["l", 1.2], ["xl", 1.42]];
+
+function nearestScaleKey(steps, value) {
+  const num = Number(value);
+  if (!Number.isFinite(num)) return steps[1] ? steps[1][0] : steps[0][0];
+  let best = steps[0];
+  for (const step of steps) {
+    if (Math.abs(step[1] - num) < Math.abs(best[1] - num)) best = step;
+  }
+  return best[0];
+}
+
+function applyUiScale(fontScale, btnScale) {
+  document.documentElement.setAttribute(
+    "data-uifont", nearestScaleKey(FONT_SCALE_STEPS, fontScale));
+  document.documentElement.setAttribute(
+    "data-uibtn", nearestScaleKey(BTN_SCALE_STEPS, btnScale));
+}
+
+// 面板一打开就按已保存的倍率渲染；拿不到 settings 就用默认，不阻断启动
+async function loadUiScale() {
+  try {
+    const data = await apiOk("/api/settings");
+    applyUiScale(data.ui_font_scale, data.ui_button_scale);
+  } catch (err) {
+    applyUiScale(1, 1);
+  }
+}
+
+/* ------------------------------------------------------ 单输入框小对话框 */
+
+let askResolve = null;
+
+function askModal(opts) {
+  const options = opts || {};
+  return new Promise((resolve) => {
+    askResolve = resolve;
+    $("asktitle").textContent = options.title || "";
+    $("askhint").textContent = options.hint || "";
+    $("l-askinput").textContent = options.label || "";
+    const input = $("askinput");
+    input.type = options.password ? "password" : "text";
+    input.value = options.value || "";
+    $("askok").textContent = options.ok || strings["web.files.save"] || "OK";
+    $("askcancel").textContent = options.cancel || strings["web.files.cancel"] || "Cancel";
+    $("askmodal").hidden = false;
+    setTimeout(() => { input.focus(); input.select(); }, 0);
+  });
+}
+
+function closeAsk(value) {
+  $("askmodal").hidden = true;
+  $("askinput").value = "";
+  const resolve = askResolve;
+  askResolve = null;
+  if (resolve) resolve(value);
+}
+
+$("askok").onclick = () => closeAsk($("askinput").value);
+$("askcancel").onclick = () => closeAsk(null);
+$("askclose").onclick = () => closeAsk(null);
+$("askinput").addEventListener("keydown", (ev) => {
+  if (ev.key === "Enter") { ev.preventDefault(); closeAsk($("askinput").value); }
+  if (ev.key === "Escape") { ev.preventDefault(); closeAsk(null); }
+});
+
+$("imgclose").onclick = () => closeImage();
+$("imgmodal").addEventListener("click", (ev) => {
+  if (ev.target === $("imgmodal")) closeImage();
+});
+$("imgview").onerror = () => {
+  closeImage();
+  toast(strings["web.files.image_failed"] || "Cannot open this image", true);
+};
+
+loadUiScale();
 
 buildChips();
 

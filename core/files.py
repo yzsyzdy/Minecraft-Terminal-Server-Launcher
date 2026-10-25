@@ -48,6 +48,19 @@ TEXT_NAMES = {
 }
 
 
+# 这些后缀当作图片，面板可以直接预览（不解码，只交给浏览器）
+IMAGE_EXTENSIONS = {
+    ".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".ico", ".svg", ".avif",
+}
+
+# 浏览器愿意内联显示的图片类型；预览接口只发这些，其余一律走下载
+IMAGE_MIME = {
+    ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+    ".gif": "image/gif", ".webp": "image/webp", ".bmp": "image/bmp",
+    ".ico": "image/x-icon", ".svg": "image/svg+xml", ".avif": "image/avif",
+}
+
+
 class FileEntry(NamedTuple):
     """目录里的一项。path 是相对根目录的 posix 风格路径。"""
 
@@ -57,6 +70,7 @@ class FileEntry(NamedTuple):
     size: int
     mtime: float
     editable: bool
+    image: bool = False
 
 
 def is_probably_text(name: str) -> bool:
@@ -66,6 +80,16 @@ def is_probably_text(name: str) -> bool:
         return True
     ext = os.path.splitext(low)[1]
     return ext in TEXT_EXTENSIONS
+
+
+def is_probably_image(name: str) -> bool:
+    """按后缀猜它是不是图片。同样是提示，不是解码判断。"""
+    return os.path.splitext(str(name or "").lower())[1] in IMAGE_EXTENSIONS
+
+
+def image_mime(name: str) -> str:
+    """图片后缀对应的 Content-Type；不是图片返回空串。"""
+    return IMAGE_MIME.get(os.path.splitext(str(name or "").lower())[1], "")
 
 
 def normalize_rel(rel: str) -> str:
@@ -134,6 +158,7 @@ def list_dir(root: str, rel: str = "") -> list[FileEntry]:
             size=0 if is_dir else stat.st_size,
             mtime=stat.st_mtime,
             editable=not is_dir and is_probably_text(name),
+            image=not is_dir and is_probably_image(name),
         ))
 
     # 目录在前，然后按名字排；大小写不敏感，免得大小写混着排看起来很乱
@@ -287,6 +312,71 @@ def delete_entry(root: str, rel: str) -> None:
         raise CoreError("web.error.delete_failed", msg=str(e)) from e
 
 
+def _transfer_entry(root: str, rel: str, dest_rel: str, *,
+                    move: bool, overwrite: bool) -> str:
+    """复制 / 移动一个条目到 dest 目录里，返回新的相对路径。
+
+    剪切粘贴最容易出的两类事故都在这里拦掉：
+
+      * 把一个目录粘进它自己的子目录（Windows 上会真的开始无限递归复制）；
+      * 目标同名时静默覆盖——这里的默认口径和上传、解压一致：不覆盖，报错，
+        让界面去问用户。
+
+    overwrite=True 时先删掉同名目标再搬，不做「合并目录」这种半吊子语义。
+    """
+    src = _require_entry(root, rel)
+    dest_dir = resolve(root, normalize_rel(dest_rel))
+    if not os.path.isdir(dest_dir):
+        raise CoreError("web.error.no_such_dir", path=dest_rel or "/")
+    name = os.path.basename(src.rstrip("\\/")) or "item"
+    target = os.path.join(dest_dir, name)
+
+    try:
+        same = os.path.exists(target) and os.path.samefile(src, target)
+    except OSError:
+        same = False
+    if same:
+        raise CoreError("web.error.already_exists", path=name)
+
+    if os.path.isdir(src):
+        src_real = os.path.realpath(src)
+        dest_real = os.path.realpath(dest_dir)
+        if dest_real == src_real or dest_real.startswith(src_real + os.sep):
+            raise CoreError("web.error.copy_into_self", name=name)
+
+    if os.path.exists(target):
+        if not overwrite:
+            raise CoreError("web.error.already_exists", path=name)
+        try:
+            if os.path.isdir(target) and not os.path.islink(target):
+                shutil.rmtree(target)
+            else:
+                os.remove(target)
+        except OSError as e:
+            raise CoreError("web.error.write_failed", msg=str(e)) from e
+
+    try:
+        if move:
+            shutil.move(src, target)
+        elif os.path.isdir(src):
+            shutil.copytree(src, target, symlinks=True)
+        else:
+            shutil.copy2(src, target)
+    except OSError as e:
+        raise CoreError("web.error.copy_failed", msg=str(e)) from e
+    return relative(root, target)
+
+
+def copy_entry(root: str, rel: str, dest_rel: str = "",
+               *, overwrite: bool = False) -> str:
+    return _transfer_entry(root, rel, dest_rel, move=False, overwrite=overwrite)
+
+
+def move_entry(root: str, rel: str, dest_rel: str = "",
+               *, overwrite: bool = False) -> str:
+    return _transfer_entry(root, rel, dest_rel, move=True, overwrite=overwrite)
+
+
 def save_upload(root: str, rel: str, stream, content_length: int,
                 max_bytes: int, create_dirs: bool = False) -> int:
     """把上传流写入目标路径，返回字节数。
@@ -359,8 +449,11 @@ def save_upload(root: str, rel: str, stream, content_length: int,
 __all__ = [
     "MAX_EDIT_BYTES",
     "MAX_LIST_ENTRIES",
+    "IMAGE_EXTENSIONS",
     "FileEntry",
     "is_probably_text",
+    "is_probably_image",
+    "image_mime",
     "normalize_rel",
     "resolve",
     "relative",
@@ -370,5 +463,7 @@ __all__ = [
     "make_directory",
     "rename_entry",
     "delete_entry",
+    "copy_entry",
+    "move_entry",
     "save_upload",
 ]

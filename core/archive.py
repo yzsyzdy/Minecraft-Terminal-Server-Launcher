@@ -17,6 +17,8 @@ server.properties 之类的东西比解压失败糟糕得多。跳过了多少�
 from __future__ import annotations
 
 import os
+import shutil
+import subprocess
 import tarfile
 import tempfile
 import zipfile
@@ -30,7 +32,12 @@ MAX_MEMBERS = 200_000
 MAX_TOTAL_BYTES = 4 * 1024 * 1024 * 1024      # 解压后总大小 4 GiB
 
 # 面板上给「解压」按钮用的后缀白名单（真正解压时仍按内容判断）
-ARCHIVE_SUFFIXES = (".zip", ".tar", ".tar.gz", ".tgz", ".tar.bz2", ".tbz2")
+ARCHIVE_SUFFIXES = (".zip", ".7z", ".rar", ".tar", ".tar.gz", ".tgz",
+                    ".tar.bz2", ".tbz2", ".tar.xz", ".txz")
+
+# 7z 与 RAR 的文件头（RAR 只认出来报错用——解 rar 需要 unrar，不在依赖里）
+SEVENZ_SIGNATURE = b"7z\xbc\xaf\x27\x1c"
+RAR_SIGNATURE = b"Rar!\x1a\x07"
 
 
 class ExtractResult(NamedTuple):
@@ -44,16 +51,20 @@ class ExtractResult(NamedTuple):
 
 
 def archive_kind(path: str) -> str:
-    """按内容判断压缩包类型，返回 'zip' / 'tar' / 'gzip' / ''。
+    """按内容判断压缩包类型，返回 'zip' / '7z' / 'rar' / 'tar' / 'gzip' / ''。
 
     gzip 与 tar 分开：'.tar.gz' 要先过 gzip 再当 tar 读，而裸 '.gz'
     （单个文件被 gzip 压过）我们不处理。
     """
     try:
         with open(path, "rb") as f:
-            head = f.read(4)
+            head = f.read(8)
             if head[:4] == b"PK\x03\x04":
                 return "zip"
+            if head[:6] == SEVENZ_SIGNATURE:
+                return "7z"
+            if head[:7] == RAR_SIGNATURE:
+                return "rar"
             if head[:2] == b"\x1f\x8b":
                 return "gzip"
             # tar 的签名在偏移 257 处（POSIX 与 GNU 都是 "ustar"）
@@ -62,6 +73,24 @@ def archive_kind(path: str) -> str:
                 return "tar"
     except OSError:
         return ""
+    return ""
+
+
+def sevenzip_backend() -> str:
+    """能用的 7z 后端：'py7zr' / '7z' / ''。
+
+    py7zr 是可选依赖（装了才能读写 7z，也才支持密码）；没装时退到系统的
+    7z / 7za / 7zr 可执行文件。两者都没有就返回空串，由调用方报错而不是
+    假装解压成功。
+    """
+    try:
+        import py7zr  # noqa: F401
+        return "py7zr"
+    except Exception:  # noqa: BLE001 装了但导入失败也算没有
+        pass
+    for name in ("7z", "7za", "7zr"):
+        if shutil.which(name):
+            return name
     return ""
 
 
@@ -106,12 +135,13 @@ def _dest_rel_for(root: str, src_rel: str, dest_rel: Optional[str]) -> str:
 
 
 def extract(root: str, src_rel: str, dest_rel: Optional[str] = None,
-            *, overwrite: bool = False,
+            *, overwrite: bool = False, password: str = "",
             max_members: int = MAX_MEMBERS,
             max_bytes: int = MAX_TOTAL_BYTES) -> ExtractResult:
     """把实例目录里的压缩包解开。失败抛 CoreError。
 
     dest_rel 为空时解到压缩包自己所在的目录（就地解压）。
+    password 只用于加密的 zip / 7z；传空串表示没有密码。
     """
     src = fileops.resolve(root, src_rel)
     if not os.path.isfile(src):
@@ -120,6 +150,9 @@ def extract(root: str, src_rel: str, dest_rel: Optional[str] = None,
     kind = archive_kind(src)
     if not kind:
         raise CoreError("web.error.not_an_archive", name=os.path.basename(src))
+    if kind == "rar":
+        raise CoreError("web.error.rar_unsupported",
+                        name=os.path.basename(src))
     if kind == "gzip":
         # 先确认它其实是 tar.gz：裸 .gz 只有单个成员，不是我们要的东西
         try:
@@ -196,6 +229,7 @@ def extract(root: str, src_rel: str, dest_rel: Optional[str] = None,
         extracted += 1
 
     if kind == "zip":
+        pwd = password.encode("utf-8") if password else None
         try:
             with zipfile.ZipFile(src) as zf:
                 members = zf.infolist()
@@ -218,11 +252,25 @@ def extract(root: str, src_rel: str, dest_rel: Optional[str] = None,
                         except OSError:
                             refused += 1
                         continue
-                    with zf.open(info) as stream:
-                        _write(target, stream, info.file_size)
+                    try:
+                        with zf.open(info, pwd=pwd) as stream:
+                            _write(target, stream, info.file_size)
+                    except RuntimeError as e:
+                        # 加密条目没给密码、或密码不对，zipfile 都抛 RuntimeError
+                        text = str(e).lower()
+                        if "password" in text or "encrypted" in text:
+                            raise CoreError("web.error.archive_password",
+                                            name=os.path.basename(src)) from e
+                        raise
         except (zipfile.BadZipFile, OSError) as e:
             raise CoreError("web.error.bad_archive",
                             name=os.path.basename(src), msg=str(e)) from e
+    elif kind == "7z":
+        result = _extract_7z(root, src, dest, dest_abs, password,
+                             overwrite=overwrite, max_members=max_members,
+                             max_bytes=max_bytes)
+        extracted, skipped, refused, written = (
+            result.extracted, result.skipped, result.refused, result.total_bytes)
     else:
         try:
             with tarfile.open(src, "r:*") as tf:
@@ -263,6 +311,192 @@ def extract(root: str, src_rel: str, dest_rel: Optional[str] = None,
                          refused=refused, total_bytes=written)
 
 
+def _move_tree(root_dest: str, tmp_dir: str, dest_rel: str, *,
+               overwrite: bool, max_bytes: int) -> ExtractResult:
+    """把 7z 先解到临时目录的树搬进实例目录，沿途做同一套边界检查。"""
+    extracted = skipped = refused = 0
+    written = 0
+    for current, _dirs, names in os.walk(tmp_dir):
+        for name in names:
+            source = os.path.join(current, name)
+            rel = os.path.relpath(source, tmp_dir).replace(os.sep, "/")
+            try:
+                target = fileops.resolve(root_dest, rel)
+            except CoreError:
+                refused += 1
+                continue
+            try:
+                size = os.path.getsize(source)
+            except OSError:
+                refused += 1
+                continue
+            if written + size > max_bytes:
+                raise CoreError("web.error.extract_too_large",
+                                max=round(max_bytes / 1024 / 1024 / 1024))
+            if os.path.exists(target) and not overwrite:
+                skipped += 1
+                continue
+            parent = os.path.dirname(target)
+            try:
+                if parent:
+                    os.makedirs(parent, exist_ok=True)
+                shutil.move(source, target)
+            except OSError as e:
+                raise CoreError("web.error.write_failed", msg=str(e)) from e
+            written += size
+            extracted += 1
+    return ExtractResult(dest=dest_rel, extracted=extracted, skipped=skipped,
+                         refused=refused, total_bytes=written)
+
+
+def _extract_7z(root: str, src: str, dest_rel: str, dest_abs: str,
+                password: str, *, overwrite: bool, max_members: int,
+                max_bytes: int) -> ExtractResult:
+    """7z：优先 py7zr（支持密码），否则调系统的 7z 命令行。"""
+    backend = sevenzip_backend()
+    if not backend:
+        raise CoreError("web.error.sevenzip_unavailable")
+
+    name = os.path.basename(src)
+    tmp_dir = tempfile.mkdtemp(prefix=".mstl-7z-", dir=dest_abs)
+    try:
+        if backend == "py7zr":
+            import py7zr
+            try:
+                with py7zr.SevenZipFile(src, mode="r",
+                                        password=password or None) as zf:
+                    names = zf.getnames()
+                    if len(names) > max_members:
+                        raise CoreError("web.error.extract_too_many",
+                                        max=max_members)
+                    zf.extractall(path=tmp_dir)
+            except CoreError:
+                raise
+            except py7zr.exceptions.PasswordRequired as e:
+                raise CoreError("web.error.archive_password", name=name) from e
+            except py7zr.exceptions.Bad7zFile as e:
+                raise CoreError("web.error.bad_archive", name=name,
+                                msg=str(e)) from e
+            except Exception as e:  # noqa: BLE001 py7zr 的密码错误有时是底层异常
+                text = str(e).lower()
+                # 密码错时 py7zr 抛的是 lzma.LZMAError("Corrupt input data")，
+                # 不是 PasswordRequired；只有带过密码才敢判定「密码不对」，
+                # 没带密码时仍按坏包处理。
+                if "password" in text or (password and "corrupt" in text):
+                    raise CoreError("web.error.archive_password",
+                                    name=name) from e
+                raise CoreError("web.error.bad_archive", name=name,
+                                msg=str(e)) from e
+        else:
+            cmd = [backend, "x", "-y", f"-o{tmp_dir}", src]
+            if password:
+                cmd.append(f"-p{password}")
+            flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+            try:
+                proc = subprocess.run(cmd, capture_output=True, timeout=600,
+                                      creationflags=flags)
+            except (OSError, subprocess.TimeoutExpired) as e:
+                raise CoreError("web.error.bad_archive", name=name,
+                                msg=str(e)) from e
+            if proc.returncode != 0:
+                message = (proc.stdout + proc.stderr).decode("utf-8", "replace")
+                if "password" in message.lower():
+                    raise CoreError("web.error.archive_password",
+                                    name=name)
+                raise CoreError("web.error.bad_archive", name=name,
+                                msg=message.strip()[:200])
+
+        return _move_tree(dest_abs, tmp_dir, dest_rel, overwrite=overwrite,
+                          max_bytes=max_bytes)
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+
+
+def create_archive(root: str, src_rels: list[str], dest_rel: str,
+                   *, fmt: str = "zip", password: str = "",
+                   overwrite: bool = False) -> str:
+    """把若干文件/目录打成一个压缩包，返回相对路径。
+
+    fmt 支持 zip / 7z / tar.gz。zip 用标准库（写不了密码）；7z 需要 py7zr
+    才能写，并且只有它支持密码。
+    """
+    if not src_rels:
+        raise CoreError("web.error.nothing_to_compress")
+    fmt = (fmt or "zip").lower()
+    if fmt not in ("zip", "7z", "tar.gz"):
+        raise CoreError("web.error.bad_archive_format", name=fmt)
+
+    dest = fileops.normalize_rel(dest_rel)
+    if not dest:
+        raise CoreError("web.error.bad_path", path=dest_rel)
+    target = fileops.resolve(root, dest)
+    if os.path.isdir(target):
+        raise CoreError("web.error.is_a_directory", path=dest)
+    if os.path.exists(target) and not overwrite:
+        raise CoreError("web.error.already_exists", path=dest)
+    parent = os.path.dirname(target)
+    try:
+        if parent:
+            os.makedirs(parent, exist_ok=True)
+    except OSError as e:
+        raise CoreError("web.error.mkdir_failed", msg=str(e)) from e
+
+    sources = []
+    for rel in src_rels:
+        src = fileops.resolve(root, fileops.normalize_rel(rel))
+        if not os.path.exists(src):
+            raise CoreError("web.error.no_such_file", path=rel)
+        sources.append((os.path.basename(src.rstrip("\\/")) or "item", src))
+
+    try:
+        if fmt == "zip":
+            with zipfile.ZipFile(target, "w", zipfile.ZIP_DEFLATED) as zf:
+                for arc_base, src in sources:
+                    if os.path.isdir(src):
+                        for current, _dirs, names in os.walk(src):
+                            for name in names:
+                                full = os.path.join(current, name)
+                                inner = os.path.relpath(full, src).replace(os.sep, "/")
+                                zf.write(full, f"{arc_base}/{inner}")
+                    else:
+                        zf.write(src, arc_base)
+        elif fmt == "tar.gz":
+            with tarfile.open(target, "w:gz") as tf:
+                for arc_base, src in sources:
+                    tf.add(src, arcname=arc_base)
+        else:
+            backend = sevenzip_backend()
+            if backend != "py7zr":
+                raise CoreError("web.error.sevenzip_write_unavailable")
+            import py7zr
+            with py7zr.SevenZipFile(target, "w",
+                                    password=password or None) as zf:
+                for arc_base, src in sources:
+                    if os.path.isdir(src):
+                        # py7zr 的 write() 对目录只记一条目录项，不递归；
+                        # 这里自己走一遍，和 zip 分支保持同样的结构。
+                        for current, _dirs, names in os.walk(src):
+                            for name in names:
+                                full = os.path.join(current, name)
+                                inner = os.path.relpath(full, src).replace(os.sep, "/")
+                                zf.write(full, f"{arc_base}/{inner}")
+                    else:
+                        zf.write(src, arc_base)
+    except CoreError:
+        try:
+            os.remove(target)
+        except OSError:
+            pass
+        raise
+    except (OSError, RuntimeError, zipfile.BadZipFile, tarfile.TarError) as e:
+        try:
+            os.remove(target)
+        except OSError:
+            pass
+        raise CoreError("web.error.compress_failed", msg=str(e)) from e
+    return dest
+
+
 __all__ = [
     "ARCHIVE_SUFFIXES",
     "MAX_MEMBERS",
@@ -270,5 +504,7 @@ __all__ = [
     "ExtractResult",
     "archive_kind",
     "is_archive_name",
+    "sevenzip_backend",
     "extract",
+    "create_archive",
 ]

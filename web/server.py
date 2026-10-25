@@ -193,6 +193,25 @@ WEB_STRINGS = (
     "web.files.uploading_folder",
     "web.files.folder_done",
     "web.files.folder_partial",
+    # 剪切 / 复制 / 粘贴、压缩、图片预览、加密包
+    "web.files.copy",
+    "web.files.cut",
+    "web.files.paste",
+    "web.files.pasted",
+    "web.files.copied",
+    "web.files.moved",
+    "web.files.clip_copy",
+    "web.files.clip_cut",
+    "web.files.compress",
+    "web.files.compress_prompt",
+    "web.files.compressing",
+    "web.files.compress_done",
+    "web.files.preview",
+    "web.files.password",
+    "web.files.password_title",
+    "web.files.password_hint",
+    "web.files.image_failed",
+    "web.files.confirm_overwrite",
     # 内容（插件 / 模组）
     "web.jars.tab",
     "web.jars.plugins",
@@ -233,6 +252,14 @@ WEB_STRINGS = (
     "web.settings.update_new",
     "web.settings.update_latest",
     "web.settings.update_unknown",
+    # 界面缩放
+    "web.settings.ui_font",
+    "web.settings.ui_button",
+    "web.settings.ui_s",
+    "web.settings.ui_m",
+    "web.settings.ui_l",
+    "web.settings.ui_xl",
+    "web.settings.ui_hint",
     "web.settings.saved",
     "web.settings.restore",
     "web.settings.restore_hint",
@@ -415,6 +442,17 @@ def web_settings(config: dict) -> tuple[str, int, str]:
         port = 8765
     token = str(web.get("token") or "")
     return host, port, token
+
+
+def _clamp_scale(value, fallback: float) -> float:
+    """界面缩放系数：限制在 0.85 ~ 1.6，非法值回退到默认。"""
+    try:
+        num = float(value)
+    except (TypeError, ValueError):
+        return fallback
+    if not (num == num):          # NaN
+        return fallback
+    return max(0.85, min(1.6, round(num, 3)))
 
 
 def web_auto_start(config: dict) -> bool:
@@ -986,6 +1024,8 @@ def _make_handler(manager: RuntimeManager, servers_dir: str, token: str,
                 return self._guard(lambda: self._file_read(query))
             if path == "/api/file/raw":
                 return self._guard(lambda: self._file_download(query))
+            if path == "/api/file/preview":
+                return self._guard(lambda: self._file_preview(query))
             if path == "/api/cores":
                 return self._guard(lambda: self._cores(query))
             if path == "/api/frp":
@@ -1119,6 +1159,8 @@ def _make_handler(manager: RuntimeManager, servers_dir: str, token: str,
                 "size": e.size,
                 "mtime": e.mtime,
                 "editable": e.editable,
+                # 图片可以直接在面板里预览，不用先下载
+                "image": e.image,
                 # 界面按这个决定要不要显示「解压」按钮；真正解压时服务端
                 # 仍按内容再判断一次
                 "archive": (not e.is_dir) and archives.is_archive_name(e.name),
@@ -1171,6 +1213,33 @@ def _make_handler(manager: RuntimeManager, servers_dir: str, token: str,
             self.send_header("Content-Length", str(size))
             self.send_header("Content-Disposition", disposition)
             self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            with open(target, "rb") as f:
+                shutil.copyfileobj(f, self.wfile, 64 * 1024)
+
+        def _file_preview(self, query: dict[str, str]) -> None:
+            """图片预览：只发图片，且用 inline 而不是 attachment。
+
+            和下载接口分开是有意的——下载必须强制 attachment，预览则必须
+            让浏览器就地渲染；同一个响应头不可能两头兼顾。
+            """
+            root = self._instance_dir(query.get("name") or "")
+            rel = query.get("path") or ""
+            target = fileops.resolve(root, rel)
+            if not os.path.isfile(target):
+                raise CoreError("web.error.no_such_file", path=rel or "/")
+            mime = fileops.image_mime(os.path.basename(target))
+            if not mime:
+                raise CoreError("web.error.not_an_image",
+                                name=os.path.basename(target))
+
+            size = os.path.getsize(target)
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", mime)
+            self.send_header("Content-Length", str(size))
+            self.send_header("Content-Disposition", "inline")
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("X-Content-Type-Options", "nosniff")
             self.end_headers()
             with open(target, "rb") as f:
                 shutil.copyfileobj(f, self.wfile, 64 * 1024)
@@ -1516,6 +1585,10 @@ def _make_handler(manager: RuntimeManager, servers_dir: str, token: str,
                             "supported": is_supported()},
                 "restore_running": (config.get("web") or {}).get(
                     "restore_running", True) is not False,
+                # 界面缩放：面板字号与按钮尺寸。存在 config 里而不是 localStorage，
+                # 换浏览器打开同一台机器时保持一致。
+                "ui_font_scale": _clamp_scale(config.get("ui_font_scale"), 1.0),
+                "ui_button_scale": _clamp_scale(config.get("ui_button_scale"), 1.0),
             }
 
         def _settings_save(self, body: dict) -> None:
@@ -1554,6 +1627,13 @@ def _make_handler(manager: RuntimeManager, servers_dir: str, token: str,
                 web = dict(web) if isinstance(web, dict) else {}
                 web["restore_running"] = bool(body.get("restore_running"))
                 config["web"] = web
+
+            if "ui_font_scale" in body:
+                config["ui_font_scale"] = _clamp_scale(
+                    body.get("ui_font_scale"), 1.0)
+            if "ui_button_scale" in body:
+                config["ui_button_scale"] = _clamp_scale(
+                    body.get("ui_button_scale"), 1.0)
 
             save_config(config, project_dir)
 
@@ -1698,6 +1778,46 @@ def _make_handler(manager: RuntimeManager, servers_dir: str, token: str,
                 fileops.delete_entry(root, str(body.get("path") or ""))
                 return self._json({"ok": True})
 
+            if path == "/api/file/copy":
+                root = self._instance_dir(name)
+                made = fileops.copy_entry(
+                    root, str(body.get("path") or ""),
+                    str(body.get("dest") or ""),
+                    overwrite=bool(body.get("overwrite")))
+                return self._json({"ok": True, "path": made,
+                                   "message": t("web.files.copied",
+                                                name=os.path.basename(made))})
+
+            if path == "/api/file/move":
+                root = self._instance_dir(name)
+                made = fileops.move_entry(
+                    root, str(body.get("path") or ""),
+                    str(body.get("dest") or ""),
+                    overwrite=bool(body.get("overwrite")))
+                return self._json({"ok": True, "path": made,
+                                   "message": t("web.files.moved",
+                                                name=os.path.basename(made))})
+
+            if path == "/api/file/compress":
+                root = self._instance_dir(name)
+                paths = body.get("paths")
+                if not isinstance(paths, list) or not paths:
+                    raise CoreError("web.error.nothing_to_compress")
+                dest_rel = str(body.get("dest") or "")
+                label = t("web.files.compressing",
+                          name=os.path.basename(dest_rel))
+                try:
+                    made = archives.create_archive(
+                        root, [str(p) for p in paths], dest_rel,
+                        fmt=str(body.get("format") or "zip"),
+                        password=str(body.get("password") or ""),
+                        overwrite=bool(body.get("overwrite")))
+                finally:
+                    finish_job(label)
+                return self._json({"ok": True, "path": made,
+                                   "message": t("web.files.compress_done",
+                                                name=os.path.basename(made))})
+
             if path == "/api/file/extract":
                 root = self._instance_dir(name)
                 src_rel = str(body.get("path") or "")
@@ -1707,7 +1827,8 @@ def _make_handler(manager: RuntimeManager, servers_dir: str, token: str,
                     result = archives.extract(
                         root, src_rel,
                         dest_rel if isinstance(dest_rel, str) else None,
-                        overwrite=bool(body.get("overwrite")))
+                        overwrite=bool(body.get("overwrite")),
+                        password=str(body.get("password") or ""))
                 finally:
                     finish_job(label)
                 return self._json({

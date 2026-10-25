@@ -5,6 +5,8 @@
   "curseforge_api_key": "",
   "download_threads": 16,
   "auto_start_server": "",
+  "ui_font_scale": 1.0,
+  "ui_button_scale": 1.0,
   "web": {
     "host": "127.0.0.1",
     "port": 8765,
