@@ -445,14 +445,14 @@ def web_settings(config: dict) -> tuple[str, int, str]:
 
 
 def _clamp_scale(value, fallback: float) -> float:
-    """界面缩放系数：限制在 0.85 ~ 1.6，非法值回退到默认。"""
+    """界面缩放系数：限制在 0.8 ~ 2.0，非法值回退到默认（标准档）。"""
     try:
         num = float(value)
     except (TypeError, ValueError):
         return fallback
     if not (num == num):          # NaN
         return fallback
-    return max(0.85, min(1.6, round(num, 3)))
+    return max(0.8, min(2.0, round(num, 3)))
 
 
 def web_auto_start(config: dict) -> bool:
@@ -1587,8 +1587,8 @@ def _make_handler(manager: RuntimeManager, servers_dir: str, token: str,
                     "restore_running", True) is not False,
                 # 界面缩放：面板字号与按钮尺寸。存在 config 里而不是 localStorage，
                 # 换浏览器打开同一台机器时保持一致。
-                "ui_font_scale": _clamp_scale(config.get("ui_font_scale"), 1.0),
-                "ui_button_scale": _clamp_scale(config.get("ui_button_scale"), 1.0),
+                "ui_font_scale": _clamp_scale(config.get("ui_font_scale"), 1.18),
+                "ui_button_scale": _clamp_scale(config.get("ui_button_scale"), 1.42),
             }
 
         def _settings_save(self, body: dict) -> None:
@@ -1630,10 +1630,10 @@ def _make_handler(manager: RuntimeManager, servers_dir: str, token: str,
 
             if "ui_font_scale" in body:
                 config["ui_font_scale"] = _clamp_scale(
-                    body.get("ui_font_scale"), 1.0)
+                    body.get("ui_font_scale"), 1.18)
             if "ui_button_scale" in body:
                 config["ui_button_scale"] = _clamp_scale(
-                    body.get("ui_button_scale"), 1.0)
+                    body.get("ui_button_scale"), 1.42)
 
             save_config(config, project_dir)
 

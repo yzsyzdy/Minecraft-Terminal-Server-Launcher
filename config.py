@@ -15,9 +15,10 @@ DEFAULT_CONFIG: dict[str, Any] = {
     # 核心下载源：false = MSL 优先（BMCL 兜底），true = BMCL 优先
     "prefer_bmcl": False,
     "auto_start_server": "",
-    # 面板界面缩放：字号与按钮尺寸。1.0 为默认，取值 0.85 ~ 1.6。
-    "ui_font_scale": 1.0,
-    "ui_button_scale": 1.0,
+    # 面板界面缩放：字号与按钮尺寸。默认 1.18 / 1.42（原来的「特大」档），
+    # 取值 0.8 ~ 2.0。
+    "ui_font_scale": 1.18,
+    "ui_button_scale": 1.42,
     "web": {
         "host": "127.0.0.1",
         "port": 8765,

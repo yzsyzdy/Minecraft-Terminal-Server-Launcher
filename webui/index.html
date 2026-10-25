@@ -64,9 +64,10 @@
     --r-sm:4px; --r:6px; --r-lg:10px;
 
     /* 字号：11 标注 / 12 次文 / 13 正文 / 15 标题。
-       乘 --ui-scale：设置里的「界面字号」直接改这个变量，全站跟着走。 */
-    --ui-scale:1;
-    --btn-scale:1;
+       乘 --ui-scale：设置里的「界面字号」直接改这个变量，全站跟着走。
+       1.18 是「标准」——它就是旧版「特大」的绝对值，见下面的分档说明。 */
+    --ui-scale:1.18;
+    --btn-scale:1.42;
     --t-label:calc(11px * var(--ui-scale)); --t-meta:calc(12px * var(--ui-scale));
     --t-ui:calc(13px * var(--ui-scale)); --t-title:calc(15px * var(--ui-scale));
 
@@ -95,12 +96,16 @@
   }
   /* 界面缩放：设置里的「字号 / 按钮大小」写在这两个属性上。
      属性放在 <html> 上，刷新后由 JS 先读 config 再写入，避免整页 zoom
-     那种「连图片一起放大」的副作用。 */
-  html[data-uifont="s"]{--ui-scale:.94}
-  html[data-uifont="l"]{--ui-scale:1.08}
-  html[data-uifont="xl"]{--ui-scale:1.18}
-  html[data-uibtn="l"]{--btn-scale:1.2}
-  html[data-uibtn="xl"]{--btn-scale:1.42}
+     那种「连图片一起放大」的副作用。
+     注意：这里的分档是「绝对值」——标准档（m）就是过去「特大」那一档，
+     因为实测下来那一档才是能舒服看清、在手机上点得准的尺寸。 */
+  html[data-uifont="s"]{--ui-scale:.86}
+  html[data-uifont="m"]{--ui-scale:1.18}
+  html[data-uifont="l"]{--ui-scale:1.28}
+  html[data-uifont="xl"]{--ui-scale:1.38}
+  html[data-uibtn="m"]{--btn-scale:1.42}
+  html[data-uibtn="l"]{--btn-scale:1.6}
+  html[data-uibtn="xl"]{--btn-scale:1.78}
 
   *{box-sizing:border-box}
   /* 作者样式优先于浏览器默认样式，所以下面那些 display:flex 会把 UA 的
@@ -4083,8 +4088,8 @@ applyTheme(themeMode());
 
 // 服务端存的是倍率，属性只认档位；取最接近的一档，避免浮点误差把 1.08
 // 判成「自定义」而落回默认。
-const FONT_SCALE_STEPS = [["s", 0.94], ["m", 1], ["l", 1.08], ["xl", 1.18]];
-const BTN_SCALE_STEPS = [["m", 1], ["l", 1.2], ["xl", 1.42]];
+const FONT_SCALE_STEPS = [["s", 0.86], ["m", 1.18], ["l", 1.28], ["xl", 1.38]];
+const BTN_SCALE_STEPS = [["m", 1.42], ["l", 1.6], ["xl", 1.78]];
 
 function nearestScaleKey(steps, value) {
   const num = Number(value);
@@ -4109,7 +4114,7 @@ async function loadUiScale() {
     const data = await apiOk("/api/settings");
     applyUiScale(data.ui_font_scale, data.ui_button_scale);
   } catch (err) {
-    applyUiScale(1, 1);
+    applyUiScale(1.18, 1.42);
   }
 }
 
