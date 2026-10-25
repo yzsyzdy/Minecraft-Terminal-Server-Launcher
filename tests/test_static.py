@@ -132,6 +132,18 @@ class PanelConsistencyTest(unittest.TestCase):
         missing = sorted(k for k in used if k not in set(WEB_STRINGS))
         self.assertEqual(missing, [])
 
+    def test_icon_files_exist(self):
+        """CSS 里引用的图标必须真的在 webui/icons/ 下。
+
+        图标是 mask 引用的外部 png：路径写错不会报 JS 错误，只会让图标
+        静默消失，光看代码发现不了。
+        """
+        refs = set(re.findall(r'url\("(icons/[^"]+)"\)', self.html))
+        self.assertTrue(refs, "面板里应该至少引用一个图标")
+        missing = sorted(r for r in refs
+                         if not os.path.isfile(os.path.join(ROOT, "webui", r)))
+        self.assertEqual(missing, [])
+
     def test_javascript_parses(self):
         node = shutil.which("node")
         if not node:

@@ -325,6 +325,20 @@
                 cursor:pointer;min-width:0}
   #flist .fname span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   #flist .fico{flex:0 0 auto;width:16px;text-align:center;color:var(--faint)}
+  /* 文件类型图标：源图见 webui/icons/CREDITS.md。用 mask 只取图形，颜色
+     跟 currentColor 走，深浅主题都不必另存一套图。 */
+  .ico{display:inline-block;width:1.15em;height:1.15em;flex:0 0 auto;
+       vertical-align:-.18em;background-color:currentColor;
+       -webkit-mask:var(--ico-src) center/contain no-repeat;
+       mask:var(--ico-src) center/contain no-repeat}
+  .ico-settings{--ico-src:url("icons/settings-apache2.0-mask.png")}
+  .ico-yaml{--ico-src:url("icons/yaml-mit-mask.png")}
+  .ico-json{--ico-src:url("icons/json-own-mask.png")}
+  .ico-java{--ico-src:url("icons/java-apache2.0-mask.png")}
+  .ico-photo{--ico-src:url("icons/photo-apache2.0-mask.png")}
+  .ico-file{--ico-src:url("icons/file-apache2.0-mask.png")}
+  #flist .fico.ico{width:20px;height:20px;color:var(--dim)}
+  .chip .ico{width:1em;height:1em;margin-right:5px;vertical-align:-.1em}
   #flist .fdir .fname{font-weight:600}
   #flist .fmeta{color:var(--dim);font:400 var(--t-label)/1 var(--mono);
                 white-space:nowrap;font-variant-numeric:tabular-nums}
@@ -571,7 +585,7 @@
   <button class="ghost" id="newinst">＋</button>
   <button class="ghost" id="refresh">⟳</button>
   <button class="ghost" id="themebtn">◐</button>
-  <button class="ghost" id="cfgbtn">⚙</button>
+  <button class="ghost" id="cfgbtn"><span class="ico ico-settings" aria-hidden="true"></span></button>
 </header>
 <main>
   <div id="list"></div>
@@ -586,7 +600,7 @@
         <button class="tab" id="tab-ai"></button>
         <button class="tab" id="tab-jars" hidden></button>
       </span>
-      <button class="ghost" id="instset">⚙</button>
+      <button class="ghost" id="instset"><span class="ico ico-settings" aria-hidden="true"></span></button>
       <button id="clear"></button>
       <button id="follow"></button>
     </div>
@@ -639,7 +653,7 @@
         <b id="aititle" style="font-size:13px"></b>
         <span id="aistate"></span>
         <span style="flex:1"></span>
-        <button class="ghost" id="aiset" title="">⚙</button>
+        <button class="ghost" id="aiset" title=""><span class="ico ico-settings" aria-hidden="true"></span></button>
         <button id="aireset"></button>
       </div>
       <div id="aiconfig" hidden>
@@ -1773,7 +1787,8 @@ function renderDetails() {
       ? (launch.program || "") : (launch.command || "");
     if (target) chips.push({ text: target, title: target });
   } else if (item.java) {
-    chips.push({ text: "Java " + baseName(item.java), title: item.java });
+    chips.push({ text: "Java " + baseName(item.java), title: item.java,
+                 icon: "ico-java" });
   }
   if (item.workdir) {
     chips.push({ text: fmt(strings["web.detail.workdir"], { path: item.workdir }), title: item.workdir });
@@ -1786,7 +1801,13 @@ function renderDetails() {
   chips.forEach(c => {
     const el = document.createElement("span");
     el.className = "chip";
-    el.textContent = c.text;
+    if (c.icon) {
+      const glyph = document.createElement("span");
+      glyph.className = "ico " + c.icon;
+      glyph.setAttribute("aria-hidden", "true");
+      el.appendChild(glyph);
+    }
+    el.appendChild(document.createTextNode(c.text));
     if (c.title) el.title = c.title;
     box.appendChild(el);
   });
@@ -2903,10 +2924,22 @@ function buildFileRow(entry, isUp) {
   const nameBox = document.createElement("div");
   nameBox.className = "fname" + (entry.dir ? " fdir" : "");
   const icon = document.createElement("span");
-  icon.className = "fico";
-  icon.textContent = entry.dir ? "📁"
-    : entry.image ? "🖼"
-    : (entry.editable ? "📄" : "📦");
+  const ext = String(entry.name || "").toLowerCase().split(".").pop();
+  if (entry.dir) {
+    icon.className = "fico";
+    icon.textContent = "📁";
+  } else if (ext === "yml" || ext === "yaml") {
+    icon.className = "fico ico ico-yaml";
+  } else if (ext === "json") {
+    icon.className = "fico ico ico-json";
+  } else if (ext === "jar") {
+    icon.className = "fico ico ico-java";
+  } else if (entry.image) {
+    icon.className = "fico ico ico-photo";
+  } else {
+    // 没有专属图标的普通文件一律用同一张纸；目录仍然用文件夹表情
+    icon.className = "fico ico ico-file";
+  }
   const label = document.createElement("span");
   label.textContent = entry.name;
   nameBox.appendChild(icon);

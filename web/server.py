@@ -1014,6 +1014,8 @@ def _make_handler(manager: RuntimeManager, servers_dir: str, token: str,
                     return self._page("webui/index.html missing", HTTPStatus.INTERNAL_SERVER_ERROR)
             if not self._authed(query):
                 return self._reject_unauthorized()
+            if path.startswith("/icons/"):
+                return self._guard(lambda: self._static_icon(path))
             if path == "/api/state":
                 return self._state()
             if path == "/api/stream":
@@ -1092,6 +1094,31 @@ def _make_handler(manager: RuntimeManager, servers_dir: str, token: str,
                 self._server_error(err)
 
         # -- 具体处理 ------------------------------------------------------
+
+        def _static_icon(self, path: str) -> None:
+            """面板自带的图标（`webui/icons/*.png`）。
+
+            只认单层文件名：带分隔符、`..` 或不是 .png 的一律 404。图标目录很浅，
+            没必要做成通用静态服务器，那等于给面板开一个新的读文件面。
+            """
+            name = path[len("/icons/"):]
+            if (not name or "/" in name or "\\" in name or ".." in name
+                    or not name.lower().endswith(".png")):
+                return self._json({"ok": False, "message": "not found"},
+                                  HTTPStatus.NOT_FOUND)
+            file_path = os.path.join(bundled_dir(), "webui", "icons", name)
+            if not os.path.isfile(file_path):
+                return self._json({"ok": False, "message": "not found"},
+                                  HTTPStatus.NOT_FOUND)
+            with open(file_path, "rb") as f:
+                blob = f.read()
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", "image/png")
+            self.send_header("Content-Length", str(len(blob)))
+            self.send_header("Cache-Control", "public, max-age=3600")
+            self.send_header("X-Content-Type-Options", "nosniff")
+            self.end_headers()
+            self.wfile.write(blob)
 
         def _state(self) -> None:
             instances = []
