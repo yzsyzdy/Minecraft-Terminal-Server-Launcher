@@ -931,5 +931,22 @@
     "web.settings.bg_saved": "Background updated",
     "web.settings.bg_removed": "Background removed",
     "web.error.bg_not_image": "Unsupported image (PNG / JPEG / GIF / WebP only)",
-    "web.error.bg_too_large": "Background image is too large, limit {max} MB"
+    "web.error.bg_too_large": "Background image is too large, limit {max} MB",
+
+    "web.tab.dash": "Dashboard",
+    "web.dash.cpu": "CPU",
+    "web.dash.mem": "Memory",
+    "web.dash.net": "Network",
+    "web.dash.uptime": "Uptime",
+    "web.dash.instances": "Running instances",
+    "web.dash.empty": "No instance is running",
+    "web.dash.open": "Open",
+    "web.dash.running": "running",
+    "web.dash.cores": "cores",
+    "web.dash.net_hint": "Total across all interfaces",
+    "web.dash.unavailable": "unavailable",
+    "web.settings.tab_ui": "Interface",
+    "web.settings.tab_bg": "Background",
+    "web.settings.tab_boot": "Startup",
+    "web.settings.tab_about": "About"
 }

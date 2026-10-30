@@ -274,6 +274,24 @@ WEB_STRINGS = (
     "web.settings.bg_component_opacity",
     "web.settings.bg_saved",
     "web.settings.bg_removed",
+    # 设置分类
+    "web.settings.tab_ui",
+    "web.settings.tab_bg",
+    "web.settings.tab_boot",
+    "web.settings.tab_about",
+    # 仪表板
+    "web.tab.dash",
+    "web.dash.cpu",
+    "web.dash.mem",
+    "web.dash.net",
+    "web.dash.uptime",
+    "web.dash.instances",
+    "web.dash.empty",
+    "web.dash.open",
+    "web.dash.running",
+    "web.dash.cores",
+    "web.dash.net_hint",
+    "web.dash.unavailable",
     "web.settings.saved",
     "web.settings.restore",
     "web.settings.restore_hint",
@@ -466,7 +484,7 @@ def _clamp_scale(value, fallback: float) -> float:
         return fallback
     if not (num == num):          # NaN
         return fallback
-    return max(0.8, min(2.0, round(num, 3)))
+    return max(0.7, min(2.0, round(num, 3)))
 
 
 def _clamp_int(value, fallback: int, low: int, high: int) -> int:
@@ -527,6 +545,21 @@ def background_version(project_dir: str) -> int:
         return int(os.path.getmtime(path))
     except OSError:
         return 0
+
+
+# 整机占用采样器。必须跨请求保留：CPU 与网络都是「两次采样之间的差值」，
+# 每次请求新建一个就只能永远返回 None。
+_sysstats_sampler = None
+_sysstats_lock = threading.Lock()
+
+
+def system_snapshot() -> dict:
+    global _sysstats_sampler
+    from core.sysstats import SystemSampler
+    with _sysstats_lock:
+        if _sysstats_sampler is None:
+            _sysstats_sampler = SystemSampler()
+        return _sysstats_sampler.sample()
 
 
 def web_auto_start(config: dict) -> bool:
@@ -1121,6 +1154,8 @@ def _make_handler(manager: RuntimeManager, servers_dir: str, token: str,
                 return self._guard(lambda: self._json(self._settings_view()))
             if path == "/api/background":
                 return self._guard(self._background_get)
+            if path == "/api/system":
+                return self._guard(self._system_stats)
             if path == "/api/update":
                 return self._guard(self._update_check)
             if path == "/api/openfrp/frpc":
@@ -1703,7 +1738,7 @@ def _make_handler(manager: RuntimeManager, servers_dir: str, token: str,
                 "bg_blur": _clamp_int(config.get("bg_blur"), 12, 0, 40),
                 "bg_visibility": _clamp_int(config.get("bg_visibility"), 100, 0, 100),
                 "bg_component_opacity": _clamp_int(
-                    config.get("bg_component_opacity"), 100, 40, 100),
+                    config.get("bg_component_opacity"), 85, 40, 100),
             }
 
         def _settings_save(self, body: dict) -> None:
@@ -1757,7 +1792,7 @@ def _make_handler(manager: RuntimeManager, servers_dir: str, token: str,
                     body.get("bg_visibility"), 100, 0, 100)
             if "bg_component_opacity" in body:
                 config["bg_component_opacity"] = _clamp_int(
-                    body.get("bg_component_opacity"), 100, 40, 100)
+                    body.get("bg_component_opacity"), 85, 40, 100)
             if "bg_on" in body:
                 config["bg_on"] = bool(body.get("bg_on"))
 
@@ -1781,6 +1816,28 @@ def _make_handler(manager: RuntimeManager, servers_dir: str, token: str,
 
             self._json(dict(self._settings_view(),
                             message=t("web.settings.saved")))
+
+        def _system_stats(self) -> None:
+            """仪表板：整机占用 + 正在跑的实例。"""
+            data = system_snapshot()
+            running = []
+            for entry in list_servers(servers_dir):
+                path = entry["_path"]
+                name = entry.get("name") or os.path.basename(
+                    os.path.normpath(path))
+                runtime = manager.state_of(name)
+                if not runtime or runtime.get("state") != "running":
+                    continue
+                running.append({
+                    "name": name,
+                    "pid": runtime.get("pid"),
+                    "started_at": runtime.get("started_at"),
+                    "mc_version": entry.get("mc_version", ""),
+                    "jar": entry.get("jar", ""),
+                })
+            data["instances"] = running
+            data["version"] = t("web.panel.title")
+            self._json(dict({"ok": True}, **data))
 
         # -- 自定义背景 ------------------------------------------------------
 

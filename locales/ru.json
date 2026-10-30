@@ -931,5 +931,22 @@
     "web.settings.bg_saved": "Фон обновлён",
     "web.settings.bg_removed": "Фон удалён",
     "web.error.bg_not_image": "Неподдерживаемое изображение (только PNG / JPEG / GIF / WebP)",
-    "web.error.bg_too_large": "Файл слишком большой, лимит {max} МБ"
+    "web.error.bg_too_large": "Файл слишком большой, лимит {max} МБ",
+
+    "web.tab.dash": "Панель",
+    "web.dash.cpu": "ЦП",
+    "web.dash.mem": "Память",
+    "web.dash.net": "Сеть",
+    "web.dash.uptime": "Время работы",
+    "web.dash.instances": "Запущенные экземпляры",
+    "web.dash.empty": "Нет запущенных экземпляров",
+    "web.dash.open": "Открыть",
+    "web.dash.running": "работает",
+    "web.dash.cores": "ядер",
+    "web.dash.net_hint": "Суммарно по всем интерфейсам",
+    "web.dash.unavailable": "нет данных",
+    "web.settings.tab_ui": "Интерфейс",
+    "web.settings.tab_bg": "Фон",
+    "web.settings.tab_boot": "Запуск",
+    "web.settings.tab_about": "О программе"
 }

@@ -932,5 +932,22 @@
     "web.settings.bg_saved": "背景图已更新",
     "web.settings.bg_removed": "背景已移除",
     "web.error.bg_not_image": "这不是支持的图片（只收 PNG / JPEG / GIF / WebP）",
-    "web.error.bg_too_large": "背景图太大，上限 {max} MB"
+    "web.error.bg_too_large": "背景图太大，上限 {max} MB",
+
+    "web.tab.dash": "仪表板",
+    "web.dash.cpu": "CPU 占用",
+    "web.dash.mem": "内存",
+    "web.dash.net": "网络",
+    "web.dash.uptime": "运行时长",
+    "web.dash.instances": "正在运行的实例",
+    "web.dash.empty": "当前没有在跑的实例",
+    "web.dash.open": "打开",
+    "web.dash.running": "运行中",
+    "web.dash.cores": "核",
+    "web.dash.net_hint": "所有网卡收发合计",
+    "web.dash.unavailable": "取不到",
+    "web.settings.tab_ui": "界面",
+    "web.settings.tab_bg": "背景",
+    "web.settings.tab_boot": "启动",
+    "web.settings.tab_about": "关于"
 }

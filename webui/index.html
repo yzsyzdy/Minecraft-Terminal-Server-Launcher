@@ -99,10 +99,6 @@
      那种「连图片一起放大」的副作用。
      注意：这里的分档是「绝对值」——标准档（m）就是过去「特大」那一档，
      因为实测下来那一档才是能舒服看清、在手机上点得准的尺寸。 */
-  html[data-uifont="s"]{--ui-scale:.86}
-  html[data-uifont="m"]{--ui-scale:1.18}
-  html[data-uifont="l"]{--ui-scale:1.28}
-  html[data-uifont="xl"]{--ui-scale:1.38}
   html[data-uibtn="m"]{--btn-scale:1.42}
   html[data-uibtn="l"]{--btn-scale:1.6}
   html[data-uibtn="xl"]{--btn-scale:1.78}
@@ -138,6 +134,54 @@
   .slider input[type=range]{flex:1;accent-color:var(--brand);height:20px}
   .slider output{min-width:4.2em;text-align:right;
                  font:500 var(--t-meta)/1 var(--mono);color:var(--dim)}
+
+  /* 设置改成侧栏式：左边分类，右边只显示当前分类，省得一路往下滚 */
+  #cfgmodal .dialog{width:min(840px,100%)}
+  .settings-body{display:grid;grid-template-columns:172px 1fr;
+                 padding:0;min-height:420px;max-height:min(66vh,600px)}
+  .settings-nav{display:flex;flex-direction:column;gap:2px;padding:var(--s3);
+                border-right:1px solid var(--line);background:var(--sunken);
+                overflow:auto}
+  .settings-nav button{justify-content:flex-start;border-color:transparent;
+                       background:transparent;color:var(--dim);
+                       text-align:left;width:100%}
+  .settings-nav button:hover:not(:disabled){background:var(--hover);
+                       border-color:transparent;color:var(--fg)}
+  .settings-nav button.on{background:var(--surface);border-color:var(--line);
+                          color:var(--fg);font-weight:600}
+  .settings-panes{padding:var(--s4);overflow:auto;display:flex;
+                  flex-direction:column;gap:var(--s2)}
+  .settings-panes section{display:flex;flex-direction:column;gap:var(--s2)}
+  .settings-panes section[hidden]{display:none}
+
+  /* 仪表板 */
+  #dash{padding:var(--s5);overflow:auto;display:flex;flex-direction:column;
+        gap:var(--s5)}
+  .dash-grid{display:grid;gap:var(--s3);
+             grid-template-columns:repeat(auto-fit,minmax(230px,1fr))}
+  .stat{background:var(--surface);border:1px solid var(--line);
+        border-radius:var(--r-lg);padding:var(--s4)}
+  .stat .label{font-size:var(--t-label);color:var(--dim);letter-spacing:.08em;
+               text-transform:uppercase}
+  .stat .value{font:600 calc(var(--t-title) * 1.3)/1.25 var(--mono);
+               margin-top:6px;font-variant-numeric:tabular-nums;
+               white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .stat .sub{font-size:var(--t-label);color:var(--faint);margin-top:6px}
+  .meter{height:6px;border-radius:3px;background:var(--sunken);
+         margin-top:10px;overflow:hidden}
+  .meter i{display:block;height:100%;width:0;background:var(--brand);
+           border-radius:3px;transition:width .3s}
+  .meter.warn i{background:var(--warn)}
+  .meter.err i{background:var(--err)}
+  .dash-list{display:flex;flex-direction:column;gap:var(--s2)}
+  .dash-item{display:flex;align-items:center;gap:var(--s3);
+             padding:var(--s3) var(--s4);background:var(--surface);
+             border:1px solid var(--line);border-radius:var(--r)}
+  .dash-item .n{font-weight:600}
+  .dash-item .m{color:var(--dim);font:400 var(--t-label)/1.6 var(--mono)}
+  .dash-empty{color:var(--dim);font-size:var(--t-meta);
+              padding:var(--s4);border:1px dashed var(--line-strong);
+              border-radius:var(--r)}
 
   *{box-sizing:border-box}
   /* 作者样式优先于浏览器默认样式，所以下面那些 display:flex 会把 UA 的
@@ -629,6 +673,7 @@
       <span class="badge" id="curstate"></span>
       <span class="sp"></span>
       <span class="tabs">
+        <button class="tab" id="tab-dash"></button>
         <button class="tab on" id="tab-console"></button>
         <button class="tab" id="tab-files"></button>
         <button class="tab" id="tab-ai"></button>
@@ -639,6 +684,36 @@
       <button id="follow"></button>
     </div>
     <div id="details"></div>
+    <div id="dash" hidden>
+      <div class="dash-grid">
+        <div class="stat">
+          <div class="label" id="l-dash-cpu"></div>
+          <div class="value" id="dash-cpu">—</div>
+          <div class="meter"><i id="dash-cpu-bar"></i></div>
+          <div class="sub" id="dash-cpu-sub"></div>
+        </div>
+        <div class="stat">
+          <div class="label" id="l-dash-mem"></div>
+          <div class="value" id="dash-mem">—</div>
+          <div class="meter"><i id="dash-mem-bar"></i></div>
+          <div class="sub" id="dash-mem-sub"></div>
+        </div>
+        <div class="stat">
+          <div class="label" id="l-dash-net"></div>
+          <div class="value" id="dash-net">—</div>
+          <div class="sub" id="dash-net-sub"></div>
+        </div>
+        <div class="stat">
+          <div class="label" id="l-dash-up"></div>
+          <div class="value" id="dash-up">—</div>
+          <div class="sub" id="dash-up-sub"></div>
+        </div>
+      </div>
+      <div>
+        <div class="label" id="l-dash-instances" style="color:var(--dim);letter-spacing:.08em;margin-bottom:var(--s2)"></div>
+        <div class="dash-list" id="dash-instances"></div>
+      </div>
+    </div>
     <pre id="log"></pre>
     <div id="files" hidden>
       <div id="fbar">
@@ -1277,110 +1352,126 @@
 </div>
 
 <div id="cfgmodal" hidden>
-  <div class="dialog" style="width:min(560px,100%)">
+  <div class="dialog">
     <div class="dhead">
       <b id="cfgtitle"></b>
       <span style="flex:1"></span>
       <button class="ghost" id="cfgclose">✕</button>
     </div>
-    <div class="dbody">
-      <div class="drow">
-        <div class="field">
-          <label id="l-cfglang"></label>
-          <select id="cfglang"></select>
-        </div>
-        <div class="field">
-          <label id="l-cfgthreads"></label>
-          <input id="cfgthreads" type="number" min="1" max="32" step="1">
-        </div>
-      </div>
-      <div class="hint" id="cfgthreads-hint"></div>
-      <div class="drow">
-        <div class="field">
-          <label id="l-cfgfont"></label>
-          <select id="cfgfont">
-            <option value="s"></option>
-            <option value="m"></option>
-            <option value="l"></option>
-            <option value="xl"></option>
-          </select>
-        </div>
-        <div class="field">
-          <label id="l-cfguibtn"></label>
-          <select id="cfguibtn">
-            <option value="m"></option>
-            <option value="l"></option>
-            <option value="xl"></option>
-          </select>
-        </div>
-      </div>
-      <div class="hint" id="cfgui-hint"></div>
+    <div class="dbody settings-body">
+      <nav class="settings-nav" id="cfg-nav">
+        <button class="on" data-pane="ui" id="cfg-nav-ui"></button>
+        <button data-pane="bg" id="cfg-nav-bg"></button>
+        <button data-pane="boot" id="cfg-nav-boot"></button>
+        <button data-pane="about" id="cfg-nav-about"></button>
+      </nav>
+      <div class="settings-panes">
+        <section id="cfgpane-ui">
+          <div class="drow">
+            <div class="field">
+              <label id="l-cfglang"></label>
+              <select id="cfglang"></select>
+            </div>
+            <div class="field">
+              <label id="l-cfgthreads"></label>
+              <input id="cfgthreads" type="number" min="1" max="32" step="1">
+            </div>
+          </div>
+          <div class="hint" id="cfgthreads-hint"></div>
+          <div class="field" style="margin-top:var(--s2)">
+            <label id="l-cfgfont"></label>
+            <div class="slider">
+              <input type="range" id="cfgfont" min="0.75" max="1.55" step="0.05">
+              <output id="of-cfgfont"></output>
+            </div>
+          </div>
+          <div class="field" style="margin-top:var(--s2)">
+            <label id="l-cfguibtn"></label>
+            <select id="cfguibtn">
+              <option value="m"></option>
+              <option value="l"></option>
+              <option value="xl"></option>
+            </select>
+          </div>
+          <div class="hint" id="cfgui-hint"></div>
+        </section>
 
-      <div class="drow" style="align-items:center">
-        <b id="l-cfgbg"></b>
-        <span style="flex:1"></span>
-        <button id="cfgbgupload"></button>
-        <button id="cfgbgclear"></button>
+        <section id="cfgpane-bg" hidden>
+          <div class="drow" style="align-items:center">
+            <b id="l-cfgbg"></b>
+            <span style="flex:1"></span>
+            <button id="cfgbgupload"></button>
+            <button id="cfgbgclear"></button>
+          </div>
+          <div class="hint" id="cfgbginfo"></div>
+          <div class="drow">
+            <label class="check">
+              <input type="checkbox" id="cfgbgon">
+              <span id="l-cfgbgon"></span>
+            </label>
+          </div>
+          <div class="hint" id="cfgbghint"></div>
+          <div class="drow" style="flex-direction:column;align-items:stretch;gap:10px">
+            <div class="slider">
+              <label id="l-cfgbgblur" style="min-width:7.5em;color:var(--dim)"></label>
+              <input type="range" id="cfgbgblur" min="0" max="40" step="1">
+              <output id="of-cfgbgblur"></output>
+            </div>
+            <div class="slider">
+              <label id="l-cfgbgvis" style="min-width:7.5em;color:var(--dim)"></label>
+              <input type="range" id="cfgbgvis" min="0" max="100" step="1">
+              <output id="of-cfgbgvis"></output>
+            </div>
+            <div class="slider">
+              <label id="l-cfgbgop" style="min-width:7.5em;color:var(--dim)"></label>
+              <input type="range" id="cfgbgop" min="40" max="100" step="1">
+              <output id="of-cfgbgop"></output>
+            </div>
+          </div>
+          <input type="file" id="cfgbgfile" hidden
+                 accept="image/png,image/jpeg,image/gif,image/webp">
+        </section>
+
+        <section id="cfgpane-boot" hidden>
+          <div class="drow">
+            <div class="field">
+              <label id="l-cfgauto"></label>
+              <select id="cfgauto"></select>
+            </div>
+          </div>
+          <div class="drow">
+            <label class="check">
+              <input type="checkbox" id="cfgprefer">
+              <span id="l-cfgprefer"></span>
+            </label>
+          </div>
+          <div class="hint" id="cfgprefer-hint"></div>
+          <div class="drow">
+            <label class="check">
+              <input type="checkbox" id="cfgrestore">
+              <span id="l-cfgrestore"></span>
+            </label>
+          </div>
+          <div class="hint" id="cfgrestore-hint"></div>
+          <div class="drow">
+            <label class="check">
+              <input type="checkbox" id="cfgstartup">
+              <span id="l-cfgstartup"></span>
+            </label>
+          </div>
+          <div class="hint" id="cfgstartup-hint"></div>
+        </section>
+
+        <section id="cfgpane-about" hidden>
+          <div class="hint" id="cfgupdate"></div>
+          <div class="drow">
+            <button id="cfgcheck"></button>
+          </div>
+        </section>
       </div>
-      <div class="hint" id="cfgbginfo"></div>
-      <div class="drow">
-        <label class="check">
-          <input type="checkbox" id="cfgbgon">
-          <span id="l-cfgbgon"></span>
-        </label>
-      </div>
-      <div class="hint" id="cfgbghint"></div>
-      <div class="drow" style="flex-direction:column;align-items:stretch;gap:10px">
-        <div class="slider">
-          <label id="l-cfgbgblur" style="min-width:7.5em;color:var(--dim)"></label>
-          <input type="range" id="cfgbgblur" min="0" max="40" step="1">
-          <output id="of-cfgbgblur"></output>
-        </div>
-        <div class="slider">
-          <label id="l-cfgbgvis" style="min-width:7.5em;color:var(--dim)"></label>
-          <input type="range" id="cfgbgvis" min="0" max="100" step="1">
-          <output id="of-cfgbgvis"></output>
-        </div>
-        <div class="slider">
-          <label id="l-cfgbgop" style="min-width:7.5em;color:var(--dim)"></label>
-          <input type="range" id="cfgbgop" min="40" max="100" step="1">
-          <output id="of-cfgbgop"></output>
-        </div>
-      </div>
-      <input type="file" id="cfgbgfile" hidden
-             accept="image/png,image/jpeg,image/gif,image/webp">
-      <div class="drow">
-        <div class="field">
-          <label id="l-cfgauto"></label>
-          <select id="cfgauto"></select>
-        </div>
-      </div>
-      <div class="drow">
-        <label class="check">
-          <input type="checkbox" id="cfgprefer">
-          <span id="l-cfgprefer"></span>
-        </label>
-      </div>
-      <div class="hint" id="cfgprefer-hint"></div>
-      <div class="drow">
-        <label class="check">
-          <input type="checkbox" id="cfgrestore">
-          <span id="l-cfgrestore"></span>
-        </label>
-      </div>
-      <div class="hint" id="cfgrestore-hint"></div>
-      <div class="drow">
-        <label class="check">
-          <input type="checkbox" id="cfgstartup">
-          <span id="l-cfgstartup"></span>
-        </label>
-      </div>
-      <div class="hint" id="cfgstartup-hint"></div>
-      <div class="hint" id="cfgupdate"></div>
-      <div class="dactions">
-        <button id="cfgcheck"></button>
-        <button class="primary" id="cfgsave"></button>
-      </div>
+    </div>
+    <div class="dactions" style="padding:var(--s3) var(--s4);border-top:1px solid var(--line)">
+      <button class="primary" id="cfgsave"></button>
     </div>
   </div>
 </div>
@@ -1585,6 +1676,7 @@ function applyStrings() {
   $("themebtn").title = strings["web.panel.theme"] || "Theme";
   $("follow").className = follow ? "on" : "";
 
+  $("tab-dash").textContent = strings["web.tab.dash"] || "Dashboard";
   $("tab-console").textContent = strings["web.tab.console"] || "Console";
   $("tab-files").textContent = strings["web.tab.files"] || "Files";
   $("fup").title = strings["web.files.up"] || "..";
@@ -1751,13 +1843,20 @@ function applyStrings() {
   $("l-cfguibtn").textContent = strings["web.settings.ui_button"] || "";
   $("cfgui-hint").textContent = strings["web.settings.ui_hint"] || "";
   const uiNames = {
-    s: strings["web.settings.ui_s"] || "Small",
     m: strings["web.settings.ui_m"] || "Normal",
     l: strings["web.settings.ui_l"] || "Large",
     xl: strings["web.settings.ui_xl"] || "Extra large",
   };
-  [...$("cfgfont").options].forEach((opt) => { opt.textContent = uiNames[opt.value] || opt.value; });
   [...$("cfguibtn").options].forEach((opt) => { opt.textContent = uiNames[opt.value] || opt.value; });
+  $("cfg-nav-ui").textContent = strings["web.settings.tab_ui"] || "Interface";
+  $("cfg-nav-bg").textContent = strings["web.settings.tab_bg"] || "Background";
+  $("cfg-nav-boot").textContent = strings["web.settings.tab_boot"] || "Startup";
+  $("cfg-nav-about").textContent = strings["web.settings.tab_about"] || "About";
+  $("l-dash-cpu").textContent = strings["web.dash.cpu"] || "CPU";
+  $("l-dash-mem").textContent = strings["web.dash.mem"] || "Memory";
+  $("l-dash-net").textContent = strings["web.dash.net"] || "Network";
+  $("l-dash-up").textContent = strings["web.dash.uptime"] || "Uptime";
+  $("l-dash-instances").textContent = strings["web.dash.instances"] || "Running instances";
   $("l-cfgbg").textContent = strings["web.settings.bg"] || "Background";
   $("l-cfgbgon").textContent = strings["web.settings.bg_enable"] || "Enable";
   $("l-cfgbgblur").textContent = strings["web.settings.bg_blur"] || "Blur";
@@ -2400,6 +2499,7 @@ let cfgState = null;
 
 async function openConfig() {
   $("cfgupdate").textContent = "";
+  cfgPane("ui");
   $("cfgmodal").hidden = false;
   try {
     cfgState = await apiOk("/api/settings");
@@ -2445,7 +2545,8 @@ function cfgFill(data) {
   $("l-cfgstartup").parentElement.style.opacity = startup.supported ? "1" : "0.45";
   $("cfgrestore").checked = data.restore_running !== false;
   $("cfgprefer").checked = !!data.prefer_bmcl;
-  $("cfgfont").value = nearestScaleKey(FONT_SCALE_STEPS, data.ui_font_scale);
+  $("cfgfont").value = String(clampFont(data.ui_font_scale));
+  if ($("of-cfgfont")) $("of-cfgfont").textContent = Math.round(clampFont(data.ui_font_scale) * 100) + " %";
   $("cfguibtn").value = nearestScaleKey(BTN_SCALE_STEPS, data.ui_button_scale);
 
   // 背景：图存在才启用这些控件；没有图时按钮变成「选择图片」
@@ -2468,9 +2569,8 @@ function cfgFill(data) {
 }
 
 async function saveConfig() {
-  const fontKey = $("cfgfont").value;
   const btnKey = $("cfguibtn").value;
-  const fontScale = (FONT_SCALE_STEPS.find((s) => s[0] === fontKey) || ["m", 1])[1];
+  const fontScale = clampFont($("cfgfont").value);
   const btnScale = (BTN_SCALE_STEPS.find((s) => s[0] === btnKey) || ["m", 1])[1];
   const body = {
     language: $("cfglang").value,
@@ -2713,15 +2813,20 @@ function switchTab(name) {
   const isFiles = name === "files";
   const isAi = name === "ai";
   const isJars = name === "jars";
+  const isDash = name === "dash";
+  $("tab-dash").className = "tab" + (isDash ? " on" : "");
   $("tab-console").className = "tab" + (name === "console" ? " on" : "");
   $("tab-files").className = "tab" + (isFiles ? " on" : "");
   $("tab-ai").className = "tab" + (isAi ? " on" : "");
   $("tab-jars").className = "tab" + (isJars ? " on" : "");
+  $("dash").hidden = !isDash;
+  // 仪表板占满整栏，详情 chips 收起来
+  $("details").hidden = isDash;
   $("files").hidden = !isFiles;
   $("ai").hidden = !isAi;
   $("jars").hidden = !isJars;
   // 控制台那一列（日志 + 输入条 + 底部按钮）在其它标签下都要让位
-  const hideConsole = isFiles || isAi || isJars;
+  const hideConsole = isFiles || isAi || isJars || isDash;
   $("log").hidden = hideConsole;
   $("bar").hidden = hideConsole;
   $("clear").hidden = hideConsole;
@@ -2730,6 +2835,7 @@ function switchTab(name) {
   if (isFiles) loadFiles(filesPath);
   if (isAi) aiShow();
   if (isJars) jarsShow();
+  if (isDash) dashStart(); else dashStop();
 }
 
 /* ------------------------------------------------------------------ AI 助手 */
@@ -4131,6 +4237,13 @@ $("cfgcheck").onclick = checkUpdate;
 });
 $("cfgbgon").addEventListener("change", () => applyBackground(bgFormState()));
 $("cfgbgupload").onclick = () => $("cfgbgfile").click();
+[...document.querySelectorAll("#cfg-nav button")].forEach((btn) => {
+  btn.onclick = () => cfgPane(btn.dataset.pane);
+});
+$("tab-dash").onclick = () => switchTab("dash");
+$("cfgbgblur").addEventListener("input", syncBgOutputs);
+$("cfgfont").addEventListener("input", () => applyUiScale($("cfgfont").value, $("cfguibtn").value));
+$("cfguibtn").addEventListener("change", () => applyUiScale($("cfgfont").value, $("cfguibtn").value));
 $("cfgbgclear").onclick = removeBackground;
 $("cfgbgfile").onchange = (ev) => {
   const file = ev.target.files && ev.target.files[0];
@@ -4237,10 +4350,16 @@ applyTheme(themeMode());
 
 /* ------------------------------------------------------------ 界面缩放 */
 
-// 服务端存的是倍率，属性只认档位；取最接近的一档，避免浮点误差把 1.08
-// 判成「自定义」而落回默认。
-const FONT_SCALE_STEPS = [["s", 0.86], ["m", 1.18], ["l", 1.28], ["xl", 1.38]];
+// 字号是连续值（滑块），直接写 --ui-scale；按钮只保留三档，用属性切换。
+const FONT_MIN = 0.75;
+const FONT_MAX = 1.55;
 const BTN_SCALE_STEPS = [["m", 1.42], ["l", 1.6], ["xl", 1.78]];
+
+function clampFont(value) {
+  const num = Number(value);
+  if (!Number.isFinite(num)) return 1.18;
+  return Math.max(FONT_MIN, Math.min(FONT_MAX, Math.round(num * 100) / 100));
+}
 
 function nearestScaleKey(steps, value) {
   const num = Number(value);
@@ -4253,10 +4372,12 @@ function nearestScaleKey(steps, value) {
 }
 
 function applyUiScale(fontScale, btnScale) {
-  document.documentElement.setAttribute(
-    "data-uifont", nearestScaleKey(FONT_SCALE_STEPS, fontScale));
+  const font = clampFont(fontScale);
+  document.documentElement.style.setProperty("--ui-scale", String(font));
   document.documentElement.setAttribute(
     "data-uibtn", nearestScaleKey(BTN_SCALE_STEPS, btnScale));
+  const out = $("of-cfgfont");
+  if (out) out.textContent = Math.round(font * 100) + " %";
 }
 
 // 面板一打开就按已保存的倍率渲染；拿不到 settings 就用默认，不阻断启动
@@ -4272,7 +4393,7 @@ async function loadPanelPrefs() {
 
 /* --------------------------------------------------------- 自定义背景 */
 
-let bgState = { enabled: false, on: true, version: 0, blur: 12, visibility: 100, opacity: 100 };
+let bgState = { enabled: false, on: true, version: 0, blur: 12, visibility: 100, opacity: 85 };
 
 function applyBackground(next) {
   bgState = Object.assign({}, bgState, next || {});
@@ -4300,7 +4421,7 @@ function applyPanelSettings(data) {
     blur: data.bg_blur === undefined ? 12 : data.bg_blur,
     visibility: data.bg_visibility === undefined ? 100 : data.bg_visibility,
     opacity: data.bg_component_opacity === undefined
-      ? 100 : data.bg_component_opacity,
+      ? 85 : data.bg_component_opacity,
   });
   if (data.bg_enabled) bgState.file = data.bg_file || "";
 }
@@ -4350,6 +4471,152 @@ async function removeBackground() {
   } catch (err) {
     fail(err);
   }
+}
+
+/* ------------------------------------------------------------ 设置分类 */
+
+function cfgPane(name) {
+  [...document.querySelectorAll("#cfg-nav button")].forEach((btn) => {
+    btn.classList.toggle("on", btn.dataset.pane === name);
+  });
+  ["ui", "bg", "boot", "about"].forEach((key) => {
+    const pane = $("cfgpane-" + key);
+    if (pane) pane.hidden = key !== name;
+  });
+}
+
+/* ------------------------------------------------------------ 仪表板 */
+
+let dashTimer = null;
+
+function fmtBytes(value) {
+  const num = Number(value);
+  if (!Number.isFinite(num) || num < 0) return "—";
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  let n = num;
+  let i = 0;
+  while (n >= 1024 && i < units.length - 1) { n /= 1024; i += 1; }
+  return (n >= 100 || i === 0 ? Math.round(n) : n.toFixed(1)) + " " + units[i];
+}
+
+function fmtDuration(seconds) {
+  const num = Number(seconds);
+  if (!Number.isFinite(num) || num < 0) return "—";
+  const total = Math.floor(num);
+  const d = Math.floor(total / 86400);
+  const h = Math.floor((total % 86400) / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  if (d) return d + " 天 " + h + " 小时";
+  if (h) return h + " 小时 " + m + " 分";
+  if (m) return m + " 分 " + (total % 60) + " 秒";
+  return total + " 秒";
+}
+
+function dashBar(id, percent) {
+  const bar = $(id);
+  const box = bar.parentElement;
+  const value = Number(percent);
+  const has = Number.isFinite(value);
+  bar.style.width = (has ? Math.max(0, Math.min(100, value)) : 0) + "%";
+  box.classList.toggle("warn", has && value >= 70 && value < 90);
+  box.classList.toggle("err", has && value >= 90);
+}
+
+function renderDash(data) {
+  const cpu = data.cpu || {};
+  const mem = data.memory || {};
+  const net = data.network || {};
+
+  $("dash-cpu").textContent = cpu.percent === null || cpu.percent === undefined
+    ? "—" : cpu.percent + " %";
+  $("dash-cpu-sub").textContent = (cpu.cores || "?") + " " +
+    (strings["web.dash.cores"] || "cores");
+  dashBar("dash-cpu-bar", cpu.percent);
+
+  const memText = (mem.used && mem.total)
+    ? fmtBytes(mem.used) + " / " + fmtBytes(mem.total)
+    : "—";
+  $("dash-mem").textContent = memText;
+  $("dash-mem-sub").textContent = mem.percent === null || mem.percent === undefined
+    ? (strings["web.dash.unavailable"] || "unavailable") : mem.percent + " %";
+  dashBar("dash-mem-bar", mem.percent);
+
+  const netOk = net.rx_bps !== null && net.rx_bps !== undefined;
+  $("dash-net").textContent = netOk
+    ? "↓ " + fmtBytes(net.rx_bps) + "/s   ↑ " + fmtBytes(net.tx_bps) + "/s"
+    : "—";
+  $("dash-net-sub").textContent = strings["web.dash.net_hint"]
+    || "所有网卡合计，含局域网";
+
+  $("dash-up").textContent = fmtDuration(data.uptime);
+  const running = Array.isArray(data.instances) ? data.instances : [];
+  $("dash-up-sub").textContent =
+    (strings["web.dash.running"] || "running") + "：" + running.length;
+
+  const box = $("dash-instances");
+  box.innerHTML = "";
+  if (!running.length) {
+    const empty = document.createElement("div");
+    empty.className = "dash-empty";
+    empty.textContent = strings["web.dash.empty"] || "No running instance";
+    box.appendChild(empty);
+    return;
+  }
+  running.forEach((item) => {
+    const row = document.createElement("div");
+    row.className = "dash-item";
+
+    const name = document.createElement("span");
+    name.className = "n";
+    name.textContent = item.name;
+
+    const badge = document.createElement("span");
+    badge.className = "badge running";
+    badge.textContent = stateLabel("running");
+
+    const meta = document.createElement("span");
+    meta.className = "m";
+    const started = item.started_at
+      ? fmtDuration(Date.now() / 1000 - item.started_at) : "—";
+    meta.textContent = [
+      item.mc_version || "",
+      item.jar || "",
+      item.pid ? "PID " + item.pid : "",
+      (strings["web.dash.uptime"] || "uptime") + " " + started,
+    ].filter(Boolean).join(" · ");
+
+    const open = document.createElement("button");
+    open.textContent = strings["web.dash.open"] || "Open";
+    open.onclick = () => {
+      select(item.name);
+      switchTab("console");
+    };
+
+    row.appendChild(name);
+    row.appendChild(badge);
+    row.appendChild(meta);
+    row.appendChild(document.createElement("span")).className = "sp";
+    row.appendChild(open);
+    box.appendChild(row);
+  });
+}
+
+async function refreshDash() {
+  try {
+    renderDash(await apiOk("/api/system"));
+  } catch (err) {
+    // 轮询失败不打扰用户：机器忙、面板重启都可能导致一次失败
+  }
+}
+
+function dashStart() {
+  refreshDash();
+  if (!dashTimer) dashTimer = setInterval(refreshDash, 2000);
+}
+
+function dashStop() {
+  if (dashTimer) clearInterval(dashTimer);
+  dashTimer = null;
 }
 
 /* ------------------------------------------------------ 单输入框小对话框 */
