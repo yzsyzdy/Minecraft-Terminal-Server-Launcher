@@ -63,3 +63,6 @@ _*.txt
 # 上次退出时还在跑的实例名单（本机运行时状态）
 .mstl-running.json
 .mstl-running.json.tmp
+
+# 面板自定义背景图（用户本机的图片，可能几十 MB，不该进仓库）
+.mstl-background.*
