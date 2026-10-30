@@ -17,20 +17,35 @@ import download_msl as dm
 
 class OfficialPaperFallbackTest(unittest.TestCase):
     def test_picks_the_highest_build_with_a_download(self):
-        payload = {
-            "builds": [
-                {"build": 3, "downloads": {"application": {"name": "a.jar", "sha256": "s3"}}},
-                {"build": 9, "downloads": {"application": {"name": "b.jar", "sha256": "s9"}}},
-                {"build": 12, "downloads": {}},      # 没得下，必须跳过
-            ]
-        }
+        # Fill v3 的形状：数组、downloads["server:default"]、校验值在 checksums 里
+        def build(num, name, sha):
+            return {"id": num, "channel": "STABLE",
+                    "downloads": {"server:default": {
+                        "name": name, "url": f"https://fill/{name}",
+                        "checksums": {"sha256": sha}}}}
+        payload = [
+            build(3, "a.jar", "s3"),
+            build(9, "b.jar", "s9"),
+            {"id": 12, "channel": "STABLE", "downloads": {}},   # 没得下，必须跳过
+        ]
         with mock.patch.object(dm, "fetch_json", return_value=payload):
             got = dm._official_download_url("paper", "1.21.8")
         self.assertEqual(got["sha256"], "s9")
-        self.assertIn("/builds/9/downloads/b.jar", got["url"])
+        self.assertTrue(got["url"].endswith("/b.jar"))
+
+    def test_prefers_stable_channel_over_a_newer_experimental(self):
+        def build(num, channel):
+            return {"id": num, "channel": channel,
+                    "downloads": {"server:default": {
+                        "name": f"p{num}.jar", "url": f"https://fill/p{num}.jar",
+                        "checksums": {"sha256": f"s{num}"}}}}
+        payload = [build(20, "ALPHA"), build(10, "STABLE")]
+        with mock.patch.object(dm, "fetch_json", return_value=payload):
+            got = dm._official_download_url("paper", "1.21.8")
+        self.assertTrue(got["url"].endswith("/p10.jar"))
 
     def test_returns_none_when_nothing_is_downloadable(self):
-        with mock.patch.object(dm, "fetch_json", return_value={"builds": []}):
+        with mock.patch.object(dm, "fetch_json", return_value=[]):
             self.assertIsNone(dm._official_download_url("paper", "1.21.8"))
 
     def test_returns_none_when_the_api_is_down(self):
@@ -73,11 +88,14 @@ class FallbackWiringTest(unittest.TestCase):
 
     def test_versions_fall_back_and_are_newest_first(self):
         """_interactive_pick_version 把 versions[0] 当最新版，顺序不能反。"""
+        # Fill v3 按大版本分组，组间与组内都已经是新的在前
+        grouped = {"versions": {"1.21": ["1.21.8", "1.21.1"],
+                                "1.20": ["1.20.1"]}}
         with mock.patch.object(dm, "_msl_request", return_value=None), \
-                mock.patch.object(dm, "fetch_json",
-                                  return_value={"versions": ["1.20.1", "1.21.8"]}):
+                mock.patch.object(dm, "fetch_json", return_value=grouped):
             got = dm.msl_get_versions("paper")
         self.assertEqual(got["versions"][0], "1.21.8")
+        self.assertEqual(got["versions"][-1], "1.20.1")
 
 
 class SourceOrderTest(unittest.TestCase):

@@ -9,6 +9,7 @@ import os
 import json
 import re
 import shutil
+import time
 import hashlib
 import threading
 import concurrent.futures
@@ -305,32 +306,54 @@ def _bmcl_download_url(server_type: str, version: str) -> Optional[dict]:
     return None
 
 
+def _official_json(url: str, timeout: int = 5, attempts: int = 2):
+    """官方接口的一次请求：超时就重试一次。
+
+    papermc / mojang 的 TLS 握手在国内网络下偶尔会卡住，一次失败就整档降级
+    太亏；两次都不行就交给下一档兜底，用户至少不用等太久。
+    """
+    for index in range(attempts):
+        data = fetch_json(url, timeout=timeout)
+        if data is not None:
+            return data
+        if index + 1 < attempts:
+            time.sleep(0.3)
+    return None
+
+
 def _official_versions(server_type: str) -> Optional[dict]:
     """向官方源要版本列表，返回与 MSL 同形的 {"versions": [...]}。
 
     顺序必须「新的在前」：_interactive_pick_version 把 versions[0] 当成最新版。
+    PaperMC 的 v2 API 已经下线（返回 410 Gone），现在只认 Fill v3。
     """
     versions: Optional[list] = None
     if server_type in _OFFICIAL_PAPER_PROJECTS:
         project = _OFFICIAL_PAPER_PROJECTS[server_type]
-        data = fetch_json(f"https://api.papermc.io/v2/projects/{project}", timeout=20)
+        data = _official_json(f"https://fill.papermc.io/v3/projects/{project}")
         if isinstance(data, dict):
-            versions = list(data.get("versions") or [])
-            versions.reverse()          # PaperMC 是从旧到新
+            grouped = data.get("versions")
+            if isinstance(grouped, dict):
+                # {"26.3": ["26.3", "26.3-rc-3"], ...}：键与值本身已是新的在前
+                versions = []
+                for items in grouped.values():
+                    if isinstance(items, list):
+                        versions.extend(str(v) for v in items)
+            elif isinstance(grouped, list):
+                versions = [str(v) for v in grouped]
     elif server_type == "purpur":
-        data = fetch_json("https://api.purpurmc.org/v2/purpur", timeout=20)
+        data = _official_json("https://api.purpurmc.org/v2/purpur")
         if isinstance(data, dict):
             versions = list(data.get("versions") or [])
             versions.reverse()
     elif server_type == "vanilla":
-        data = fetch_json(
-            "https://launchermeta.mojang.com/mc/game/version_manifest_v2.json",
-            timeout=20)
+        data = _official_json(
+            "https://launchermeta.mojang.com/mc/game/version_manifest_v2.json")
         if isinstance(data, dict):
             versions = [v.get("id") for v in data.get("versions") or []
                         if isinstance(v, dict) and v.get("type") == "release"]
     elif server_type == "fabric":
-        data = fetch_json("https://meta.fabricmc.net/v2/versions/game", timeout=20)
+        data = _official_json("https://meta.fabricmc.net/v2/versions/game")
         if isinstance(data, list):
             versions = [v.get("version") for v in data if isinstance(v, dict)]
     if not versions:
@@ -339,29 +362,38 @@ def _official_versions(server_type: str) -> Optional[dict]:
 
 
 def _official_papermc(server_type: str, version: str) -> Optional[dict]:
+    """PaperMC Fill v3：取这个版本里编号最大、且带服务端下载的构建。"""
     project = _OFFICIAL_PAPER_PROJECTS[server_type]
-    data = fetch_json(
-        f"https://api.papermc.io/v2/projects/{project}/versions/{version}/builds",
-        timeout=20)
-    if not isinstance(data, dict):
+    data = _official_json(
+        f"https://fill.papermc.io/v3/projects/{project}/versions/{version}/builds")
+    builds = data if isinstance(data, list) else (
+        (data or {}).get("builds") if isinstance(data, dict) else None)
+    if not isinstance(builds, list):
         return None
-    best = None
-    for entry in data.get("builds") or []:
+
+    def payload(entry):
+        """服务端 jar 在 downloads["server:default"]；老形状 application 也兼容。"""
         if not isinstance(entry, dict):
-            continue
-        app = ((entry.get("downloads") or {}).get("application") or {})
-        if not app.get("name"):
-            continue
-        if best is None or int(entry.get("build") or 0) > int(best.get("build") or 0):
-            best = entry
-    if best is None:
+            return None
+        downloads = entry.get("downloads") or {}
+        if isinstance(downloads, dict):
+            server = downloads.get("server:default") or downloads.get("application")
+            if isinstance(server, dict) and server.get("url"):
+                return server
         return None
-    app = best["downloads"]["application"]
+
+    stable = [b for b in builds if payload(b)
+              and str(b.get("channel") or "").upper() == "STABLE"]
+    pool = stable or [b for b in builds if payload(b)]
+    if not pool:
+        return None
+    best = max(pool, key=lambda b: int(b.get("id") or b.get("build") or 0))
+    app = payload(best) or {}
+    checksums = app.get("checksums") if isinstance(app.get("checksums"), dict) else {}
     return {
-        "url": (f"https://api.papermc.io/v2/projects/{project}/versions/{version}"
-                f"/builds/{best['build']}/downloads/{app['name']}"),
-        # PaperMC 的 builds 接口直接给 sha256，能校验就校验
-        "sha256": str(app.get("sha256") or ""),
+        "url": str(app.get("url") or ""),
+        # Fill v3 把 sha256 放在 downloads.*.checksums 里，能校验就校验
+        "sha256": str(checksums.get("sha256") or app.get("sha256") or ""),
     }
 
 
@@ -370,8 +402,7 @@ def _official_download_url(server_type: str, version: str) -> Optional[dict]:
     if server_type in _OFFICIAL_PAPER_PROJECTS:
         return _official_papermc(server_type, version)
     if server_type == "purpur":
-        data = fetch_json(f"https://api.purpurmc.org/v2/purpur/{version}/latest",
-                          timeout=20)
+        data = _official_json(f"https://api.purpurmc.org/v2/purpur/{version}/latest")
         build = str((data or {}).get("build") or "") if isinstance(data, dict) else ""
         if not build:
             return None
@@ -380,13 +411,12 @@ def _official_download_url(server_type: str, version: str) -> Optional[dict]:
             "sha256": "",       # Purpur 只给 md5，_verify_sha256 用不上
         }
     if server_type == "vanilla":
-        data = fetch_json(
-            "https://launchermeta.mojang.com/mc/game/version_manifest_v2.json",
-            timeout=20)
+        data = _official_json(
+            "https://launchermeta.mojang.com/mc/game/version_manifest_v2.json")
         for entry in (data or {}).get("versions") or [] if isinstance(data, dict) else []:
             if not isinstance(entry, dict) or entry.get("id") != version:
                 continue
-            detail = fetch_json(str(entry.get("url") or ""), timeout=20)
+            detail = _official_json(str(entry.get("url") or ""))
             server = ((detail or {}).get("downloads") or {}).get("server") or {}
             if server.get("url"):
                 # Mojang 只给 sha1，这里的校验位留空（不假装校验过）
@@ -394,8 +424,8 @@ def _official_download_url(server_type: str, version: str) -> Optional[dict]:
             return None
         return None
     if server_type == "fabric":
-        loaders = fetch_json(
-            f"https://meta.fabricmc.net/v2/versions/loader/{version}", timeout=20)
+        loaders = _official_json(
+            f"https://meta.fabricmc.net/v2/versions/loader/{version}")
         if not isinstance(loaders, list):
             return None
         for entry in loaders:
