@@ -1251,10 +1251,13 @@ def _settings_menu(project_dir: str) -> None:
         current_lang = config.get("language", "") or "auto"
         current_threads = config.get("download_threads", 16)
         auto_server = config.get("auto_start_server", "") or "-"
-        prefer_bmcl = bool(config.get("prefer_bmcl"))
+        from download_msl import source_from_config
+        current_source = source_from_config(config)
         from startup import is_startup_enabled
         startup_state = t("settings.on") if is_startup_enabled() else t("settings.off")
-        source_state = t("settings.source_bmcl") if prefer_bmcl else t("settings.source_msl")
+        source_state = t({"official": "settings.source_official",
+                          "bmcl": "settings.source_bmcl",
+                          "msl": "settings.source_msl"}[current_source])
 
         clear_screen()
         print()
@@ -1387,15 +1390,18 @@ def _settings_menu(project_dir: str) -> None:
             input(t("app.press_enter"))
 
         elif choice == "6":
-            # 切下载源：MSL 优先 <-> BMCL 优先。两边都另有兵底，不会真的断掉
-            config["prefer_bmcl"] = not bool(config.get("prefer_bmcl"))
+            # 切下载源：官方 → BMCL → MSL 循环。每一档都另有兜底，不会真的断掉
+            order = ("official", "bmcl", "msl")
+            next_source = order[(order.index(current_source) + 1) % len(order)]
+            config["download_source"] = next_source
             from download_msl import set_source_preference
-            set_source_preference(config["prefer_bmcl"])
+            set_source_preference(next_source)
             save_config(config, project_dir)
             print()
             print(t("settings.source_saved",
-                    val=t("settings.source_bmcl") if config["prefer_bmcl"]
-                    else t("settings.source_msl")))
+                    val=t({"official": "settings.source_official",
+                           "bmcl": "settings.source_bmcl",
+                           "msl": "settings.source_msl"}[next_source])))
             input(t("app.press_enter"))
 
         else:

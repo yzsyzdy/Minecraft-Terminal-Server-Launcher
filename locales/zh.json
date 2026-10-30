@@ -949,5 +949,14 @@
     "web.settings.tab_ui": "界面",
     "web.settings.tab_bg": "背景",
     "web.settings.tab_boot": "启动",
-    "web.settings.tab_about": "关于"
+    "web.settings.tab_about": "关于",
+
+    "web.settings.download_source": "核心下载源",
+    "web.settings.download_source_hint": "官方 = PaperMC / Purpur / Mojang / Fabric 的官方接口；BMCL 与 MSL 是国内镜像。三种都是「首选 + 两级兜底」，选中的源拿不到会自动换下一个。",
+    "web.settings.source_official": "官方源优先",
+    "web.settings.source_bmcl": "BMCL 镜像优先",
+    "web.settings.source_msl": "MSL 镜像优先",
+    "web.settings.bad_source": "不认识的下载源",
+    "settings.source_official": "官方源优先",
+    "download.source_official": "[提示] 下载源：官方接口"
 }

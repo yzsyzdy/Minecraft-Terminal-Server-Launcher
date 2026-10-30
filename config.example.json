@@ -4,6 +4,7 @@
   "language": "",
   "curseforge_api_key": "",
   "download_threads": 16,
+  "download_source": "msl",
   "auto_start_server": "",
   "ui_font_scale": 1.18,
   "ui_button_scale": 1.42,

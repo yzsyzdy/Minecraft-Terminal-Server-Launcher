@@ -948,5 +948,14 @@
     "web.settings.tab_ui": "Interface",
     "web.settings.tab_bg": "Background",
     "web.settings.tab_boot": "Startup",
-    "web.settings.tab_about": "About"
+    "web.settings.tab_about": "About",
+
+    "web.settings.download_source": "Core download source",
+    "web.settings.download_source_hint": "Official = PaperMC / Purpur / Mojang / Fabric APIs; BMCL and MSL are mirrors. Each choice tries its preferred source first and falls back to the other two.",
+    "web.settings.source_official": "Official first",
+    "web.settings.source_bmcl": "BMCL mirror first",
+    "web.settings.source_msl": "MSL mirror first",
+    "web.settings.bad_source": "Unknown download source",
+    "settings.source_official": "Official first",
+    "download.source_official": "[info] Source: official API"
 }

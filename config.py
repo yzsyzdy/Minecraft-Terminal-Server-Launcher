@@ -12,8 +12,9 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "language": "",
     "curseforge_api_key": "",
     "download_threads": 16,
-    # 核心下载源：false = MSL 优先（BMCL 兜底），true = BMCL 优先
-    "prefer_bmcl": False,
+    # 核心下载源：official / bmcl / msl。三种都是「首选 + 两级兜底」，
+    # 任何一档不可用都会自动往下走，不会真的断掉下载。
+    "download_source": "msl",
     "auto_start_server": "",
     # 面板界面缩放：字号与按钮尺寸。默认 1.18 / 1.42（原来的「特大」档），
     # 取值 0.8 ~ 2.0。

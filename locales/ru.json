@@ -948,5 +948,14 @@
     "web.settings.tab_ui": "Интерфейс",
     "web.settings.tab_bg": "Фон",
     "web.settings.tab_boot": "Запуск",
-    "web.settings.tab_about": "О программе"
+    "web.settings.tab_about": "О программе",
+
+    "web.settings.download_source": "Источник загрузки ядер",
+    "web.settings.download_source_hint": "Официальный = PaperMC / Purpur / Mojang / Fabric; BMCL и MSL — зеркала. Любой вариант сначала пробует выбранный источник, затем остальные два.",
+    "web.settings.source_official": "Сначала официальный",
+    "web.settings.source_bmcl": "Сначала BMCL",
+    "web.settings.source_msl": "Сначала MSL",
+    "web.settings.bad_source": "Неизвестный источник",
+    "settings.source_official": "Сначала официальный",
+    "download.source_official": "[инфо] Источник: официальный API"
 }

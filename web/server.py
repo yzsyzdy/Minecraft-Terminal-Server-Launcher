@@ -295,8 +295,11 @@ WEB_STRINGS = (
     "web.settings.saved",
     "web.settings.restore",
     "web.settings.restore_hint",
-    "web.settings.prefer_bmcl",
-    "web.settings.prefer_bmcl_hint",
+    "web.settings.download_source",
+    "web.settings.download_source_hint",
+    "web.settings.source_official",
+    "web.settings.source_bmcl",
+    "web.settings.source_msl",
     # OpenFrp
     "web.openfrp.tab",
     "web.openfrp.hint",
@@ -1709,6 +1712,7 @@ def _make_handler(manager: RuntimeManager, servers_dir: str, token: str,
         def _settings_view(self) -> dict:
             config = load_config(project_dir)
             from startup import is_startup_enabled, is_supported
+            from download_msl import source_from_config
             startup_state = False
             try:
                 startup_state = is_startup_enabled()
@@ -1725,6 +1729,7 @@ def _make_handler(manager: RuntimeManager, servers_dir: str, token: str,
                             "supported": is_supported()},
                 "restore_running": (config.get("web") or {}).get(
                     "restore_running", True) is not False,
+                "download_source": source_from_config(config),
                 # 界面缩放：面板字号与按钮尺寸。存在 config 里而不是 localStorage，
                 # 换浏览器打开同一台机器时保持一致。
                 "ui_font_scale": _clamp_scale(config.get("ui_font_scale"), 1.18),
@@ -1772,6 +1777,14 @@ def _make_handler(manager: RuntimeManager, servers_dir: str, token: str,
                     self._instance_dir(target)   # 不存在的实例名直接报错
                 config["auto_start_server"] = target
 
+            if "download_source" in body:
+                from download_msl import set_source_preference
+                raw = str(body.get("download_source") or "").strip().lower()
+                if raw not in ("official", "bmcl", "msl"):
+                    raise CoreError("web.settings.bad_source")
+                config["download_source"] = raw
+                set_source_preference(raw)
+
             if "restore_running" in body:
                 web = config.get("web")
                 web = dict(web) if isinstance(web, dict) else {}
@@ -1810,9 +1823,9 @@ def _make_handler(manager: RuntimeManager, servers_dir: str, token: str,
             if changed_language:
                 load_language(config.get("language") or detect_os_language())
 
-            if "prefer_bmcl" in body:
+            if "download_source" in body:
                 from download_msl import set_source_preference
-                set_source_preference(bool(config.get("prefer_bmcl")))
+                set_source_preference(config.get("download_source"))
 
             self._json(dict(self._settings_view(),
                             message=t("web.settings.saved")))
@@ -2455,12 +2468,13 @@ def build_server(project_dir: str, *, host: str = "127.0.0.1", port: int = 8765,
 
     # 下载设置也在这里应用一次：嵌入方不一定会走 start.py，不补上的话面板里
     # 下的核心还是默认线程数、默认下载源。
-    from download_msl import set_download_threads, set_source_preference
+    from download_msl import (set_download_threads, set_source_preference,
+                              source_from_config)
     try:
         set_download_threads(int(config.get("download_threads") or 16))
     except (TypeError, ValueError):
         pass
-    set_source_preference(bool(config.get("prefer_bmcl")))
+    set_source_preference(source_from_config(config))
 
     servers_dir = servers_dir or ensure_servers_folder(project_dir)
     manager = manager or shared_manager(project_dir)

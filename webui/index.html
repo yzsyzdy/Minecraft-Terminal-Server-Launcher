@@ -75,6 +75,11 @@
     --mono:"Cascadia Code",Consolas,"DejaVu Sans Mono",monospace;
 
     --shadow-float:0 1px 2px rgba(31,36,48,.05),0 10px 28px rgba(31,36,48,.10);
+
+    /* 语法高亮：只给编辑器用，不参与界面装饰 */
+    --syn-key:#7b3fbf; --syn-str:#1a7f37; --syn-num:#b3541e;
+    --syn-com:#8a919c; --syn-kw:#3b47b4; --syn-var:#cf222e;
+    --syn-tag:#0a6b8a; --syn-attr:#8a5a00; --syn-cmd:#1a7f37;
   }
 
   /* 深色：宣传片里的「舞台」，暖黑不是纯黑。底色、线、文字直接取 Wiki 的
@@ -93,6 +98,9 @@
     --toast-bg:#2a2620; --toast-fg:#f4f0e8;
     --toast-err-bg:#8c1f28; --toast-err-fg:#ffffff;
     --shadow-float:0 1px 2px rgba(0,0,0,.5),0 12px 32px rgba(0,0,0,.55);
+    --syn-key:#c9a7ff; --syn-str:#7ee2a8; --syn-num:#ffb86b;
+    --syn-com:#7d786f; --syn-kw:#a3adf7; --syn-var:#ff8f8f;
+    --syn-tag:#7fd8ff; --syn-attr:#e7c07b; --syn-cmd:#7ee2a8;
   }
   /* 界面缩放：设置里的「字号 / 按钮大小」写在这两个属性上。
      属性放在 <html> 上，刷新后由 JS 先读 config 再写入，避免整页 zoom
@@ -436,10 +444,28 @@
         border-bottom:1px solid var(--line);background:var(--surface)}
   #epath{color:var(--dim);font:400 11.5px/1 var(--mono);
          overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  #etext{flex:1;min-height:0;border:0;outline:none;resize:none;
-         padding:var(--s3) var(--s4);tab-size:4;
-         font:400 12.5px/1.75 var(--mono);color:var(--fg);
-         background:var(--surface)}
+  #ebody{position:relative;flex:1;min-height:0;display:flex;
+         background:var(--surface);overflow:hidden}
+  /* 高亮层与输入层必须字号、行高、内边距、tab 宽度全部一致，否则光标会
+     和文字错位。textarea 的文字设成透明，只留 caret；高亮由下面的 pre 显示。 */
+  #etext,#ehl{margin:0;border:0;padding:var(--s3) var(--s4);tab-size:4;
+              font:400 12.5px/1.75 var(--mono);
+              white-space:pre;word-wrap:normal;overflow:auto}
+  #etext{position:absolute;inset:0;z-index:2;resize:none;outline:none;
+         background:transparent;color:transparent;caret-color:var(--fg)}
+  #etext::selection{background:var(--select)}
+  #ehl{position:absolute;inset:0;z-index:1;pointer-events:none;
+       color:var(--fg);overflow:hidden;background:var(--surface)}
+  .tok-com{color:var(--syn-com);font-style:italic}
+  .tok-str{color:var(--syn-str)}
+  .tok-key{color:var(--syn-key)}
+  .tok-num{color:var(--syn-num)}
+  .tok-kw{color:var(--syn-kw);font-weight:600}
+  .tok-var{color:var(--syn-var)}
+  .tok-tag{color:var(--syn-tag)}
+  .tok-attr{color:var(--syn-attr)}
+  .tok-cmd{color:var(--syn-cmd)}
+  .tok-punc{color:var(--dim)}
 
   /* ---------------------------------------------------------------- 对话框 */
   /* 遮罩统一：eulamodal / expmodal / cfgmodal 是后来加的，漏在这里的话
@@ -741,7 +767,10 @@
           <button class="primary" id="esave"></button>
           <button id="ecancel"></button>
         </div>
-        <textarea id="etext" spellcheck="false" autocomplete="off"></textarea>
+        <div id="ebody">
+          <pre id="ehl" aria-hidden="true"></pre>
+          <textarea id="etext" spellcheck="false" autocomplete="off" wrap="off"></textarea>
+        </div>
       </div>
     </div>
     <div id="jars" hidden>
@@ -1442,12 +1471,16 @@
             </div>
           </div>
           <div class="drow">
-            <label class="check">
-              <input type="checkbox" id="cfgprefer">
-              <span id="l-cfgprefer"></span>
-            </label>
+            <div class="field">
+              <label id="l-cfgsource"></label>
+              <select id="cfgsource">
+                <option value="official"></option>
+                <option value="bmcl"></option>
+                <option value="msl"></option>
+              </select>
+            </div>
           </div>
-          <div class="hint" id="cfgprefer-hint"></div>
+          <div class="hint" id="cfgsource-hint"></div>
           <div class="drow">
             <label class="check">
               <input type="checkbox" id="cfgrestore">
@@ -1872,8 +1905,16 @@ function applyStrings() {
   $("cfgstartup-hint").textContent = strings["web.settings.startup_hint"] || "";
   $("l-cfgrestore").textContent = strings["web.settings.restore"] || "";
   $("cfgrestore-hint").textContent = strings["web.settings.restore_hint"] || "";
-  $("l-cfgprefer").textContent = strings["web.settings.prefer_bmcl"] || "";
-  $("cfgprefer-hint").textContent = strings["web.settings.prefer_bmcl_hint"] || "";
+  $("l-cfgsource").textContent = strings["web.settings.download_source"] || "";
+  $("cfgsource-hint").textContent = strings["web.settings.download_source_hint"] || "";
+  const sourceNames = {
+    official: strings["web.settings.source_official"] || "Official",
+    bmcl: strings["web.settings.source_bmcl"] || "BMCL",
+    msl: strings["web.settings.source_msl"] || "MSL",
+  };
+  [...$("cfgsource").options].forEach((opt) => {
+    opt.textContent = sourceNames[opt.value] || opt.value;
+  });
   $("cfgcheck").textContent = strings["web.settings.update_check"] || "";
   $("cfgsave").textContent = strings["web.files.save"] || "";
   $("expopen").textContent = strings["web.export.title"] || "";
@@ -2546,7 +2587,7 @@ function cfgFill(data) {
   $("cfgstartup").disabled = !startup.supported;
   $("l-cfgstartup").parentElement.style.opacity = startup.supported ? "1" : "0.45";
   $("cfgrestore").checked = data.restore_running !== false;
-  $("cfgprefer").checked = !!data.prefer_bmcl;
+  $("cfgsource").value = data.download_source || "official";
   $("cfgfont").value = String(clampFont(data.ui_font_scale));
   if ($("of-cfgfont")) $("of-cfgfont").textContent = Math.round(clampFont(data.ui_font_scale) * 100) + " %";
   $("cfguibtn").value = nearestScaleKey(BTN_SCALE_STEPS, data.ui_button_scale);
@@ -2579,7 +2620,7 @@ async function saveConfig() {
     download_threads: Number($("cfgthreads").value) || 16,
     auto_start_server: $("cfgauto").value,
     restore_running: $("cfgrestore").checked,
-    prefer_bmcl: $("cfgprefer").checked,
+    download_source: $("cfgsource").value,
     ui_font_scale: fontScale,
     ui_button_scale: btnScale,
     bg_on: $("cfgbgon").checked,
@@ -3240,6 +3281,161 @@ function downloadFile(entry) {
   a.remove();
 }
 
+/* ------------------------------------------------------------ 语法高亮 */
+/* 不引 CodeMirror 之类的库：一个可执行文件里塞一份编辑器太重，而配置文件
+   需要的只是「注释/字符串/键/数字」几类着色。这里是一个很小的分词器，
+   规则按语言列举，别的语言一律按纯文本显示。 */
+
+const SYN_LANG_BY_EXT = {
+  json: "json", json5: "json",
+  yml: "yaml", yaml: "yaml",
+  properties: "ini", ini: "ini", cfg: "ini", conf: "ini", toml: "ini",
+  bat: "bat", cmd: "bat",
+  sh: "sh", bash: "sh",
+  ps1: "ps1", psm1: "ps1",
+  js: "js", mjs: "js", cjs: "js", ts: "js",
+  html: "xml", htm: "xml", xml: "xml", svg: "xml",
+  css: "css",
+  md: "md", markdown: "md",
+};
+
+const SYN_RULES = {
+  json: [
+    ["tok-key", /"(?:[^"\\\n]|\\.)*"(?=[ \t]*:)/y],
+    ["tok-str", /"(?:[^"\\\n]|\\.)*"/y],
+    ["tok-kw", /\b(?:true|false|null)\b/y],
+    ["tok-num", /-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?/y],
+    ["tok-punc", /[{}[\],:]/y],
+  ],
+  yaml: [
+    ["tok-com", /#[^\n]*/y],
+    ["tok-key", /^[ \t]*[^\s:#][^:#\n]*(?=[ \t]*:)/my],
+    ["tok-punc", /^[ \t]*-(?=\s)/my],
+    ["tok-str", /"(?:[^"\\]|\\.)*"|'(?:[^']|'')*'/y],
+    ["tok-kw", /\b(?:true|false|null|yes|no|on|off)\b/y],
+    ["tok-var", /[&*][A-Za-z0-9_-]+/y],
+    ["tok-num", /-?\d+(?:\.\d+)?/y],
+  ],
+  ini: [
+    ["tok-com", /^[ \t]*[#;][^\n]*/my],
+    ["tok-key", /^[ \t]*[^=\s:;#][^=:\n]*(?=[=:])/my],
+    ["tok-str", /"[^"\n]*"/y],
+    ["tok-kw", /\b(?:true|false)\b/iy],
+    ["tok-num", /\b\d+(?:[.,]\d+)*\b/y],
+  ],
+  bat: [
+    ["tok-com", /^[ \t]*(?:rem(?:\s[^\n]*)?|::[^\n]*)/imy],
+    ["tok-label", /^:[A-Za-z0-9_.-]+/my],
+    ["tok-str", /"[^"\n]*"/y],
+    ["tok-var", /%[^%\r\n]+%|%%?[A-Za-z]/y],
+    ["tok-kw", /\b(?:if|else|exist|not|for|in|do|call|goto|set|setlocal|endlocal|echo|exit|cd|chdir|copy|move|del|erase|start|pause|shift|pushd|popd)\b/iy],
+  ],
+  sh: [
+    ["tok-com", /#[^\n]*/y],
+    ["tok-str", /"(?:[^"\\]|\\.)*"|'[^']*'/y],
+    ["tok-var", /\$\{[^}\n]+\}|\$[A-Za-z_][A-Za-z0-9_]*|\$[0-9@*#?$!]/y],
+    ["tok-kw", /\b(?:if|then|else|elif|fi|for|while|until|do|done|case|esac|function|return|export|local|readonly|echo|printf|cd|exit|source|set|unset|test)\b/y],
+    ["tok-num", /\b\d+\b/y],
+  ],
+  ps1: [
+    ["tok-com", /#[^\n]*/y],
+    ["tok-str", /"(?:[^"`]|`.)*"|'[^']*'/y],
+    ["tok-var", /\$env:[A-Za-z_][A-Za-z0-9_]*|\$[A-Za-z_][A-Za-z0-9_]*(?::[A-Za-z]+)?/iy],
+    ["tok-cmd", /\b(?:Get|Set|New|Remove|Start|Stop|Restart|Test|Write|Read|Copy|Move|Invoke|Import|Export|Enable|Disable|Add|Clear|Select|Where|ForEach|Out|Join|Split)-[A-Za-z]+\b/iy],
+    ["tok-kw", /\b(?:if|elseif|else|foreach|for|while|do|switch|function|param|return|try|catch|finally|throw|begin|process|end|break|continue)\b/iy],
+  ],
+  js: [
+    ["tok-com", /\/\/[^\n]*|\/\*[\s\S]*?\*\//y],
+    ["tok-str", /"(?:[^"\\\n]|\\.)*"|'(?:[^'\\\n]|\\.)*'|`(?:[^`\\]|\\.)*`/y],
+    ["tok-kw", /\b(?:const|let|var|function|return|if|else|for|while|do|switch|case|break|continue|new|class|extends|import|export|from|async|await|try|catch|finally|throw|typeof|instanceof|in|of|this|null|undefined|true|false)\b/y],
+    ["tok-num", /\b\d+(?:\.\d+)?\b/y],
+  ],
+  xml: [
+    ["tok-com", /<!--[\s\S]*?-->/y],
+    ["tok-tag", /<\/?[A-Za-z][\w:.-]*|\/?>/y],
+    ["tok-attr", /[A-Za-z_:][\w:.-]*(?==)/y],
+    ["tok-str", /"[^"\n]*"|'[^'\n]*'/y],
+  ],
+  css: [
+    ["tok-com", /\/\*[\s\S]*?\*\//y],
+    ["tok-key", /[A-Za-z-]+(?=[ \t]*:)/y],
+    ["tok-str", /"[^"\n]*"|'[^'\n]*'/y],
+    ["tok-tag", /[.#][A-Za-z][\w-]*/y],
+    ["tok-num", /\b\d+(?:\.\d+)?(?:px|em|rem|%|s|ms|vh|vw)?\b/y],
+  ],
+  md: [
+    ["tok-com", /^>[^\n]*/my],
+    ["tok-tag", /^#{1,6}[^\n]*/my],
+    ["tok-str", /```[\s\S]*?```|`[^`\n]+`/y],
+    ["tok-kw", /\*\*[^*\n]+\*\*|__[^_\n]+__/y],
+    ["tok-attr", /\[[^\]\n]*\]\([^)\n]*\)|^\s*[-*+]\s/my],
+  ],
+};
+
+const SYN_MAX_BYTES = 200 * 1024;
+
+function editorLang(path) {
+  const name = String(path || "").toLowerCase();
+  const ext = name.includes(".") ? name.split(".").pop() : "";
+  return SYN_LANG_BY_EXT[ext] || "";
+}
+
+function synEscape(text) {
+  return text.replace(/[&<>]/g, (ch) => (
+    ch === "&" ? "&amp;" : ch === "<" ? "&lt;" : "&gt;"));
+}
+
+function synTokenize(text, rules) {
+  let out = "";
+  let plain = "";
+  let i = 0;
+  const flush = () => { if (plain) { out += synEscape(plain); plain = ""; } };
+  while (i < text.length) {
+    let hit = null;
+    for (const [cls, re] of rules) {
+      re.lastIndex = i;
+      const m = re.exec(text);
+      if (m && m.index === i && m[0].length) { hit = [cls, m[0]]; break; }
+    }
+    if (hit) {
+      flush();
+      out += '<span class="' + hit[0] + '">' + synEscape(hit[1]) + "</span>";
+      i += hit[1].length;
+    } else {
+      plain += text[i];
+      i += 1;
+    }
+  }
+  flush();
+  return out;
+}
+
+function highlightCode(text, lang) {
+  const rules = SYN_RULES[lang];
+  if (!rules || text.length > SYN_MAX_BYTES) return synEscape(text);
+  return synTokenize(text, rules);
+}
+
+function renderEditorHighlight() {
+  const pre = $("ehl");
+  if (!$("editor") || $("editor").hidden) return;
+  pre.innerHTML = highlightCode($("etext").value, editorLang(editorPath)) + "\n";
+  syncEditorScroll();
+}
+
+function syncEditorScroll() {
+  const textarea = $("etext");
+  const pre = $("ehl");
+  pre.scrollTop = textarea.scrollTop;
+  pre.scrollLeft = textarea.scrollLeft;
+}
+
+let editorHighlightTimer = null;
+function scheduleEditorHighlight() {
+  if (editorHighlightTimer) clearTimeout(editorHighlightTimer);
+  editorHighlightTimer = setTimeout(renderEditorHighlight, 90);
+}
+
 async function openEditor(path) {
   if (!selected) return;
   try {
@@ -3247,10 +3443,16 @@ async function openEditor(path) {
                              "&path=" + encodeURIComponent(path));
     editorPath = data.path;
     $("etext").value = data.text || "";
+    // 设完 value 光标会在末尾，浏览器紧接着会把 textarea 滚到底；
+    // 这里手动回到开头，并让 focus 不要把整个页面滚下去
+    $("etext").scrollTop = 0;
+    $("etext").scrollLeft = 0;
+    $("etext").setSelectionRange(0, 0);
     $("epath").textContent = fmt(strings["web.files.editing"] || "{path}",
                                  { path: data.path });
     $("editor").hidden = false;
-    $("etext").focus();
+    renderEditorHighlight();
+    $("etext").focus({ preventScroll: true });
   } catch (err) {
     fail(err);
   }
@@ -3259,6 +3461,7 @@ async function openEditor(path) {
 function closeEditor() {
   editorPath = null;
   $("etext").value = "";
+  $("ehl").textContent = "";
   $("editor").hidden = true;
 }
 
@@ -4186,6 +4389,21 @@ $("fupload-dir-input").onchange = (ev) => {
 };
 $("esave").onclick = saveEditor;
 $("ecancel").onclick = closeEditor;
+
+// 编辑器的输入层是透明的，高亮由下层 pre 显示；输入、滚动、输入法都要同步，
+// 否则光标会和文字错位，或者打中文时看不见候选内容。
+$("etext").addEventListener("input", scheduleEditorHighlight);
+$("etext").addEventListener("scroll", syncEditorScroll);
+$("etext").addEventListener("compositionstart", () => {
+  // 组合期间把真文字显出来：透明文字会让拼音候选看起来像丢了
+  $("etext").style.color = "var(--fg)";
+  $("ehl").style.visibility = "hidden";
+});
+$("etext").addEventListener("compositionend", () => {
+  $("etext").style.color = "transparent";
+  $("ehl").style.visibility = "visible";
+  renderEditorHighlight();
+});
 
 $("newinst").onclick = openNewInstance;
 $("dclose").onclick = closeNewInstance;

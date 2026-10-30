@@ -80,5 +80,82 @@ class FallbackWiringTest(unittest.TestCase):
         self.assertEqual(got["versions"][0], "1.21.8")
 
 
+class SourceOrderTest(unittest.TestCase):
+    """下载源有三种模式，每一档都是「首选 + 两级兜底」。"""
+
+    def tearDown(self):
+        dm.set_source_preference("msl")
+
+    def test_official_mode_asks_official_first(self):
+        dm.set_source_preference("official")
+        with mock.patch.object(
+                dm, "_official_download_url",
+                return_value={"url": "https://official/x.jar", "sha256": ""}) as official, \
+                mock.patch.object(
+                    dm, "_msl_request",
+                    side_effect=AssertionError("官方优先时不该先问镜像")):
+            got = dm.msl_get_download_url("paper", "1.21.8")
+        official.assert_called_once()
+        self.assertEqual(got["url"], "https://official/x.jar")
+
+    def test_official_mode_falls_back_to_bmcl(self):
+        dm.set_source_preference("official")
+        with mock.patch.object(dm, "_official_download_url", return_value=None), \
+                mock.patch.object(
+                    dm, "_bmcl_download_url",
+                    return_value={"url": "https://bmcl/x.jar", "sha256": ""}):
+            got = dm.msl_get_download_url("vanilla", "1.21.8")
+        self.assertEqual(got["url"], "https://bmcl/x.jar")
+
+    def test_official_mode_falls_back_to_msl_last(self):
+        dm.set_source_preference("official")
+        mirror = {"url": "https://msl/z.jar", "sha256": "abc"}
+        with mock.patch.object(dm, "_official_download_url", return_value=None), \
+                mock.patch.object(dm, "_bmcl_download_url", return_value=None), \
+                mock.patch.object(dm, "_msl_request", return_value=mirror):
+            self.assertIs(dm.msl_get_download_url("paper", "1.21.8"), mirror)
+
+    def test_bmcl_mode_tries_bmcl_first(self):
+        dm.set_source_preference("bmcl")
+        with mock.patch.object(
+                dm, "_bmcl_download_url",
+                return_value={"url": "https://bmcl/x.jar", "sha256": ""}), \
+                mock.patch.object(
+                    dm, "_msl_request",
+                    side_effect=AssertionError("BMCL 优先时不该先问镜像")):
+            got = dm.msl_get_download_url("vanilla", "1.21.8")
+        self.assertEqual(got["url"], "https://bmcl/x.jar")
+
+    def test_versions_follow_the_same_order(self):
+        dm.set_source_preference("official")
+        with mock.patch.object(dm, "_official_versions",
+                               return_value={"versions": ["1.21.8"]}) as official, \
+                mock.patch.object(
+                    dm, "_msl_request",
+                    side_effect=AssertionError("官方优先时不该先问镜像")):
+            got = dm.msl_get_versions("paper")
+        official.assert_called_once()
+        self.assertEqual(got["versions"][0], "1.21.8")
+
+    def test_legacy_boolean_still_works(self):
+        dm.set_source_preference(True)
+        self.assertEqual(dm.source_preference(), "bmcl")
+        dm.set_source_preference(False)
+        self.assertEqual(dm.source_preference(), "msl")
+
+    def test_unknown_mode_falls_back_to_default(self):
+        dm.set_source_preference("nonsense")
+        self.assertEqual(dm.source_preference(), "msl")
+
+    def test_config_migration(self):
+        self.assertEqual(dm.source_from_config({"prefer_bmcl": True}), "bmcl")
+        self.assertEqual(dm.source_from_config({"prefer_bmcl": False}), "msl")
+        self.assertEqual(dm.source_from_config({}), "msl")
+        self.assertEqual(
+            dm.source_from_config({"download_source": "official",
+                                   "prefer_bmcl": True}), "official")
+        self.assertEqual(dm.source_from_config({"download_source": "bogus"}), "msl")
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -31,19 +31,49 @@ from bmcl import (
 
 MSL_USER_AGENT = USER_AGENT
 
-# 核心下载源偏好。默认先用 MSL（它覆盖的核心类型最多），拿不到再问 BMCL，
-# 最后才回官方。用户可以在设置里改成「优先 BMCL」。
-_PREFER_BMCL = False
+# 核心下载源优先级。三种模式都是「首选 + 两级兜底」，任何一档拿不到就继续往下：
+#   official：官方（PaperMC / Purpur / Mojang / Fabric meta）→ BMCL → MSL
+#   bmcl    ：BMCL → MSL → 官方
+#   msl     ：MSL → BMCL → 官方
+# BMCL 只镜像原版与 Fabric 的元数据，其余核心会自然落到下一档。
+_SOURCE_ORDER: dict[str, tuple[str, ...]] = {
+    "official": ("official", "bmcl", "msl"),
+    "bmcl": ("bmcl", "msl", "official"),
+    "msl": ("msl", "bmcl", "official"),
+}
+_SOURCE = "msl"
 
 
-def set_source_preference(prefer_bmcl: bool) -> None:
-    """改下载源优先级。进程级，和 set_download_threads 一样由启动时应用。"""
-    global _PREFER_BMCL
-    _PREFER_BMCL = bool(prefer_bmcl)
+def set_source_preference(source) -> None:
+    """改下载源优先级。进程级，和 set_download_threads 一样由启动时应用。
+
+    兼容旧调用：传布尔值按 True=bmcl / False=msl 处理（老版本只有这两档）。
+    """
+    global _SOURCE
+    if isinstance(source, bool):
+        _SOURCE = "bmcl" if source else "msl"
+        return
+    text = str(source or "").strip().lower()
+    _SOURCE = text if text in _SOURCE_ORDER else "msl"
 
 
 def source_preference() -> str:
-    return "bmcl" if _PREFER_BMCL else "msl"
+    return _SOURCE
+
+
+def source_order(mode: Optional[str] = None) -> tuple[str, ...]:
+    """某个模式的尝试顺序；未知模式按当前设置走。"""
+    key = str(mode or _SOURCE).strip().lower()
+    return _SOURCE_ORDER.get(key, _SOURCE_ORDER.get(_SOURCE, _SOURCE_ORDER["msl"]))
+
+
+def source_from_config(config: dict) -> str:
+    """从 config.json 读出下载源，顺带迁移旧版只有 prefer_bmcl 的配置。"""
+    raw = str((config or {}).get("download_source") or "").strip().lower()
+    if raw in _SOURCE_ORDER:
+        return raw
+    # 老配置：prefer_bmcl=True 是「BMCL 优先」，否则沿用当年的默认「MSL 优先」
+    return "bmcl" if (config or {}).get("prefer_bmcl") else "msl"
 
 # Windows 文件名里不允许出现的字符，外加控制字符
 _UNSAFE_FILENAME_CHARS = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
@@ -397,39 +427,52 @@ def msl_get_server_types(project_dir: str = "") -> Optional[dict]:
     return {k: list(v) for k, v in _FALLBACK_SERVER_TYPES.items()}
 
 
+def _versions_from(source: str, server_type: str,
+                   project_dir: str = "") -> Optional[dict]:
+    """按单个源取版本列表；这一档没有这个核心就返回 None。"""
+    if source == "official":
+        return _official_versions(server_type)
+    if source == "bmcl":
+        return _bmcl_versions(server_type)
+    key = f"versions_{server_type}"
+    if project_dir:
+        return _msl_cache_fetch(key, f"/mirrors/{server_type}", project_dir)
+    return _msl_request(f"/mirrors/{server_type}")
+
+
 def msl_get_versions(server_type: str, project_dir: str = "") -> Optional[dict]:
     """获取指定服务端类型的可用版本列表。
 
     版本列表会过滤掉 pre/rc/snapshot 等测试版，只显示稳定版。
-    顺序是「偏好的镜像 → 另一个镜像 → 官方源」；两个镜像都只覆盖原版与
-    Fabric，其余核心的 BMCL 那一环直接落空，不影响原来的行为。
+    顺序由设置里的下载源决定（官方 / BMCL / MSL），每一档拿不到就继续往下，
+    所以任何一个源挂掉都不会卡住开服流程。
     """
-    if _PREFER_BMCL:
-        data = _bmcl_versions(server_type)
-        if data:
-            print(t("download.source_bmcl"))
-            return data
-
-    key = f"versions_{server_type}"
-    if project_dir:
-        data = _msl_cache_fetch(key, f"/mirrors/{server_type}",
-                                project_dir)
-    else:
-        data = _msl_request(f"/mirrors/{server_type}")
-    if data:
-        return data
-
-    if not _PREFER_BMCL:
-        data = _bmcl_versions(server_type)
-        if data:
+    preferred = source_preference()
+    for source in source_order():
+        data = _versions_from(source, server_type, project_dir)
+        if not data:
+            continue
+        if source != preferred:
             print(t("download.fallback_source", core=server_type))
+        if source == "bmcl":
             print(t("download.source_bmcl"))
-            return data
+        elif source == "official":
+            print(t("download.source_official"))
+        return data
+    return None
 
-    fallback = _official_versions(server_type)
-    if fallback:
-        print(t("download.fallback_source", core=server_type))
-    return fallback
+
+def _url_from(source: str, server_type: str,
+              version: str) -> Optional[dict]:
+    """按单个源取下载地址；这一档拼不出来就返回 None。"""
+    if source == "official":
+        return _official_download_url(server_type, version)
+    if source == "bmcl":
+        return _bmcl_download_url(server_type, version)
+    data = _msl_request(f"/download/server/{server_type}/{version}")
+    if isinstance(data, dict) and data.get("url"):
+        return data
+    return None
 
 
 def msl_get_download_url(server_type: str, version: str) -> Optional[dict]:
@@ -440,29 +483,21 @@ def msl_get_download_url(server_type: str, version: str) -> Optional[dict]:
     （v4 /download/server/paper/1.21.8 只回了这两个键），所以不要依赖它，
     需要文件大小时用 HEAD 探测。原版从 BMCL 拿时另带一个 sha1。
 
-    镜像拿不到时退到官方源；官方源也没有这个核心就返回 None（由调用方报错）。
+    各档按设置里的顺序依次尝试；全都没有这个核心时返回 None（由调用方报错）。
     """
-    if _PREFER_BMCL:
-        data = _bmcl_download_url(server_type, version)
-        if data:
-            print(t("download.source_bmcl"))
-            return data
-
-    data = _msl_request(f"/download/server/{server_type}/{version}")
-    if isinstance(data, dict) and data.get("url"):
-        return data
-
-    if not _PREFER_BMCL:
-        data = _bmcl_download_url(server_type, version)
-        if data:
+    preferred = source_preference()
+    for source in source_order():
+        data = _url_from(source, server_type, version)
+        if not data:
+            continue
+        if source != preferred:
             print(t("download.fallback_source", core=server_type))
+        if source == "bmcl":
             print(t("download.source_bmcl"))
-            return data
-
-    fallback = _official_download_url(server_type, version)
-    if fallback:
-        print(t("download.fallback_source", core=server_type))
-    return fallback
+        elif source == "official":
+            print(t("download.source_official"))
+        return data
+    return None
 
 
 # ---------------------------------------------------------------------------
