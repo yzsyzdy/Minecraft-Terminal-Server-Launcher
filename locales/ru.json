@@ -959,5 +959,18 @@
     "settings.source_official": "Сначала официальный",
     "download.source_official": "[инфо] Источник: официальный API",
 
-    "web.settings.font_credit": "Шрифт интерфейса: HarmonyOS Sans SC © Huawei Device Co., Ltd., используется по HarmonyOS Sans Fonts License Agreement. Моноширинные части по-прежнему системные."
+    "web.settings.font_credit": "Шрифт интерфейса: HarmonyOS Sans SC © Huawei Device Co., Ltd., используется по HarmonyOS Sans Fonts License Agreement. Моноширинные части по-прежнему системные.",
+
+    "web.tab.map": "Карта",
+    "web.props.save": "Сохранить",
+    "web.props.cancel": "Закрыть",
+    "web.props.raw": "Исходный текст",
+    "web.props.unknown": "Прочее (без описания)",
+    "web.props.saved": "Сохранено",
+    "web.props.missing": "В этом экземпляре ещё нет server.properties — запустите сервер один раз.",
+    "web.map.reload": "Обновить",
+    "web.map.regions": "Регионов: {n}",
+    "web.map.size": "{w} × {h} блоков",
+    "web.map.empty": "В этом экземпляре пока нет сгенерированной карты.",
+    "web.map.hint": "Один регион = 512×512 блоков."
 }

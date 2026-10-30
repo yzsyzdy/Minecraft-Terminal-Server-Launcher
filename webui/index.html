@@ -477,6 +477,51 @@
   .tok-cmd{color:var(--syn-cmd)}
   .tok-punc{color:var(--dim)}
 
+  /* --------------------------------------------------- server.properties 表单 */
+  #props{position:absolute;inset:0;z-index:6;display:flex;flex-direction:column;
+         background:var(--surface)}
+  #pbar{display:flex;align-items:center;gap:var(--s2);
+        padding:var(--s2) var(--s4);
+        border-bottom:1px solid var(--line);background:var(--surface)}
+  #ppath{color:var(--dim);font:400 11.5px/1 var(--mono)}
+  #pbody{flex:1;min-height:0;overflow:auto;padding:var(--s4) var(--s5) var(--s6)}
+  #pbody section{margin-bottom:var(--s5)}
+  #pbody h3{font:600 calc(var(--t-ui) * 1.02)/1.3 var(--font);
+            margin:0 0 var(--s3);color:var(--fg)}
+  #pbody h3 .n{color:var(--dim);font-weight:400;margin-left:6px;
+               font-size:calc(var(--t-label) * 1.05)}
+  .pf{display:grid;grid-template-columns:minmax(160px,220px) minmax(0,1fr);
+      gap:var(--s3);align-items:center;padding:var(--s2) 0;
+      border-bottom:1px dashed var(--line)}
+  .pf:last-child{border-bottom:0}
+  .pf label{color:var(--fg);font-size:var(--t-ui)}
+  .pf label code{display:block;color:var(--dim);font:400 10.5px/1.4 var(--mono);
+                 margin-top:2px}
+  .pf .ctlwrap{display:flex;flex-direction:column;gap:2px;min-width:0}
+  .pf .ctl{display:flex;align-items:center;gap:var(--s2);min-width:0}
+  .pf input[type=text],.pf input[type=number],.pf select{width:100%;max-width:420px}
+  .pf .hint{margin-top:2px}
+  .pf .unit{color:var(--dim);font-size:var(--t-label)}
+
+  /* ------------------------------------------------------------------ 地图 */
+  #map{position:absolute;inset:0;display:flex;flex-direction:column;
+       background:var(--surface)}
+  #mapbar{display:flex;align-items:center;gap:var(--s2);
+          padding:var(--s2) var(--s4);border-bottom:1px solid var(--line)}
+  #mapworld{flex:0 0 auto;min-width:200px;max-width:360px}
+  #mapinfo{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+  #mapview{flex:1;min-height:0;overflow:auto;background:var(--bg);
+           position:relative}
+  #mapcanvas{position:relative;transform-origin:0 0}
+  /* 未生成的区块是透明的，垫一层很淡的棋盘格，免得看起来像「全黑」
+     而不是「这里没有数据」 */
+  #mapcanvas img{position:absolute;width:512px;height:512px;
+                 image-rendering:pixelated;box-shadow:0 0 0 1px var(--line);
+                 background:repeating-conic-gradient(
+                   from 0deg,rgba(127,127,127,.10) 0% 25%,
+                   transparent 0% 50%) 50%/32px 32px}
+  #mapempty{padding:var(--s5);color:var(--dim)}
+
   /* ---------------------------------------------------------------- 对话框 */
   /* 遮罩统一：eulamodal / expmodal / cfgmodal 是后来加的，漏在这里的话
      它们打开时既没有半透明遮罩、也不居中。以后再加对话框记得补 id。 */
@@ -714,6 +759,7 @@
         <button class="tab" id="tab-dash"></button>
         <button class="tab on" id="tab-console"></button>
         <button class="tab" id="tab-files"></button>
+        <button class="tab" id="tab-map"></button>
         <button class="tab" id="tab-ai"></button>
         <button class="tab" id="tab-jars" hidden></button>
       </span>
@@ -782,6 +828,30 @@
           <textarea id="etext" spellcheck="false" autocomplete="off" wrap="off"></textarea>
         </div>
       </div>
+      <div id="props" hidden>
+        <div id="pbar">
+          <span id="ppath"></span>
+          <span class="sp" style="flex:1"></span>
+          <button id="praw"></button>
+          <button class="primary" id="psave"></button>
+          <button id="pcancel"></button>
+        </div>
+        <div id="pbody"></div>
+      </div>
+    </div>
+    <div id="map" hidden>
+      <div id="mapbar">
+        <select id="mapworld"></select>
+        <span id="mapinfo" class="hint"></span>
+        <span class="sp" style="flex:1"></span>
+        <button class="ghost" id="mapzoomout" title="-">−</button>
+        <button class="ghost" id="mapzoomin" title="+">+</button>
+        <button id="mapreload"></button>
+      </div>
+      <div id="mapview">
+        <div id="mapcanvas"></div>
+      </div>
+      <div id="mapempty" class="hint" hidden></div>
     </div>
     <div id="jars" hidden>
       <div id="jbar">
@@ -1725,6 +1795,11 @@ function applyStrings() {
   $("tab-dash").textContent = strings["web.tab.dash"] || "Dashboard";
   $("tab-console").textContent = strings["web.tab.console"] || "Console";
   $("tab-files").textContent = strings["web.tab.files"] || "Files";
+  $("tab-map").textContent = strings["web.tab.map"] || "Map";
+  $("psave").textContent = strings["web.props.save"] || "Save";
+  $("pcancel").textContent = strings["web.props.cancel"] || "Close";
+  $("praw").textContent = strings["web.props.raw"] || "Raw text";
+  $("mapreload").textContent = strings["web.map.reload"] || "Refresh";
   $("fup").title = strings["web.files.up"] || "..";
   $("froot").title = strings["web.files.root"] || "/";
   $("fnewfile").textContent = strings["web.files.new_file"] || "New file";
@@ -2863,25 +2938,338 @@ async function ofDownload() {
 
 let tab = "console";
 
+/* ------------------------------------------------- server.properties 表单 */
+/* 每个字段：[键, 中文名, 说明, 类型, 额外配置]。
+   没收录的键不会丢，会落在「其他」分组里按值猜类型，仍然可改。 */
+const PROP_GROUPS = [
+  ["网络与端口", [
+    ["server-port", "服务器端口", "玩家连接的 TCP 端口，改完要重启服务器", "int", { min: 1, max: 65535 }],
+    ["server-ip", "监听地址", "留空表示监听所有网卡", "text", {}],
+    ["online-mode", "正版验证", "关闭后离线客户端也能进，但玩家名可被冒用", "bool", {}],
+    ["enable-status", "响应状态查询", "关掉后服务器列表里看不到在线人数", "bool", {}],
+    ["enable-query", "启用 Query", "给服务器列表、监控工具用的查询协议", "bool", {}],
+    ["query.port", "Query 端口", "一般与服务器端口相同", "int", { min: 1, max: 65535 }],
+    ["enable-rcon", "启用 RCON", "远程控制台协议，务必设置强密码", "bool", {}],
+    ["rcon.port", "RCON 端口", "只在启用 RCON 后生效", "int", { min: 1, max: 65535 }],
+    ["rcon.password", "RCON 密码", "为空时 RCON 不接受连接", "text", {}],
+    ["network-compression-threshold", "网络压缩阈值", "字节。-1 关闭压缩，0 全压缩，默认 256", "int", { min: -1, max: 65536 }],
+    ["prevent-proxy-connections", "拦截代理连接", "拒绝通过代理/VPN 的连接，可能误伤正常玩家", "bool", {}],
+    ["hide-online-players", "隐藏在线玩家", "开启后列表接口不再列出玩家名", "bool", {}],
+  ]],
+  ["玩法", [
+    ["gamemode", "默认游戏模式", "新玩家进入时的模式", "enum", [["survival", "生存"], ["creative", "创造"], ["adventure", "冒险"], ["spectator", "旁观"]]],
+    ["difficulty", "难度", "影响怪物强度与饥饿消耗", "enum", [["peaceful", "和平"], ["easy", "简单"], ["normal", "普通"], ["hard", "困难"]]],
+    ["hardcore", "极限模式", "死亡后只能旁观，不能重生", "bool", {}],
+    ["force-gamemode", "强制游戏模式", "玩家重进时重置为默认模式", "bool", {}],
+    ["pvp", "允许 PVP", "玩家之间能否互相伤害", "bool", {}],
+    ["allow-flight", "允许飞行", "关闭时使用飞行类插件的玩家会被踢出", "bool", {}],
+    ["allow-nether", "允许下界", "关闭后下界传送门无效", "bool", {}],
+    ["spawn-monsters", "生成敌对生物", "影响自然刷怪", "bool", {}],
+    ["spawn-animals", "生成被动生物", "影响动物生成", "bool", {}],
+    ["spawn-npcs", "生成村民", "关闭后不生成村民", "bool", {}],
+    ["generate-structures", "生成结构", "村庄、遗迹等；只对新生成的地形有效", "bool", {}],
+    ["max-players", "最大玩家数", "同时在线人数上限", "int", { min: 1, max: 1000 }],
+    ["player-idle-timeout", "挂机踢出分钟", "0 表示不踢", "int", { min: 0, max: 1440 }],
+    ["white-list", "启用白名单", "只允许名单内玩家进入", "bool", {}],
+    ["enforce-whitelist", "强制白名单", "名单移除的玩家会被立刻踢出", "bool", {}],
+    ["op-permission-level", "OP 权限等级", "1–4，4 为完全权限", "int", { min: 1, max: 4 }],
+    ["enable-command-block", "启用命令方块", "关闭后命令方块不执行", "bool", {}],
+    ["spawn-protection", "出生点保护半径", "方块数，0 表示关闭", "int", { min: 0, max: 1024 }],
+    ["motd", "服务器描述", "服务器列表里显示的一行字，支持 § 颜色代码", "text", {}],
+  ]],
+  ["世界", [
+    ["level-name", "世界文件夹", "类似 world；换名字等于换存档", "text", {}],
+    ["level-seed", "世界种子", "只对尚未生成的世界有效", "text", {}],
+    ["level-type", "世界类型", "决定地形生成器", "enum", [["minecraft:normal", "默认"], ["minecraft:flat", "超平坦"], ["minecraft:large_biomes", "巨型生物群系"], ["minecraft:amplified", "放大化"], ["minecraft:single_biome_surface", "单一生物群系"]]],
+    ["max-world-size", "世界边界半径", "方块数，限制世界可到达的范围", "int", { min: 1, max: 29999984 }],
+  ]],
+  ["性能与日志", [
+    ["view-distance", "视距", "发往客户端的区块半径，越大越吃内存和带宽", "int", { min: 2, max: 32 }],
+    ["simulation-distance", "模拟距离", "实体与红石参与模拟的半径", "int", { min: 2, max: 32 }],
+    ["max-tick-time", "单 tick 超时", "毫秒，-1 关闭看门狗", "int", { min: -1, max: 600000 }],
+    ["sync-chunk-writes", "同步写区块", "关闭可提升性能，但突然断电更容易坏档", "bool", {}],
+    ["entity-broadcast-range-percentage", "实体广播范围", "百分比，降低可减少带宽占用", "int", { min: 10, max: 1000 }],
+    ["pause-when-empty-seconds", "空服暂停秒数", "0 表示不暂停", "int", { min: 0, max: 86400 }],
+    ["broadcast-console-to-ops", "向 OP 广播控制台", "控制台命令会发给所有 OP", "bool", {}],
+    ["broadcast-rcon-to-ops", "向 OP 广播 RCON", "RCON 命令会发给所有 OP", "bool", {}],
+    ["log-ips", "记录玩家 IP", "关闭后日志里不写 IP", "bool", {}],
+    ["debug", "调试模式", "开启后日志会非常啰嗦", "bool", {}],
+    ["resource-pack", "资源包地址", "玩家进入时自动下载的 zip 直链", "text", {}],
+    ["resource-pack-sha1", "资源包 SHA1", "留空则不校验", "text", {}],
+    ["require-resource-pack", "强制资源包", "玩家拒绝下载会被踢出", "bool", {}],
+  ]],
+];
+
+let propsValues = null;
+let propsPath = "server.properties";
+
+function propTypeOf(key, value) {
+  if (value === "true" || value === "false") return "bool";
+  if (/^-?\d+$/.test(value || "") && String(value).length < 10) return "int";
+  return "text";
+}
+
+function propControl(key, type, value, extra) {
+  const wrap = document.createElement("div");
+  wrap.className = "ctl";
+  let input;
+  if (type === "bool") {
+    input = document.createElement("input");
+    input.type = "checkbox";
+    input.checked = String(value) === "true";
+  } else if (type === "enum") {
+    input = document.createElement("select");
+    const known = (extra || []).some((pair) => pair[0] === value);
+    (extra || []).forEach(([val, label]) => {
+      const opt = document.createElement("option");
+      opt.value = val;
+      opt.textContent = label + "（" + val + "）";
+      input.appendChild(opt);
+    });
+    if (!known && value) {
+      const opt = document.createElement("option");
+      opt.value = value;
+      opt.textContent = value;
+      input.appendChild(opt);
+    }
+    input.value = value || (extra && extra[0] ? extra[0][0] : "");
+  } else {
+    input = document.createElement("input");
+    input.type = type === "int" ? "number" : "text";
+    input.value = value == null ? "" : value;
+    input.spellcheck = false;
+  }
+  input.dataset.key = key;
+  input.dataset.type = type;
+  wrap.appendChild(input);
+  return { wrap, input };
+}
+
+function propField(field, value) {
+  const key = field[0];
+  const label = field[1];
+  const hint = field[2];
+  const type = field[3];
+  const extra = field[4] || {};
+  const row = document.createElement("div");
+  row.className = "pf" + (type === "bool" ? " bool" : "");
+  const labelEl = document.createElement("label");
+  labelEl.textContent = label;
+  const code = document.createElement("code");
+  code.textContent = key;
+  labelEl.appendChild(code);
+  const options = Array.isArray(extra) ? extra : null;
+  const { wrap, input } = propControl(key, type, value, options);
+  const ctl = document.createElement("div");
+  ctl.className = "ctlwrap";
+  ctl.appendChild(wrap);
+  if (type === "int" && !options && extra.min != null) {
+    const unit = document.createElement("span");
+    unit.className = "unit";
+    unit.textContent = "范围 " + extra.min + " – " + extra.max;
+    ctl.appendChild(unit);
+    input.min = extra.min;
+    input.max = extra.max;
+  }
+  if (hint) {
+    const h = document.createElement("div");
+    h.className = "hint";
+    h.textContent = hint;
+    ctl.appendChild(h);
+  }
+  row.appendChild(labelEl);
+  row.appendChild(ctl);
+  return row;
+}
+
+function renderProps(values) {
+  const body = $("pbody");
+  body.textContent = "";
+  const known = new Set();
+  PROP_GROUPS.forEach(([title, fields]) => {
+    const section = document.createElement("section");
+    const h = document.createElement("h3");
+    h.textContent = title;
+    section.appendChild(h);
+    let count = 0;
+    fields.forEach((field) => {
+      if (!(field[0] in values)) return;
+      known.add(field[0]);
+      section.appendChild(propField(field, values[field[0]]));
+      count += 1;
+    });
+    if (count) body.appendChild(section);
+  });
+  const rest = Object.keys(values).filter((key) => !known.has(key)).sort();
+  if (rest.length) {
+    const section = document.createElement("section");
+    const h = document.createElement("h3");
+    h.textContent = strings["web.props.unknown"] || "其他（未收录）";
+    const n = document.createElement("span");
+    n.className = "n";
+    n.textContent = "· " + rest.length;
+    h.appendChild(n);
+    section.appendChild(h);
+    rest.forEach((key) => {
+      const type = propTypeOf(key, values[key]);
+      section.appendChild(propField([key, key, "", type, {}], values[key]));
+    });
+    body.appendChild(section);
+  }
+  if (!body.children.length) {
+    const empty = document.createElement("div");
+    empty.className = "hint";
+    empty.textContent = strings["web.props.missing"] || "";
+    body.appendChild(empty);
+  }
+}
+
+async function openProps(path) {
+  if (!selected) return;
+  try {
+    const data = await apiOk("/api/properties?name=" + encodeURIComponent(selected));
+    propsValues = data.values || {};
+    propsPath = path || "server.properties";
+    $("ppath").textContent = propsPath;
+    $("props").hidden = false;
+    renderProps(propsValues);
+    $("pbody").scrollTop = 0;
+  } catch (err) {
+    fail(err);
+  }
+}
+
+function closeProps() {
+  $("props").hidden = true;
+  propsValues = null;
+}
+
+async function saveProps() {
+  if (!selected) return;
+  const values = {};
+  $("pbody").querySelectorAll("[data-key]").forEach((el) => {
+    const key = el.dataset.key;
+    if (!key) return;
+    if (el.type === "checkbox") values[key] = el.checked ? "true" : "false";
+    else values[key] = el.value;
+  });
+  try {
+    await apiOk("/api/properties", { name: selected, values });
+    toast(strings["web.props.saved"] || "已保存");
+    $("props").hidden = true;
+  } catch (err) {
+    fail(err);
+  }
+}
+
+/* ------------------------------------------------------------------ 地图 */
+const mapState = { worlds: [], world: null, zoom: 0.5 };
+
+function mapTileUrl(world, x, z) {
+  return "/api/map?name=" + encodeURIComponent(selected) +
+         "&world=" + encodeURIComponent(world) +
+         "&x=" + x + "&z=" + z;
+}
+
+function applyMapZoom() {
+  $("mapcanvas").style.transform = "scale(" + mapState.zoom + ")";
+}
+
+function renderMap() {
+  const canvas = $("mapcanvas");
+  canvas.textContent = "";
+  const world = mapState.worlds.find((w) => w.id === mapState.world);
+  const empty = $("mapempty");
+  if (!world || !world.regions.length) {
+    empty.hidden = false;
+    empty.textContent = strings["web.map.empty"] || "";
+    $("mapview").hidden = true;
+    return;
+  }
+  empty.hidden = true;
+  $("mapview").hidden = false;
+  const xs = world.regions.map((r) => r[0]);
+  const zs = world.regions.map((r) => r[1]);
+  const minX = Math.min(...xs), maxX = Math.max(...xs);
+  const minZ = Math.min(...zs), maxZ = Math.max(...zs);
+  const width = (maxX - minX + 1) * 512;
+  const height = (maxZ - minZ + 1) * 512;
+  canvas.style.width = width + "px";
+  canvas.style.height = height + "px";
+  world.regions.forEach((pair) => {
+    const img = document.createElement("img");
+    img.src = mapTileUrl(world.id, pair[0], pair[1]);
+    img.alt = "region " + pair[0] + "," + pair[1];
+    img.loading = "lazy";
+    img.style.left = ((pair[0] - minX) * 512) + "px";
+    img.style.top = ((pair[1] - minZ) * 512) + "px";
+    canvas.appendChild(img);
+  });
+  $("mapinfo").textContent = fmt(strings["web.map.regions"] || "{n} 个 region",
+                                 { n: world.regions.length }) + " · " +
+    fmt(strings["web.map.size"] || "{w} × {h} 方块", { w: width, h: height });
+  $("mapinfo").title = strings["web.map.hint"] || "";
+  // 默认缩放到刚好放进视口，最多 1:1
+  const view = $("mapview");
+  const fit = Math.min(view.clientWidth / width, view.clientHeight / height, 1);
+  mapState.zoom = Math.max(0.15, fit);
+  applyMapZoom();
+}
+
+async function loadMaps(force) {
+  if (!selected) return;
+  try {
+    const data = await apiOk("/api/maps?name=" + encodeURIComponent(selected));
+    mapState.worlds = data.worlds || [];
+    const select = $("mapworld");
+    select.textContent = "";
+    if (!mapState.worlds.length) {
+      mapState.world = null;
+      renderMap();
+      return;
+    }
+    mapState.worlds.forEach((world) => {
+      const opt = document.createElement("option");
+      opt.value = world.id;
+      const parts = world.id.split("/");
+      const label = parts[parts.length - 1] === world.name
+        ? world.id
+        : world.id + "  ·  " + world.name;
+      opt.textContent = label + "（" + world.regions.length + " 个 region）";
+      select.appendChild(opt);
+    });
+    if (!mapState.world || !mapState.worlds.some((w) => w.id === mapState.world)) {
+      mapState.world = mapState.worlds[0].id;
+    }
+    select.value = mapState.world;
+    renderMap();
+  } catch (err) {
+    if (force) fail(err);
+  }
+}
+
 function switchTab(name) {
   tab = name;
   const isFiles = name === "files";
   const isAi = name === "ai";
   const isJars = name === "jars";
+  const isMap = name === "map";
   const isDash = name === "dash";
   $("tab-dash").className = "tab" + (isDash ? " on" : "");
   $("tab-console").className = "tab" + (name === "console" ? " on" : "");
   $("tab-files").className = "tab" + (isFiles ? " on" : "");
   $("tab-ai").className = "tab" + (isAi ? " on" : "");
   $("tab-jars").className = "tab" + (isJars ? " on" : "");
+  $("tab-map").className = "tab" + (isMap ? " on" : "");
   $("dash").hidden = !isDash;
   // 仪表板占满整栏，详情 chips 收起来
   $("details").hidden = isDash;
   $("files").hidden = !isFiles;
   $("ai").hidden = !isAi;
   $("jars").hidden = !isJars;
+  $("map").hidden = !isMap;
   // 控制台那一列（日志 + 输入条 + 底部按钮）在其它标签下都要让位
-  const hideConsole = isFiles || isAi || isJars || isDash;
+  const hideConsole = isFiles || isAi || isJars || isDash || isMap;
   $("log").hidden = hideConsole;
   $("bar").hidden = hideConsole;
   $("clear").hidden = hideConsole;
@@ -2890,6 +3278,7 @@ function switchTab(name) {
   if (isFiles) loadFiles(filesPath);
   if (isAi) aiShow();
   if (isJars) jarsShow();
+  if (isMap) loadMaps();
   if (isDash) dashStart(); else dashStop();
 }
 
@@ -3206,6 +3595,7 @@ function buildFileRow(entry, isUp) {
   nameBox.onclick = () => {
     if (entry.dir) loadFiles(entry.path);
     else if (entry.image) previewImage(entry);
+    else if (entry.name === "server.properties" && !entry.dir) openProps(entry.path);
     else if (entry.editable) openEditor(entry.path);
     else downloadFile(entry);
   };
@@ -4401,6 +4791,28 @@ $("fupload-dir-input").onchange = (ev) => {
 };
 $("esave").onclick = saveEditor;
 $("ecancel").onclick = closeEditor;
+$("psave").onclick = saveProps;
+$("pcancel").onclick = closeProps;
+$("praw").onclick = () => {
+  const path = propsPath;
+  closeProps();
+  openEditor(path);
+};
+
+$("tab-map").onclick = () => switchTab("map");
+$("mapworld").onchange = () => {
+  mapState.world = $("mapworld").value;
+  renderMap();
+};
+$("mapreload").onclick = () => loadMaps(true);
+$("mapzoomin").onclick = () => {
+  mapState.zoom = Math.min(2, mapState.zoom * 1.5);
+  applyMapZoom();
+};
+$("mapzoomout").onclick = () => {
+  mapState.zoom = Math.max(0.15, mapState.zoom / 1.5);
+  applyMapZoom();
+};
 
 // 编辑器的输入层是透明的，高亮由下层 pre 显示；输入、滚动、输入法都要同步，
 // 否则光标会和文字错位，或者打中文时看不见候选内容。

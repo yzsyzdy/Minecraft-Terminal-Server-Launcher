@@ -293,6 +293,19 @@ WEB_STRINGS = (
     "web.dash.cores",
     "web.dash.net_hint",
     "web.dash.unavailable",
+    "web.tab.map",
+    "web.props.save",
+    "web.props.cancel",
+    "web.props.raw",
+    "web.props.unknown",
+    "web.props.saved",
+    "web.props.missing",
+    "web.map.reload",
+    "web.map.regions",
+    "web.map.size",
+    "web.map.empty",
+    "web.map.hint",
+
     "web.settings.saved",
     "web.settings.restore",
     "web.settings.restore_hint",
@@ -555,6 +568,48 @@ def background_version(project_dir: str) -> int:
 # 每次请求新建一个就只能永远返回 None。
 _sysstats_sampler = None
 _sysstats_lock = threading.Lock()
+
+
+def _map_cache_dir(instance_root: str, world: str) -> str:
+    slug = world.replace("/", "_").replace("\\", "_")
+    return os.path.join(instance_root, ".mstl-map", slug)
+
+
+def map_tile(region_path: str, instance_root: str, world: str,
+             cx: int, cz: int):
+    """渲染一个 region 的 PNG，带磁盘缓存（按 mca 的 mtime 失效）。"""
+    from core import mcmap
+    try:
+        stat = os.stat(region_path)
+    except OSError:
+        return None
+    cache_dir = _map_cache_dir(instance_root, world)
+    cache_path = os.path.join(cache_dir, f"r.{cx}.{cz}.{stat.st_mtime_ns}.png")
+    if os.path.isfile(cache_path):
+        try:
+            with open(cache_path, "rb") as handle:
+                return handle.read()
+        except OSError:
+            pass
+    png = mcmap.render_region(region_path)
+    if not png:
+        return None
+    try:
+        os.makedirs(cache_dir, exist_ok=True)
+        tmp = cache_path + ".mstl-tmp"
+        with open(tmp, "wb") as handle:
+            handle.write(png)
+        os.replace(tmp, cache_path)
+        # 只留这个 region 的最新一张，旧的时间戳版本顺手清掉
+        for entry in os.listdir(cache_dir):
+            if entry.startswith(f"r.{cx}.{cz}.") and entry != os.path.basename(cache_path):
+                try:
+                    os.remove(os.path.join(cache_dir, entry))
+                except OSError:
+                    pass
+    except OSError:
+        pass
+    return png
 
 
 def system_snapshot() -> dict:
@@ -1162,6 +1217,12 @@ def _make_handler(manager: RuntimeManager, servers_dir: str, token: str,
                 return self._guard(self._background_get)
             if path == "/api/system":
                 return self._guard(self._system_stats)
+            if path == "/api/properties":
+                return self._guard(lambda: self._properties_get(query))
+            if path == "/api/maps":
+                return self._guard(lambda: self._maps(query))
+            if path == "/api/map":
+                return self._guard(lambda: self._map_tile(query))
             if path == "/api/update":
                 return self._guard(self._update_check)
             if path == "/api/openfrp/frpc":
@@ -1238,6 +1299,89 @@ def _make_handler(manager: RuntimeManager, servers_dir: str, token: str,
             self.send_header("X-Content-Type-Options", "nosniff")
             self.end_headers()
             self.wfile.write(blob)
+
+        # ---------------------------------------------------- server.properties
+        def _properties_get(self, query) -> None:
+            from core import properties as props
+            name = str(query.get("name") or "")
+            root = self._instance_dir(name)
+            if not name or not os.path.isdir(root):
+                return self._json({"ok": False, "message": "no such instance"},
+                                  HTTPStatus.NOT_FOUND)
+            values = props.load(root)
+            self._json({
+                "ok": True,
+                "name": name,
+                "exists": props.exists(root),
+                "values": values,
+            })
+
+        def _properties_save(self, body) -> None:
+            from core import properties as props
+            name = str((body or {}).get("name") or "")
+            root = self._instance_dir(name)
+            if not name or not os.path.isdir(root):
+                return self._json({"ok": False, "message": "no such instance"},
+                                  HTTPStatus.NOT_FOUND)
+            values = (body or {}).get("values")
+            if not isinstance(values, dict):
+                return self._json({"ok": False,
+                                   "message": "values must be an object"},
+                                  HTTPStatus.BAD_REQUEST)
+            cleaned = {str(k): str(v) for k, v in values.items()
+                       if isinstance(k, str) and len(str(k)) <= 128}
+            try:
+                merged = props.update(root, cleaned)
+            except CoreError as error:
+                return self._json({"ok": False, "message": self._error_text(error)},
+                                  HTTPStatus.BAD_REQUEST)
+            self._json({"ok": True, "values": merged})
+
+        # ------------------------------------------------------------- 地图
+        def _maps(self, query) -> None:
+            from core import mcmap
+            name = str(query.get("name") or "")
+            root = self._instance_dir(name)
+            if not name or not os.path.isdir(root):
+                return self._json({"ok": False, "message": "no such instance"},
+                                  HTTPStatus.NOT_FOUND)
+            self._json({"ok": True, "worlds": mcmap.list_worlds(root)})
+
+        def _map_tile(self, query) -> None:
+            from core import mcmap
+            name = str(query.get("name") or "")
+            world = str(query.get("world") or "")
+            root = self._instance_dir(name)
+            if not name or not os.path.isdir(root):
+                return self._json({"ok": False, "message": "no such instance"},
+                                  HTTPStatus.NOT_FOUND)
+            world_root = os.path.realpath(os.path.join(root, world))
+            if not world_root.startswith(os.path.realpath(root)):
+                return self._json({"ok": False, "message": "bad world"},
+                                  HTTPStatus.BAD_REQUEST)
+            try:
+                cx = int(query.get("x") or 0)
+                cz = int(query.get("z") or 0)
+            except (TypeError, ValueError):
+                return self._json({"ok": False, "message": "bad region"},
+                                  HTTPStatus.BAD_REQUEST)
+            if abs(cx) > 1000 or abs(cz) > 1000:
+                return self._json({"ok": False, "message": "bad region"},
+                                  HTTPStatus.BAD_REQUEST)
+            region = os.path.join(world_root, "region", f"r.{cx}.{cz}.mca")
+            if not os.path.isfile(region):
+                return self._json({"ok": False, "message": "no such region"},
+                                  HTTPStatus.NOT_FOUND)
+            png = map_tile(region, root, world, cx, cz)
+            if not png:
+                return self._json({"ok": False, "message": "render failed"},
+                                  HTTPStatus.INTERNAL_SERVER_ERROR)
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", "image/png")
+            self.send_header("Content-Length", str(len(png)))
+            self.send_header("Cache-Control", "no-cache")
+            self.end_headers()
+            self.wfile.write(png)
 
         def _static_font(self, path: str) -> None:
             """面板内置字体（`webui/fonts/*.ttf`）。只认单层 .ttf。"""
@@ -2029,6 +2173,9 @@ def _make_handler(manager: RuntimeManager, servers_dir: str, token: str,
 
             if path == "/api/settings":
                 return self._settings_save(body)
+
+            if path == "/api/properties":
+                return self._properties_save(body)
 
             if path == "/api/settings/background/remove":
                 return self._background_remove()

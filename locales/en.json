@@ -959,5 +959,18 @@
     "settings.source_official": "Official first",
     "download.source_official": "[info] Source: official API",
 
-    "web.settings.font_credit": "UI font: HarmonyOS Sans SC © Huawei Device Co., Ltd., used under the HarmonyOS Sans Fonts License Agreement. Monospace parts (console, code, logs) still use system fonts."
+    "web.settings.font_credit": "UI font: HarmonyOS Sans SC © Huawei Device Co., Ltd., used under the HarmonyOS Sans Fonts License Agreement. Monospace parts (console, code, logs) still use system fonts.",
+
+    "web.tab.map": "Map",
+    "web.props.save": "Save",
+    "web.props.cancel": "Close",
+    "web.props.raw": "Raw text",
+    "web.props.unknown": "Other (not curated)",
+    "web.props.saved": "Saved",
+    "web.props.missing": "This instance has no server.properties yet; start the server once to generate it.",
+    "web.map.reload": "Refresh",
+    "web.map.regions": "{n} regions",
+    "web.map.size": "{w} × {h} blocks",
+    "web.map.empty": "No generated map in this instance yet.",
+    "web.map.hint": "One region = 512×512 blocks; ungenerated chunks are transparent."
 }

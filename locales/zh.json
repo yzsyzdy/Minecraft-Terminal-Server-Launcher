@@ -960,5 +960,18 @@
     "settings.source_official": "官方源优先",
     "download.source_official": "[提示] 下载源：官方接口",
 
-    "web.settings.font_credit": "界面字体：HarmonyOS Sans SC © Huawei Device Co., Ltd.，依 HarmonyOS Sans Fonts License Agreement 随本软件使用；等宽部分（控制台、代码、日志）仍用系统字体。"
+    "web.settings.font_credit": "界面字体：HarmonyOS Sans SC © Huawei Device Co., Ltd.，依 HarmonyOS Sans Fonts License Agreement 随本软件使用；等宽部分（控制台、代码、日志）仍用系统字体。",
+
+    "web.tab.map": "地图",
+    "web.props.save": "保存",
+    "web.props.cancel": "关闭",
+    "web.props.raw": "原始文本",
+    "web.props.unknown": "其他（未收录）",
+    "web.props.saved": "已保存",
+    "web.props.missing": "这个实例还没有 server.properties，启动一次服务器就会生成。",
+    "web.map.reload": "刷新",
+    "web.map.regions": "{n} 个 region",
+    "web.map.size": "{w} × {h} 方块",
+    "web.map.empty": "这个实例里没有已生成的地图。世界还没跑过，或者存档里只有未生成完的区块。",
+    "web.map.hint": "一个 region = 512×512 方块；未生成的区块是透明的。"
 }
