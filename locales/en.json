@@ -957,5 +957,7 @@
     "web.settings.source_msl": "MSL mirror first",
     "web.settings.bad_source": "Unknown download source",
     "settings.source_official": "Official first",
-    "download.source_official": "[info] Source: official API"
+    "download.source_official": "[info] Source: official API",
+
+    "web.settings.font_credit": "UI font: HarmonyOS Sans SC © Huawei Device Co., Ltd., used under the HarmonyOS Sans Fonts License Agreement. Monospace parts (console, code, logs) still use system fonts."
 }

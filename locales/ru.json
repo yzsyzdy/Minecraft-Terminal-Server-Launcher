@@ -957,5 +957,7 @@
     "web.settings.source_msl": "Сначала MSL",
     "web.settings.bad_source": "Неизвестный источник",
     "settings.source_official": "Сначала официальный",
-    "download.source_official": "[инфо] Источник: официальный API"
+    "download.source_official": "[инфо] Источник: официальный API",
+
+    "web.settings.font_credit": "Шрифт интерфейса: HarmonyOS Sans SC © Huawei Device Co., Ltd., используется по HarmonyOS Sans Fonts License Agreement. Моноширинные части по-прежнему системные."
 }

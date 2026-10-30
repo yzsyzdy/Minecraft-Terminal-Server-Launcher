@@ -260,6 +260,7 @@ WEB_STRINGS = (
     "web.settings.ui_l",
     "web.settings.ui_xl",
     "web.settings.ui_hint",
+    "web.settings.font_credit",
     # 自定义背景
     "web.settings.bg",
     "web.settings.bg_hint",
@@ -1126,6 +1127,8 @@ def _make_handler(manager: RuntimeManager, servers_dir: str, token: str,
                 return self._reject_unauthorized()
             if path.startswith("/icons/"):
                 return self._guard(lambda: self._static_icon(path))
+            if path.startswith("/fonts/"):
+                return self._guard(lambda: self._static_font(path))
             if path == "/api/state":
                 return self._state()
             if path == "/api/stream":
@@ -1232,6 +1235,27 @@ def _make_handler(manager: RuntimeManager, servers_dir: str, token: str,
             self.send_header("Content-Type", "image/png")
             self.send_header("Content-Length", str(len(blob)))
             self.send_header("Cache-Control", "public, max-age=3600")
+            self.send_header("X-Content-Type-Options", "nosniff")
+            self.end_headers()
+            self.wfile.write(blob)
+
+        def _static_font(self, path: str) -> None:
+            """面板内置字体（`webui/fonts/*.ttf`）。只认单层 .ttf。"""
+            name = path[len("/fonts/"):]
+            if (not name or "/" in name or "\\" in name or ".." in name
+                    or not name.lower().endswith(".ttf")):
+                return self._json({"ok": False, "message": "not found"},
+                                  HTTPStatus.NOT_FOUND)
+            file_path = os.path.join(bundled_dir(), "webui", "fonts", name)
+            if not os.path.isfile(file_path):
+                return self._json({"ok": False, "message": "not found"},
+                                  HTTPStatus.NOT_FOUND)
+            with open(file_path, "rb") as f:
+                blob = f.read()
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", "font/ttf")
+            self.send_header("Content-Length", str(len(blob)))
+            self.send_header("Cache-Control", "public, max-age=86400")
             self.send_header("X-Content-Type-Options", "nosniff")
             self.end_headers()
             self.wfile.write(blob)

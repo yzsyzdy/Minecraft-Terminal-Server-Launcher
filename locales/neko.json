@@ -957,5 +957,7 @@
     "web.settings.source_msl": "MSL 镜像优先",
     "web.settings.bad_source": "不认识的下载源",
     "settings.source_official": "官方源优先",
-    "download.source_official": "[提示] 下载源：官方接口"
+    "download.source_official": "[提示] 下载源：官方接口",
+
+    "web.settings.font_credit": "界面字体：HarmonyOS Sans SC © Huawei Device Co., Ltd.，依 HarmonyOS Sans Fonts License Agreement 随本软件使用；等宽部分（控制台、代码、日志）仍用系统字体。"
 }
