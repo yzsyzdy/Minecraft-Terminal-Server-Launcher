@@ -915,5 +915,21 @@
     "web.error.nothing_to_compress": "没有选中要压缩的内容",
     "web.error.bad_archive_format": "不认识这种压缩格式：{name}",
     "web.error.not_an_image": "{name} 不是图片",
-    "web.files.confirm_overwrite": "同名喵，要盖掉 {name} 吗？"
+    "web.files.confirm_overwrite": "同名喵，要盖掉 {name} 吗？",
+
+    "web.settings.bg": "铺张背景喵",
+    "web.settings.bg_hint": "支持 PNG / JPEG / GIF / WebP，最大 12 MB。图片只存在本机项目目录里，不会上传到任何地方。",
+    "web.settings.bg_none": "还没有背景图喵",
+    "web.settings.bg_current": "当前背景：{name}",
+    "web.settings.bg_upload": "挑一张喵",
+    "web.settings.bg_replace": "换一张",
+    "web.settings.bg_remove": "撤掉背景喵",
+    "web.settings.bg_enable": "启用自定义背景",
+    "web.settings.bg_blur": "糊一点喵",
+    "web.settings.bg_visibility": "露多少喵",
+    "web.settings.bg_component_opacity": "组件挡多少喵",
+    "web.settings.bg_saved": "背景图已更新",
+    "web.settings.bg_removed": "背景已移除",
+    "web.error.bg_not_image": "这不是支持的图片（只收 PNG / JPEG / GIF / WebP）",
+    "web.error.bg_too_large": "背景图太大，上限 {max} MB"
 }

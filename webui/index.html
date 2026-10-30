@@ -107,6 +107,38 @@
   html[data-uibtn="l"]{--btn-scale:1.6}
   html[data-uibtn="xl"]{--btn-scale:1.78}
 
+  /* ---------------------------------------------------- 自定义背景 */
+  /* 三层：图片（模糊 + 可见度）→ 界面底色（组件不透明度）→ 内容。
+     面板要能透出图片，就不能再让 body 铺一层实色；开启背景时把 body
+     设成透明，由 #bg 自己铺底色，否则图片会被 body 挡住。 */
+  #bg{position:fixed;inset:0;z-index:0;pointer-events:none;
+      background:var(--bg);overflow:hidden;display:none}
+  #bgimg{position:absolute;inset:-80px;background-position:center;
+         background-size:cover;background-repeat:no-repeat;
+         filter:blur(var(--bg-blur,12px));opacity:var(--bg-vis,1);
+         transform:scale(1.03)}
+  html[data-bg="on"] #bg{display:block}
+  html[data-bg="on"] body{background:transparent}
+  /* 顶栏 / 侧栏 / 右栏跟着「组件不透明度」一起透；对话框与输入框保持不透明，
+     不然正文会糊在花哨的图片上，读不下去。 */
+  header,main{position:relative;z-index:1}
+  html[data-bg="on"] header,
+  html[data-bg="on"] #pane{background:color-mix(in srgb,
+      var(--surface) var(--panel-alpha,100%), transparent)}
+  html[data-bg="on"] #list{background:color-mix(in srgb,
+      var(--bg) var(--panel-alpha,100%), transparent)}
+  html[data-bg="on"] #flist th{background:color-mix(in srgb,
+      var(--sunken) var(--panel-alpha,100%), transparent)}
+  html[data-bg="on"] #flist tr:hover td{background:color-mix(in srgb,
+      var(--bg) var(--panel-alpha,100%), transparent)}
+  html[data-bg="on"] #console{background:transparent}
+
+  /* 设置里的滑块：和输入框同一套观感，别用浏览器默认样式 */
+  .slider{display:flex;align-items:center;gap:var(--s3)}
+  .slider input[type=range]{flex:1;accent-color:var(--brand);height:20px}
+  .slider output{min-width:4.2em;text-align:right;
+                 font:500 var(--t-meta)/1 var(--mono);color:var(--dim)}
+
   *{box-sizing:border-box}
   /* 作者样式优先于浏览器默认样式，所以下面那些 display:flex 会把 UA 的
      [hidden]{display:none} 顶掉——被隐藏的面板反而一直看得见。这条兜住它。 */
@@ -577,6 +609,8 @@
 </style>
 </head>
 <body>
+<!-- 自定义背景：图片层在最底下，界面本身的底色由 html[data-bg] 决定要不要让路 -->
+<div id="bg" aria-hidden="true"><div id="bgimg"></div></div>
 <header>
   <b id="title">MSTL</b>
   <span class="dot" id="conn"></span>
@@ -1281,6 +1315,40 @@
         </div>
       </div>
       <div class="hint" id="cfgui-hint"></div>
+
+      <div class="drow" style="align-items:center">
+        <b id="l-cfgbg"></b>
+        <span style="flex:1"></span>
+        <button id="cfgbgupload"></button>
+        <button id="cfgbgclear"></button>
+      </div>
+      <div class="hint" id="cfgbginfo"></div>
+      <div class="drow">
+        <label class="check">
+          <input type="checkbox" id="cfgbgon">
+          <span id="l-cfgbgon"></span>
+        </label>
+      </div>
+      <div class="hint" id="cfgbghint"></div>
+      <div class="drow" style="flex-direction:column;align-items:stretch;gap:10px">
+        <div class="slider">
+          <label id="l-cfgbgblur" style="min-width:7.5em;color:var(--dim)"></label>
+          <input type="range" id="cfgbgblur" min="0" max="40" step="1">
+          <output id="of-cfgbgblur"></output>
+        </div>
+        <div class="slider">
+          <label id="l-cfgbgvis" style="min-width:7.5em;color:var(--dim)"></label>
+          <input type="range" id="cfgbgvis" min="0" max="100" step="1">
+          <output id="of-cfgbgvis"></output>
+        </div>
+        <div class="slider">
+          <label id="l-cfgbgop" style="min-width:7.5em;color:var(--dim)"></label>
+          <input type="range" id="cfgbgop" min="40" max="100" step="1">
+          <output id="of-cfgbgop"></output>
+        </div>
+      </div>
+      <input type="file" id="cfgbgfile" hidden
+             accept="image/png,image/jpeg,image/gif,image/webp">
       <div class="drow">
         <div class="field">
           <label id="l-cfgauto"></label>
@@ -1690,6 +1758,14 @@ function applyStrings() {
   };
   [...$("cfgfont").options].forEach((opt) => { opt.textContent = uiNames[opt.value] || opt.value; });
   [...$("cfguibtn").options].forEach((opt) => { opt.textContent = uiNames[opt.value] || opt.value; });
+  $("l-cfgbg").textContent = strings["web.settings.bg"] || "Background";
+  $("l-cfgbgon").textContent = strings["web.settings.bg_enable"] || "Enable";
+  $("l-cfgbgblur").textContent = strings["web.settings.bg_blur"] || "Blur";
+  $("l-cfgbgvis").textContent = strings["web.settings.bg_visibility"] || "Visibility";
+  $("l-cfgbgop").textContent = strings["web.settings.bg_component_opacity"] || "Opacity";
+  $("cfgbghint").textContent = strings["web.settings.bg_hint"] || "";
+  $("cfgbgupload").textContent = strings["web.settings.bg_upload"] || "Choose";
+  $("cfgbgclear").textContent = strings["web.settings.bg_remove"] || "Remove";
   $("l-cfgauto").textContent = strings["web.settings.auto_start_server"] || "";
   $("l-cfgstartup").textContent = strings["web.settings.startup"] || "";
   $("cfgstartup-hint").textContent = strings["web.settings.startup_hint"] || "";
@@ -2371,6 +2447,24 @@ function cfgFill(data) {
   $("cfgprefer").checked = !!data.prefer_bmcl;
   $("cfgfont").value = nearestScaleKey(FONT_SCALE_STEPS, data.ui_font_scale);
   $("cfguibtn").value = nearestScaleKey(BTN_SCALE_STEPS, data.ui_button_scale);
+
+  // 背景：图存在才启用这些控件；没有图时按钮变成「选择图片」
+  const hasBg = !!data.bg_enabled;
+  $("cfgbgblur").value = String(data.bg_blur === undefined ? 12 : data.bg_blur);
+  $("cfgbgvis").value = String(data.bg_visibility === undefined ? 100 : data.bg_visibility);
+  $("cfgbgop").value = String(data.bg_component_opacity === undefined
+    ? 100 : data.bg_component_opacity);
+  $("cfgbgon").checked = data.bg_on !== false;
+  $("cfgbgon").disabled = !hasBg;
+  $("cfgbgclear").disabled = !hasBg;
+  $("cfgbgupload").textContent = hasBg
+    ? (strings["web.settings.bg_replace"] || "Replace")
+    : (strings["web.settings.bg_upload"] || "Choose");
+  $("cfgbginfo").textContent = hasBg
+    ? (strings["web.settings.bg_current"] || "Current: {name}").replace(
+        "{name}", data.bg_file || "background")
+    : (strings["web.settings.bg_none"] || "No background");
+  syncBgOutputs();
 }
 
 async function saveConfig() {
@@ -2386,6 +2480,10 @@ async function saveConfig() {
     prefer_bmcl: $("cfgprefer").checked,
     ui_font_scale: fontScale,
     ui_button_scale: btnScale,
+    bg_on: $("cfgbgon").checked,
+    bg_blur: Number($("cfgbgblur").value),
+    bg_visibility: Number($("cfgbgvis").value),
+    bg_component_opacity: Number($("cfgbgop").value),
   };
   // 只在勾选状态真的变了时才提交：非 Windows 上提交这一项会直接报错，
   // 而用户可能只是想改个语言
@@ -2394,7 +2492,7 @@ async function saveConfig() {
   try {
     const data = await apiOk("/api/settings", body);
     cfgState = data;
-    applyUiScale(data.ui_font_scale, data.ui_button_scale);
+    applyPanelSettings(data);
     toast(data.message || strings["web.settings.saved"] || "");
     cfgFill(data);
     refresh().catch(() => {});   // 语言可能换了，界面文案跟着走
@@ -4016,9 +4114,29 @@ $("expstart").onclick = startExport;
 
 // 全局设置
 $("cfgbtn").onclick = openConfig;
-$("cfgclose").onclick = () => { $("cfgmodal").hidden = true; };
+$("cfgclose").onclick = () => {
+  $("cfgmodal").hidden = true;
+  // 滑块只是预览：关掉没保存就把界面还原成已保存的状态
+  if (cfgState) applyPanelSettings(cfgState);
+};
 $("cfgsave").onclick = saveConfig;
 $("cfgcheck").onclick = checkUpdate;
+
+// 背景：滑块即时预览（不落盘，点保存才写进 config），换图/移除立刻生效
+["cfgbgblur", "cfgbgvis", "cfgbgop"].forEach((id) => {
+  $(id).addEventListener("input", () => {
+    syncBgOutputs();
+    applyBackground(bgFormState());
+  });
+});
+$("cfgbgon").addEventListener("change", () => applyBackground(bgFormState()));
+$("cfgbgupload").onclick = () => $("cfgbgfile").click();
+$("cfgbgclear").onclick = removeBackground;
+$("cfgbgfile").onchange = (ev) => {
+  const file = ev.target.files && ev.target.files[0];
+  ev.target.value = "";
+  uploadBackground(file);
+};
 
 // EULA
 $("eulaclose").onclick = closeEula;
@@ -4142,12 +4260,95 @@ function applyUiScale(fontScale, btnScale) {
 }
 
 // 面板一打开就按已保存的倍率渲染；拿不到 settings 就用默认，不阻断启动
-async function loadUiScale() {
+async function loadPanelPrefs() {
   try {
     const data = await apiOk("/api/settings");
-    applyUiScale(data.ui_font_scale, data.ui_button_scale);
+    applyPanelSettings(data);
   } catch (err) {
     applyUiScale(1.18, 1.42);
+    applyBackground({ enabled: false });
+  }
+}
+
+/* --------------------------------------------------------- 自定义背景 */
+
+let bgState = { enabled: false, on: true, version: 0, blur: 12, visibility: 100, opacity: 100 };
+
+function applyBackground(next) {
+  bgState = Object.assign({}, bgState, next || {});
+  const root = document.documentElement;
+  const on = !!(bgState.enabled && bgState.on !== false);
+  root.setAttribute("data-bg", on ? "on" : "off");
+  root.style.setProperty("--bg-blur", Number(bgState.blur || 0) + "px");
+  root.style.setProperty("--bg-vis", (Number(bgState.visibility) / 100).toFixed(3));
+  root.style.setProperty("--panel-alpha", Number(bgState.opacity) + "%");
+  const img = $("bgimg");
+  if (on) {
+    // 带上 version：换图后 mtime 变了，浏览器才会真的去取新图
+    img.style.backgroundImage = 'url("/api/background?v=' + (bgState.version || 0) + '")';
+  } else {
+    img.style.backgroundImage = "none";
+  }
+}
+
+function applyPanelSettings(data) {
+  applyUiScale(data.ui_font_scale, data.ui_button_scale);
+  applyBackground({
+    enabled: !!data.bg_enabled,
+    on: data.bg_on !== false,
+    version: data.bg_version || 0,
+    blur: data.bg_blur === undefined ? 12 : data.bg_blur,
+    visibility: data.bg_visibility === undefined ? 100 : data.bg_visibility,
+    opacity: data.bg_component_opacity === undefined
+      ? 100 : data.bg_component_opacity,
+  });
+  if (data.bg_enabled) bgState.file = data.bg_file || "";
+}
+
+function bgFormState() {
+  return {
+    enabled: bgState.enabled,
+    on: $("cfgbgon").checked,
+    version: bgState.version,
+    blur: Number($("cfgbgblur").value),
+    visibility: Number($("cfgbgvis").value),
+    opacity: Number($("cfgbgop").value),
+  };
+}
+
+function syncBgOutputs() {
+  $("of-cfgbgblur").textContent = $("cfgbgblur").value + " px";
+  $("of-cfgbgvis").textContent = $("cfgbgvis").value + " %";
+  $("of-cfgbgop").textContent = $("cfgbgop").value + " %";
+}
+
+async function uploadBackground(file) {
+  if (!file) return;
+  const label = strings["web.files.uploading"] || "Uploading…";
+  try {
+    await withProgress(label, (report) => uploadWithProgress(
+      "/api/settings/background", file, report));
+    const data = await apiOk("/api/settings");
+    cfgState = data;
+    cfgFill(data);
+    applyPanelSettings(data);
+    toast(strings["web.settings.bg_saved"] || "Background updated");
+  } catch (err) {
+    fail(err);
+  }
+}
+
+async function removeBackground() {
+  const ask = (strings["web.settings.bg_remove"] || "Remove background") + "?";
+  if (!window.confirm(ask)) return;
+  try {
+    const data = await apiOk("/api/settings/background/remove", {});
+    cfgState = data;
+    cfgFill(data);
+    applyPanelSettings(data);
+    toast(strings["web.settings.bg_removed"] || "Background removed");
+  } catch (err) {
+    fail(err);
   }
 }
 
@@ -4197,7 +4398,7 @@ $("imgview").onerror = () => {
   toast(strings["web.files.image_failed"] || "Cannot open this image", true);
 };
 
-loadUiScale();
+loadPanelPrefs();
 
 buildChips();
 

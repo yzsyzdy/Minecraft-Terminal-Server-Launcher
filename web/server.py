@@ -260,6 +260,20 @@ WEB_STRINGS = (
     "web.settings.ui_l",
     "web.settings.ui_xl",
     "web.settings.ui_hint",
+    # 自定义背景
+    "web.settings.bg",
+    "web.settings.bg_hint",
+    "web.settings.bg_none",
+    "web.settings.bg_current",
+    "web.settings.bg_upload",
+    "web.settings.bg_replace",
+    "web.settings.bg_remove",
+    "web.settings.bg_enable",
+    "web.settings.bg_blur",
+    "web.settings.bg_visibility",
+    "web.settings.bg_component_opacity",
+    "web.settings.bg_saved",
+    "web.settings.bg_removed",
     "web.settings.saved",
     "web.settings.restore",
     "web.settings.restore_hint",
@@ -453,6 +467,66 @@ def _clamp_scale(value, fallback: float) -> float:
     if not (num == num):          # NaN
         return fallback
     return max(0.8, min(2.0, round(num, 3)))
+
+
+def _clamp_int(value, fallback: int, low: int, high: int) -> int:
+    """背景那几个百分比 / 像素值的收敛：整数、越界即夹住。"""
+    try:
+        num = int(round(float(value)))
+    except (TypeError, ValueError):
+        return fallback
+    return max(low, min(high, num))
+
+
+# 自定义背景图。只收这四种位图，按**文件头**判断，不信 Content-Type 也不信
+# 文件名——这个接口收到的字节会原样发回给浏览器，认错类型等于让面板托管任意内容。
+MAX_BG_BYTES = 12 * 1024 * 1024
+BG_BASENAME = ".mstl-background"
+BG_MIME = {".png": "image/png", ".jpg": "image/jpeg",
+           ".gif": "image/gif", ".webp": "image/webp"}
+BG_EXTENSIONS = tuple(BG_MIME)
+
+
+def background_path(project_dir: str) -> str:
+    """当前背景图的绝对路径；没设置过返回空串。"""
+    for ext in BG_EXTENSIONS:
+        candidate = os.path.join(project_dir, BG_BASENAME + ext)
+        if os.path.isfile(candidate):
+            return candidate
+    return ""
+
+
+def background_extension(head: bytes) -> str:
+    """按文件头判断图片类型，返回扩展名；不是认识的图片返回空串。"""
+    if head.startswith(b"\x89PNG\r\n\x1a\n"):
+        return ".png"
+    if head.startswith(b"\xff\xd8\xff"):
+        return ".jpg"
+    if head.startswith(b"GIF8"):
+        return ".gif"
+    if len(head) >= 12 and head[:4] == b"RIFF" and head[8:12] == b"WEBP":
+        return ".webp"
+    return ""
+
+
+def clear_background(project_dir: str) -> None:
+    """删掉已有的背景图（换图前也要先清，否则会留下两种后缀）。"""
+    for ext in BG_EXTENSIONS:
+        try:
+            os.remove(os.path.join(project_dir, BG_BASENAME + ext))
+        except OSError:
+            pass
+
+
+def background_version(project_dir: str) -> int:
+    """背景图的版本号（文件 mtime，秒）。前端拿它拼 URL 让缓存失效。"""
+    path = background_path(project_dir)
+    if not path:
+        return 0
+    try:
+        return int(os.path.getmtime(path))
+    except OSError:
+        return 0
 
 
 def web_auto_start(config: dict) -> bool:
@@ -1045,6 +1119,8 @@ def _make_handler(manager: RuntimeManager, servers_dir: str, token: str,
                 return self._guard(self._export_categories)
             if path == "/api/settings":
                 return self._guard(lambda: self._json(self._settings_view()))
+            if path == "/api/background":
+                return self._guard(self._background_get)
             if path == "/api/update":
                 return self._guard(self._update_check)
             if path == "/api/openfrp/frpc":
@@ -1062,6 +1138,8 @@ def _make_handler(manager: RuntimeManager, servers_dir: str, token: str,
                 return self._guard(lambda: self._frp_upload(query))
             if path == "/api/jars/upload":
                 return self._guard(lambda: self._jar_upload(query))
+            if path == "/api/settings/background":
+                return self._guard(self._background_upload)
             try:
                 body = self._body()
             except CoreError as err:
@@ -1616,6 +1694,16 @@ def _make_handler(manager: RuntimeManager, servers_dir: str, token: str,
                 # 换浏览器打开同一台机器时保持一致。
                 "ui_font_scale": _clamp_scale(config.get("ui_font_scale"), 1.18),
                 "ui_button_scale": _clamp_scale(config.get("ui_button_scale"), 1.42),
+                # 自定义背景。bg_version 用文件 mtime，前端拿它做缓存失效：
+                # 换图后 URL 变一下，浏览器才会真的去取新图。
+                "bg_enabled": bool(background_path(project_dir)),
+                "bg_file": os.path.basename(background_path(project_dir)),
+                "bg_on": config.get("bg_on", True) is not False,
+                "bg_version": background_version(project_dir),
+                "bg_blur": _clamp_int(config.get("bg_blur"), 12, 0, 40),
+                "bg_visibility": _clamp_int(config.get("bg_visibility"), 100, 0, 100),
+                "bg_component_opacity": _clamp_int(
+                    config.get("bg_component_opacity"), 100, 40, 100),
             }
 
         def _settings_save(self, body: dict) -> None:
@@ -1662,6 +1750,17 @@ def _make_handler(manager: RuntimeManager, servers_dir: str, token: str,
                 config["ui_button_scale"] = _clamp_scale(
                     body.get("ui_button_scale"), 1.42)
 
+            if "bg_blur" in body:
+                config["bg_blur"] = _clamp_int(body.get("bg_blur"), 12, 0, 40)
+            if "bg_visibility" in body:
+                config["bg_visibility"] = _clamp_int(
+                    body.get("bg_visibility"), 100, 0, 100)
+            if "bg_component_opacity" in body:
+                config["bg_component_opacity"] = _clamp_int(
+                    body.get("bg_component_opacity"), 100, 40, 100)
+            if "bg_on" in body:
+                config["bg_on"] = bool(body.get("bg_on"))
+
             save_config(config, project_dir)
 
             if "startup" in body:
@@ -1682,6 +1781,82 @@ def _make_handler(manager: RuntimeManager, servers_dir: str, token: str,
 
             self._json(dict(self._settings_view(),
                             message=t("web.settings.saved")))
+
+        # -- 自定义背景 ------------------------------------------------------
+
+        def _background_get(self) -> None:
+            """把背景图原样发回去。没有设置就 404，前端据此不铺这一层。"""
+            path = background_path(project_dir)
+            if not path:
+                return self._json({"ok": False, "message": "not found"},
+                                  HTTPStatus.NOT_FOUND)
+            ext = os.path.splitext(path)[1].lower()
+            try:
+                with open(path, "rb") as f:
+                    blob = f.read()
+            except OSError:
+                return self._json({"ok": False, "message": "not found"},
+                                  HTTPStatus.NOT_FOUND)
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", BG_MIME.get(ext, "application/octet-stream"))
+            self.send_header("Content-Length", str(len(blob)))
+            # 换图后 URL 会带上新的 bg_version，所以这里可以放心让它缓存一会儿
+            self.send_header("Cache-Control", "private, max-age=3600")
+            self.send_header("X-Content-Type-Options", "nosniff")
+            self.end_headers()
+            self.wfile.write(blob)
+
+        def _background_upload(self) -> None:
+            """接收一张背景图。整张读进内存：上限 12 MB，比流式落盘简单且够用。"""
+            length = self._content_length()
+            if length <= 0:
+                raise CoreError("web.error.upload_empty")
+            if length > MAX_BG_BYTES:
+                self._drain(length)
+                raise CoreError("web.error.bg_too_large",
+                                max=round(MAX_BG_BYTES / 1024 / 1024))
+
+            stream = _BodyStream(self)
+            data = bytearray()
+            while len(data) < length:
+                chunk = stream.read(min(256 * 1024, length - len(data)))
+                if not chunk:
+                    break
+                data.extend(chunk)
+            if len(data) != length:
+                raise CoreError("web.error.upload_incomplete")
+
+            ext = background_extension(bytes(data[:32]))
+            if not ext:
+                raise CoreError("web.error.bg_not_image")
+
+            clear_background(project_dir)
+            target = os.path.join(project_dir, BG_BASENAME + ext)
+            tmp = target + ".part"
+            try:
+                with open(tmp, "wb") as f:
+                    f.write(data)
+                os.replace(tmp, target)
+            except OSError as e:
+                try:
+                    os.remove(tmp)
+                except OSError:
+                    pass
+                raise CoreError("web.error.write_failed", msg=str(e)) from e
+
+            config = load_config(project_dir)
+            config["bg_image"] = ext
+            save_config(config, project_dir)
+            self._json(dict(self._settings_view(),
+                            message=t("web.settings.bg_saved")))
+
+        def _background_remove(self) -> None:
+            clear_background(project_dir)
+            config = load_config(project_dir)
+            config["bg_image"] = ""
+            save_config(config, project_dir)
+            self._json(dict(self._settings_view(),
+                            message=t("web.settings.bg_removed")))
 
         def _update_check(self) -> None:
             """检查更新。网络不通时如实说不知道，不要冒充「已是最新」。"""
@@ -1760,6 +1935,9 @@ def _make_handler(manager: RuntimeManager, servers_dir: str, token: str,
 
             if path == "/api/settings":
                 return self._settings_save(body)
+
+            if path == "/api/settings/background/remove":
+                return self._background_remove()
 
             if path == "/api/jars/toggle":
                 return self._jar_toggle(body)

@@ -19,6 +19,12 @@ DEFAULT_CONFIG: dict[str, Any] = {
     # 取值 0.8 ~ 2.0。
     "ui_font_scale": 1.18,
     "ui_button_scale": 1.42,
+    # 自定义背景：bg_image 为空表示没设；图片本身存在项目目录的 .mstl-background.*
+    "bg_image": "",
+    "bg_on": True,              # 有图时是否真的铺上去（关掉可以留着图不显示）
+    "bg_blur": 12,              # 模糊半径 px，0 ~ 40
+    "bg_visibility": 100,       # 背景图透过界面的强度 %，0 ~ 100
+    "bg_component_opacity": 100,  # 顶栏 / 侧栏 / 组件的底不透明度 %，40 ~ 100
     "web": {
         "host": "127.0.0.1",
         "port": 8765,

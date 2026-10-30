@@ -915,5 +915,21 @@
     "web.error.nothing_to_compress": "Нечего сжимать",
     "web.error.bad_archive_format": "Неизвестный формат: {name}",
     "web.error.not_an_image": "{name} — не изображение",
-    "web.files.confirm_overwrite": "{name} уже существует. Заменить?"
+    "web.files.confirm_overwrite": "{name} уже существует. Заменить?",
+
+    "web.settings.bg": "Свой фон",
+    "web.settings.bg_hint": "PNG / JPEG / GIF / WebP, до 12 МБ. Файл хранится только в локальной папке проекта.",
+    "web.settings.bg_none": "Фоновое изображение не задано",
+    "web.settings.bg_current": "Текущий фон: {name}",
+    "web.settings.bg_upload": "Выбрать изображение",
+    "web.settings.bg_replace": "Заменить",
+    "web.settings.bg_remove": "Удалить фон",
+    "web.settings.bg_enable": "Включить свой фон",
+    "web.settings.bg_blur": "Размытие фона",
+    "web.settings.bg_visibility": "Видимость фона",
+    "web.settings.bg_component_opacity": "Непрозрачность панелей",
+    "web.settings.bg_saved": "Фон обновлён",
+    "web.settings.bg_removed": "Фон удалён",
+    "web.error.bg_not_image": "Неподдерживаемое изображение (только PNG / JPEG / GIF / WebP)",
+    "web.error.bg_too_large": "Файл слишком большой, лимит {max} МБ"
 }
