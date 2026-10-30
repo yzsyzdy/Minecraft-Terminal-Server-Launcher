@@ -163,6 +163,8 @@
         border-radius:var(--r-lg);padding:var(--s4)}
   .stat .label{font-size:var(--t-label);color:var(--dim);letter-spacing:.08em;
                text-transform:uppercase}
+  #dash-net{white-space:pre-line;font-size:calc(var(--t-title) * 1.02);
+            line-height:1.6}
   .stat .value{font:600 calc(var(--t-title) * 1.3)/1.25 var(--mono);
                margin-top:6px;font-variant-numeric:tabular-nums;
                white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -4543,7 +4545,7 @@ function renderDash(data) {
 
   const netOk = net.rx_bps !== null && net.rx_bps !== undefined;
   $("dash-net").textContent = netOk
-    ? "↓ " + fmtBytes(net.rx_bps) + "/s   ↑ " + fmtBytes(net.tx_bps) + "/s"
+    ? "↓ " + fmtBytes(net.rx_bps) + "/s\n↑ " + fmtBytes(net.tx_bps) + "/s"
     : "—";
   $("dash-net-sub").textContent = strings["web.dash.net_hint"]
     || "所有网卡合计，含局域网";
