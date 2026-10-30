@@ -261,6 +261,10 @@ WEB_STRINGS = (
     "web.settings.ui_xl",
     "web.settings.ui_hint",
     "web.settings.font_credit",
+    "web.about.name",
+    "web.about.tagline",
+    "web.about.version",
+    "web.about.dev_version",
     # 自定义背景
     "web.settings.bg",
     "web.settings.bg_hint",
@@ -1184,6 +1188,8 @@ def _make_handler(manager: RuntimeManager, servers_dir: str, token: str,
                 return self._guard(lambda: self._static_icon(path))
             if path.startswith("/fonts/"):
                 return self._guard(lambda: self._static_font(path))
+            if path == "/icon.png":
+                return self._guard(self._app_icon)
             if path == "/api/state":
                 return self._state()
             if path == "/api/stream":
@@ -1382,6 +1388,21 @@ def _make_handler(manager: RuntimeManager, servers_dir: str, token: str,
             self.send_header("Cache-Control", "no-cache")
             self.end_headers()
             self.wfile.write(png)
+
+        def _app_icon(self) -> None:
+            """软件图标（仓库根目录的 icon.png），「关于」页用它。"""
+            file_path = os.path.join(bundled_dir(), "icon.png")
+            if not os.path.isfile(file_path):
+                return self._json({"ok": False, "message": "not found"},
+                                  HTTPStatus.NOT_FOUND)
+            with open(file_path, "rb") as handle:
+                blob = handle.read()
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", "image/png")
+            self.send_header("Content-Length", str(len(blob)))
+            self.send_header("Cache-Control", "public, max-age=86400")
+            self.end_headers()
+            self.wfile.write(blob)
 
         def _static_font(self, path: str) -> None:
             """面板内置字体（`webui/fonts/*.ttf`）。只认单层 .ttf。"""
@@ -1881,6 +1902,11 @@ def _make_handler(manager: RuntimeManager, servers_dir: str, token: str,
             config = load_config(project_dir)
             from startup import is_startup_enabled, is_supported
             from download_msl import source_from_config
+            try:
+                from check_update import _read_local_version
+                version = _read_local_version() or ""
+            except Exception:  # noqa: BLE001 版本文件坏了不该让设置打不开
+                version = ""
             startup_state = False
             try:
                 startup_state = is_startup_enabled()
@@ -1898,6 +1924,7 @@ def _make_handler(manager: RuntimeManager, servers_dir: str, token: str,
                 "restore_running": (config.get("web") or {}).get(
                     "restore_running", True) is not False,
                 "download_source": source_from_config(config),
+                "version": version,
                 # 界面缩放：面板字号与按钮尺寸。存在 config 里而不是 localStorage，
                 # 换浏览器打开同一台机器时保持一致。
                 "ui_font_scale": _clamp_scale(config.get("ui_font_scale"), 1.18),

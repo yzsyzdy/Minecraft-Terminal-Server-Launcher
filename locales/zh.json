@@ -973,5 +973,10 @@
     "web.map.regions": "{n} 个 region",
     "web.map.size": "{w} × {h} 方块",
     "web.map.empty": "这个实例里没有已生成的地图。世界还没跑过，或者存档里只有未生成完的区块。",
-    "web.map.hint": "一个 region = 512×512 方块；未生成的区块是透明的。"
+    "web.map.hint": "一个 region = 512×512 方块；未生成的区块是透明的。",
+
+    "web.about.name": "MSTL · Minecraft 终端服务器启动器",
+    "web.about.tagline": "在终端和浏览器里管理你的 Minecraft 服务器",
+    "web.about.version": "版本 {v}",
+    "web.about.dev_version": "开发版"
 }

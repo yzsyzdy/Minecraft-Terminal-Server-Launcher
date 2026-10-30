@@ -503,6 +503,21 @@
   .pf .hint{margin-top:2px}
   .pf .unit{color:var(--dim);font-size:var(--t-label)}
 
+  /* ------------------------------------------------------------ 关于面板 */
+  #about-box{display:flex;align-items:flex-start;gap:var(--s4);
+             padding:var(--s4);border:1px solid var(--line);
+             border-radius:var(--r-lg);background:var(--sunken)}
+  #about-icon{width:64px;height:64px;border-radius:14px;flex:0 0 auto;
+              image-rendering:auto}
+  #about-text{min-width:0}
+  #about-name{font:600 calc(var(--t-title) * 1.05)/1.3 var(--font);color:var(--fg)}
+  #about-tagline{margin-top:2px}
+  #about-version{margin-top:2px}
+  #about-github{display:inline-block;margin-top:6px;
+                color:var(--brand-text);font:400 12px/1.5 var(--mono);
+                text-decoration:none;word-break:break-all}
+  #about-github:hover{text-decoration:underline}
+
   /* ------------------------------------------------------------------ 地图 */
   #map{position:absolute;inset:0;display:flex;flex-direction:column;
        background:var(--surface)}
@@ -1578,7 +1593,17 @@
         </section>
 
         <section id="cfgpane-about" hidden>
-          <div class="hint" id="cfgupdate"></div>
+          <div id="about-box">
+            <img id="about-icon" src="icon.png" alt="MSTL" width="64" height="64">
+            <div id="about-text">
+              <div id="about-name">MSTL</div>
+              <div class="hint" id="about-tagline"></div>
+              <div class="hint" id="about-version"></div>
+              <a id="about-github" href="https://github.com/yzsyzdy/Minecraft-Terminal-Server-Launcher"
+                 target="_blank" rel="noopener noreferrer">github.com/yzsyzdy/Minecraft-Terminal-Server-Launcher</a>
+            </div>
+          </div>
+          <div class="hint" id="cfgupdate" style="margin-top:var(--s4)"></div>
           <div class="drow">
             <button id="cfgcheck"></button>
           </div>
@@ -1970,6 +1995,8 @@ function applyStrings() {
   };
   [...$("cfguibtn").options].forEach((opt) => { opt.textContent = uiNames[opt.value] || opt.value; });
   $("cfgfont-credit").textContent = strings["web.settings.font_credit"] || "";
+  $("about-name").textContent = strings["web.about.name"] || "MSTL";
+  $("about-tagline").textContent = strings["web.about.tagline"] || "";
   $("cfg-nav-ui").textContent = strings["web.settings.tab_ui"] || "Interface";
   $("cfg-nav-bg").textContent = strings["web.settings.tab_bg"] || "Background";
   $("cfg-nav-boot").textContent = strings["web.settings.tab_boot"] || "Startup";
@@ -2640,6 +2667,10 @@ async function openConfig() {
 }
 
 function cfgFill(data) {
+  const version = data.version ? "v" + data.version : (strings["web.about.dev_version"] || "开发版");
+  $("about-version").textContent = fmt(strings["web.about.version"] || "版本 {v}",
+                                       { v: version });
+  $("about-version").title = data.version ? "" : "源码运行时没有 version.json";
   const lang = $("cfglang");
   lang.innerHTML = "";
   const auto = document.createElement("option");
@@ -5127,6 +5158,8 @@ function cfgPane(name) {
     const pane = $("cfgpane-" + key);
     if (pane) pane.hidden = key !== name;
   });
+  // 「关于」里没有可保存的设置，底部保存按钮留空位但不显示
+  $("cfgsave").style.visibility = name === "about" ? "hidden" : "";
 }
 
 /* ------------------------------------------------------------ 仪表板 */

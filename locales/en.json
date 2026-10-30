@@ -972,5 +972,10 @@
     "web.map.regions": "{n} regions",
     "web.map.size": "{w} × {h} blocks",
     "web.map.empty": "No generated map in this instance yet.",
-    "web.map.hint": "One region = 512×512 blocks; ungenerated chunks are transparent."
+    "web.map.hint": "One region = 512×512 blocks; ungenerated chunks are transparent.",
+
+    "web.about.name": "MSTL · Minecraft Terminal Server Launcher",
+    "web.about.tagline": "Manage your Minecraft servers from the terminal and the browser",
+    "web.about.version": "Version {v}",
+    "web.about.dev_version": "dev build"
 }

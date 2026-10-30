@@ -972,5 +972,10 @@
     "web.map.regions": "Регионов: {n}",
     "web.map.size": "{w} × {h} блоков",
     "web.map.empty": "В этом экземпляре пока нет сгенерированной карты.",
-    "web.map.hint": "Один регион = 512×512 блоков."
+    "web.map.hint": "Один регион = 512×512 блоков.",
+
+    "web.about.name": "MSTL · Minecraft Terminal Server Launcher",
+    "web.about.tagline": "Управляйте серверами Minecraft из терминала и браузера",
+    "web.about.version": "Версия {v}",
+    "web.about.dev_version": "сборка из исходников"
 }
