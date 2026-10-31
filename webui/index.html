@@ -2210,6 +2210,15 @@ $("log").addEventListener("scroll", () => {
 /* ---------------------------------------------------------------- 选择 */
 
 function select(name) {
+  if (selected !== name) {
+    // 表单 / 编辑器 / 地图都是「属于某台实例」的：换实例就全部作废，
+    // 否则会把 A 的改动写进 B（表单保存以前就是取全局 selected）
+    closeProps();
+    closeEditor();
+    mapState.world = null;
+    mapState.worlds = [];
+    $("mapcanvas").textContent = "";
+  }
   selected = name;
   try { localStorage.setItem("mstl.selected", name || ""); } catch (e) {}
   // 历史行一直存在本地缓冲里，这里直接整段画出来，不必重连那条全局流
@@ -2220,6 +2229,7 @@ function select(name) {
   if (tab === "files") loadFiles("");
   // 内容页也一样：换台服就该看到那台服装了些什么
   if (tab === "jars") jarsShow();
+  if (tab === "map") loadMaps(true);
   updatePasteButton();
 }
 
@@ -3028,6 +3038,7 @@ const PROP_GROUPS = [
 
 let propsValues = null;
 let propsPath = "server.properties";
+let propsInstance = null;
 
 function propTypeOf(key, value) {
   if (value === "true" || value === "false") return "bool";
@@ -3156,6 +3167,7 @@ async function openProps(path) {
     const data = await apiOk("/api/properties?name=" + encodeURIComponent(selected));
     propsValues = data.values || {};
     propsPath = path || "server.properties";
+    propsInstance = selected;
     $("ppath").textContent = propsPath;
     $("props").hidden = false;
     renderProps(propsValues);
@@ -3168,10 +3180,11 @@ async function openProps(path) {
 function closeProps() {
   $("props").hidden = true;
   propsValues = null;
+  propsInstance = null;
 }
 
 async function saveProps() {
-  if (!selected) return;
+  if (!propsInstance) return;
   const values = {};
   $("pbody").querySelectorAll("[data-key]").forEach((el) => {
     const key = el.dataset.key;
@@ -3180,7 +3193,7 @@ async function saveProps() {
     else values[key] = el.value;
   });
   try {
-    await apiOk("/api/properties", { name: selected, values });
+    await apiOk("/api/properties", { name: propsInstance, values });
     toast(strings["web.props.saved"] || "已保存");
     $("props").hidden = true;
   } catch (err) {
@@ -3517,6 +3530,7 @@ async function aiSaveConfig() {
 let filesPath = "";
 let filesParent = "";
 let editorPath = null;
+let editorInstance = null;
 
 function joinPath(base, name) {
   return base ? base + "/" + name : name;
@@ -3874,6 +3888,7 @@ async function openEditor(path) {
     const data = await apiOk("/api/file?name=" + encodeURIComponent(selected) +
                              "&path=" + encodeURIComponent(path));
     editorPath = data.path;
+    editorInstance = selected;
     $("etext").value = data.text || "";
     // 设完 value 光标会在末尾，浏览器紧接着会把 textarea 滚到底；
     // 这里手动回到开头，并让 focus 不要把整个页面滚下去
@@ -3892,16 +3907,17 @@ async function openEditor(path) {
 
 function closeEditor() {
   editorPath = null;
+  editorInstance = null;
   $("etext").value = "";
   $("ehl").textContent = "";
   $("editor").hidden = true;
 }
 
 async function saveEditor() {
-  if (!selected || editorPath === null) return;
+  if (!editorInstance || editorPath === null) return;
   try {
     await apiOk("/api/file/write",
-                { name: selected, path: editorPath, content: $("etext").value });
+                { name: editorInstance, path: editorPath, content: $("etext").value });
     toast(strings["web.files.saved"] || "Saved");
     closeEditor();
     loadFiles();

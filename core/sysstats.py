@@ -7,7 +7,7 @@
     网络走 `netstat -e`（输出会本地化，所以只认「一行里有两个纯整数」的形状，
     不认标签文字）；
   * Linux：读 /proc/stat、/proc/meminfo、/proc/net/dev、/proc/uptime；
-  * macOS：`sysctl` / `vm_stat` / `netstat -ib`，CPU 用 loadavg 折算。
+  * macOS：`sysctl`（含 kern.cp_time）/ `vm_stat` / `netstat -ib`。
 
 任何一项取不到就返回 None，界面显示「—」。宁可空着，也不要编一个好看的假数字。
 """
@@ -58,14 +58,18 @@ def _cpu_times() -> Optional[tuple[int, int]]:
                 _win_filetime_value(kernel) + _win_filetime_value(user))
 
     if sys.platform == "darwin":
-        try:
-            load = os.getloadavg()[0]
-        except OSError:
+        # kern.cp_time 是开机以来的累计 tick（user nice sys idle），
+        # 和 /proc/stat 一样能取两次差分。以前这里用 loadavg 折算，凑出来的
+        # total 恒定不变，差分永远为 0，占用率就一直是 None。
+        parts = _run(["sysctl", "-n", "kern.cp_time"]).split()
+        if len(parts) < 4:
             return None
-        cores = os.cpu_count() or 1
-        # loadavg 是「平均长度」，没有累计计数器；换算成 0..100 的占用率
-        busy = min(100.0, load / cores * 100.0)
-        return (int((100.0 - busy) * 1000), 100_000)
+        try:
+            user, nice, system, idle = (int(float(p)) for p in parts[:4])
+        except ValueError:
+            return None
+        busy = user + nice + system
+        return (idle, busy + idle)
 
     try:
         with open("/proc/stat", "r", encoding="utf-8") as f:

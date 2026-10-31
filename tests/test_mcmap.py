@@ -85,6 +85,43 @@ class PaletteTest(unittest.TestCase):
         self.assertEqual((y, block), (4, "minecraft:grass_block"))
 
 
+class HardeningTest(unittest.TestCase):
+    def test_huge_array_count_is_rejected(self):
+        """损坏的 .mca 里 count 可以很大，不能先按它分配内存。"""
+        blob = bytes([0x0A, 0x00, 0x00,   # root compound, name ""
+                      0x0B, 0x00, 0x00,   # int array, name ""
+                      0x7F, 0xFF, 0xFF, 0xFF])
+        with self.assertRaises(ValueError):
+            mcmap.parse_nbt(blob)
+
+    def test_absurd_heightmap_bits_returns_none(self):
+        # 260 个 long -> bits = 65 -> 64 // bits == 0
+        chunk = {"Heightmaps": {"MOTION_BLOCKING": [0] * 260}}
+        self.assertIsNone(mcmap._height_at(chunk, 0, 0))
+
+    def test_palette_with_short_data_returns_none(self):
+        section = {"Y": 0, "block_states": {
+            "palette": ["minecraft:air", "minecraft:stone"],
+            "data": [0],          # 只够前 16 个位置
+        }}
+        self.assertIsNone(mcmap._palette_name(section, 15, 15, 15))
+
+    def test_negative_surface_y_is_not_skipped(self):
+        """1.18 之后主世界底部是 -64，y<0 是合法地表。"""
+        idx = 15 * 256
+        words = [0] * (idx // 16 + 1)
+        words[idx // 16] = 1 << ((idx % 16) * 4)
+        chunk = {
+            "Heightmaps": {"MOTION_BLOCKING": packed_heights([0] * 256)},
+            "sections": [{"Y": -1, "block_states": {
+                "palette": ["minecraft:air", "minecraft:stone"],
+                "data": words,
+            }}],
+        }
+        self.assertEqual(mcmap.surface_at(chunk, 0, 0),
+                         (-1, "minecraft:stone"))
+
+
 class ColorTest(unittest.TestCase):
     def test_known_block_color(self):
         self.assertEqual(mcmap.color_for("minecraft:grass_block", 70),

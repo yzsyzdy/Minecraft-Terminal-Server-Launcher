@@ -28,6 +28,7 @@ import secrets
 import shutil
 import tempfile
 import threading
+import time
 import traceback
 import urllib.parse
 from http import HTTPStatus
@@ -586,9 +587,26 @@ def _map_cache_dir(instance_root: str, world: str) -> str:
     return os.path.join(instance_root, ".mstl-map", slug)
 
 
+_map_locks: dict[str, threading.Lock] = {}
+_map_locks_guard = threading.Lock()
+
+
+def _map_lock(key: str) -> threading.Lock:
+    with _map_locks_guard:
+        lock = _map_locks.get(key)
+        if lock is None:
+            lock = threading.Lock()
+            _map_locks[key] = lock
+        return lock
+
+
 def map_tile(region_path: str, instance_root: str, world: str,
              cx: int, cz: int):
-    """渲染一个 region 的 PNG，带磁盘缓存（按 mca 的 mtime 失效）。"""
+    """渲染一个 region 的 PNG，带磁盘缓存（按 mca 的 mtime 失效）。
+
+    同一个 region 可能被多个请求同时要（拖动地图时很常见），所以按 key 加锁
+    再渲染：否则两条线程会互删对方的临时文件，最坏留下半截 PNG 被长期返回。
+    """
     from core import mcmap
     try:
         stat = os.stat(region_path)
@@ -602,25 +620,49 @@ def map_tile(region_path: str, instance_root: str, world: str,
                 return handle.read()
         except OSError:
             pass
-    png = mcmap.render_region(region_path)
-    if not png:
-        return None
-    try:
-        os.makedirs(cache_dir, exist_ok=True)
-        tmp = cache_path + ".mstl-tmp"
-        with open(tmp, "wb") as handle:
-            handle.write(png)
-        os.replace(tmp, cache_path)
-        # 只留这个 region 的最新一张，旧的时间戳版本顺手清掉
-        for entry in os.listdir(cache_dir):
-            if entry.startswith(f"r.{cx}.{cz}.") and entry != os.path.basename(cache_path):
+
+    with _map_lock(cache_path):
+        # 拿到锁之后再查一次：别的线程可能刚写完
+        if os.path.isfile(cache_path):
+            try:
+                with open(cache_path, "rb") as handle:
+                    return handle.read()
+            except OSError:
+                pass
+        png = mcmap.render_region(region_path)
+        if not png:
+            return None
+        try:
+            os.makedirs(cache_dir, exist_ok=True)
+            # 唯一临时名：即使有别的进程在写，也不会共享同一个文件
+            tmp = f"{cache_path}.mstl-tmp-{os.getpid()}-{threading.get_ident()}"
+            with open(tmp, "wb") as handle:
+                handle.write(png)
+            os.replace(tmp, cache_path)
+            # 旧的时间戳版本清掉；正在写的临时文件按后缀跳过，且只删超过一分钟的
+            cutoff = time.time() - 60
+            for entry in os.listdir(cache_dir):
+                if not entry.startswith(f"r.{cx}.{cz}."):
+                    continue
+                if entry == os.path.basename(cache_path):
+                    continue
+                target = os.path.join(cache_dir, entry)
+                if ".mstl-tmp-" in entry:
+                    try:
+                        if os.path.getmtime(target) > cutoff:
+                            continue
+                    except OSError:
+                        continue
                 try:
-                    os.remove(os.path.join(cache_dir, entry))
+                    os.remove(target)
                 except OSError:
                     pass
-    except OSError:
-        pass
-    return png
+        except OSError:
+            try:
+                os.remove(tmp)
+            except (OSError, UnboundLocalError):
+                pass
+        return png
 
 
 def system_snapshot() -> dict:

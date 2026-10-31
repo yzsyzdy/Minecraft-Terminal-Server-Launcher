@@ -131,7 +131,10 @@ class _NbtReader:
         if tag == 6:
             return self.number(">d")
         if tag == 7:
-            return self.take(self.number(">i"))
+            count = self.number(">i")
+            if count < 0 or count > len(self.data) - self.pos:
+                raise ValueError("NBT 字节数组长度异常")
+            return self.take(count)
         if tag == 8:
             return self.string()
         if tag == 9:
@@ -146,12 +149,13 @@ class _NbtReader:
                     return result
                 name = self.string()
                 result[name] = self.payload(child)
-        if tag == 11:
+        if tag in (11, 12):
             count = self.number(">i")
-            return list(struct.unpack(">" + "i" * count, self.take(4 * count)))
-        if tag == 12:
-            count = self.number(">i")
-            return list(struct.unpack(">" + "q" * count, self.take(8 * count)))
+            width = 4 if tag == 11 else 8
+            if count < 0 or count * width > len(self.data) - self.pos:
+                raise ValueError("NBT 数组长度异常")
+            fmt = ">" + ("i" if tag == 11 else "q") * count
+            return list(struct.unpack(fmt, self.take(width * count)))
         raise ValueError(f"未知 NBT 类型 {tag}")
 
 
@@ -204,13 +208,15 @@ def _height_at(chunk: dict, x: int, z: int) -> Optional[int]:
     if not isinstance(packed, list) or not packed:
         return None
     bits = (len(packed) * 64) // 256
-    if bits <= 0:
+    per_long = 64 // bits if bits else 0
+    if bits <= 0 or per_long <= 0:
         return None
-    per_long = 64 // bits
     index = (z & 15) * 16 + (x & 15)
-    word = packed[index // per_long]
+    slot = index // per_long
+    if slot >= len(packed):
+        return None
     shift = (index % per_long) * bits
-    return (word >> shift) & ((1 << bits) - 1)
+    return (packed[slot] >> shift) & ((1 << bits) - 1)
 
 
 def _column_min_y(chunk: dict) -> int:
@@ -244,8 +250,9 @@ def surface_at(chunk: dict, x: int, z: int) -> tuple[Optional[int], Optional[str
         candidates.append(raw - 1 + min_y)
     sections = {section.get("Y"): section for section in chunk.get("sections") or []
                 if isinstance(section, dict)}
+    floor = min(0, min_y)
     for y in candidates:
-        if y < 0:
+        if y < floor:
             continue
         section = sections.get(y >> 4)
         if not section:
@@ -283,9 +290,14 @@ def _palette_name(section: dict, local_x: int, local_y: int,
     if not isinstance(data, list) or not data:
         return None
     bits = max(4, (len(palette) - 1).bit_length())
-    per_long = 64 // bits
+    per_long = 64 // bits if bits else 0
+    if per_long <= 0:
+        return None
     index = local_y * 256 + local_z * 16 + local_x
-    word = data[index // per_long]
+    slot = index // per_long
+    if slot >= len(data):
+        return None
+    word = data[slot]
     shift = (index % per_long) * bits
     entry_index = (word >> shift) & ((1 << bits) - 1)
     if entry_index >= len(palette):

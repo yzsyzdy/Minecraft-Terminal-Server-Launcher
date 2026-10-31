@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import os
 import re
+import time
 from typing import Optional
 
 from .errors import CoreError
@@ -74,7 +75,11 @@ def _escape(value: str) -> str:
     直接写 UTF-8 只会得到一串问号或 mojibake。
     """
     out = []
-    for char in str(value):
+    for position, char in enumerate(str(value)):
+        if position == 0 and char == " ":
+            # Java 会吃掉值前面的空白，前导空格必须写成 `\ `
+            out.append("\\ ")
+            continue
         code = ord(char)
         if char == "\\":
             out.append("\\\\")
@@ -155,8 +160,8 @@ def parse(text: str) -> dict[str, str]:
 def load(root: str, name: str = "server.properties") -> dict[str, str]:
     path = os.path.join(root, name)
     try:
-        with open(path, "r", encoding="utf-8", errors="replace") as f:
-            return parse(f.read())
+        with open(path, "rb") as f:
+            return parse(f.read().decode("latin-1"))
     except FileNotFoundError:
         return {}
     except OSError as e:
@@ -167,21 +172,28 @@ def exists(root: str, name: str = "server.properties") -> bool:
     return os.path.isfile(os.path.join(root, name))
 
 
-def _key_line_index(lines: list[str], key: str) -> int:
-    """同一个键出现多次时返回**最后一行**。
+def _key_span(lines: list[str], key: str) -> tuple[int, int]:
+    """返回这个键**最后一次出现**所覆盖的物理行区间 [start, end)。
 
-    Java 的 Properties 是后者覆盖前者，而面板读出来的是最后一个值；如果只改
-    第一行，保存后看起来像没生效。
+    Java 允许用行尾反斜杠续行，一个键可能横跨多行；按行号直接替换会把
+    续行残留成一段坏数据，所以这里要整段换掉。
     """
-    found = -1
-    for index, line in enumerate(lines):
-        stripped = line.lstrip()
+    start, end = -1, -1
+    index = 0
+    while index < len(lines):
+        stripped = lines[index].lstrip()
         if not stripped or stripped.startswith(COMMENT_PREFIXES):
+            index += 1
             continue
+        last = index
+        while last + 1 < len(lines) and lines[last].endswith("\\") \
+                and not lines[last].endswith("\\\\"):
+            last += 1
         parsed_key, _ = _split_entry(stripped)
         if parsed_key == key:
-            found = index
-    return found
+            start, end = index, last + 1
+        index = last + 1
+    return start, end
 
 
 def update(root: str, changes: dict[str, str],
@@ -189,8 +201,10 @@ def update(root: str, changes: dict[str, str],
     """按需改若干键，保留注释与顺序；返回写完之后的完整键值。"""
     path = os.path.join(root, name)
     try:
-        with open(path, "r", encoding="utf-8", errors="replace") as f:
-            original = f.read()
+        # 这个文件在游戏侧按 ISO-8859-1 读写；用 latin-1 解码再编码能保证
+        # 原样保留那些非 ASCII 的旧字节，不会被替换成 U+FFFD 永久破坏。
+        with open(path, "rb") as f:
+            original = f.read().decode("latin-1")
     except FileNotFoundError:
         original = ""
     except OSError as e:
@@ -204,26 +218,28 @@ def update(root: str, changes: dict[str, str],
     appended: list[str] = []
     for key, value in (changes or {}).items():
         key = str(key or "").strip()
-        if not key or "\n" in key or "\r" in key:
+        if not _VALID_KEY.match(key):
             continue
         entry = f"{key}={_escape(value)}"
-        index = _key_line_index(lines, key)
-        if index >= 0:
-            lines[index] = entry
+        start, end = _key_span(lines, key)
+        if start >= 0:
+            lines[start:end] = [entry]
         else:
             appended.append(entry)
 
     if appended:
         if lines and lines[-1].strip():
             lines.append("")
-        lines.append("# 由 MSTL 面板补充")
+        # 注释必须是纯 ASCII：文件按 latin-1 写回，中文会变成问号
+        lines.append("# added by the MSTL panel")
         lines.extend(appended)
 
     text = "\n".join(lines).rstrip("\n") + "\n"
-    tmp = path + ".mstl-tmp"
+    # 唯一临时文件名：并发保存不会互相删对方的半成品
+    tmp = f"{path}.mstl-tmp-{os.getpid()}-{time.time_ns()}"
     try:
-        with open(tmp, "w", encoding="utf-8", newline="\n") as f:
-            f.write(text)
+        with open(tmp, "wb") as f:
+            f.write(text.encode("latin-1", "replace"))
         os.replace(tmp, path)
     except OSError as e:
         try:

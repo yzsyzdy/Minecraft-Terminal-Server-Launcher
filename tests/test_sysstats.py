@@ -7,7 +7,7 @@
 import time
 import unittest
 
-from core.sysstats import SystemSampler
+from core.sysstats import SystemSampler, _cpu_times
 
 
 class SamplerTest(unittest.TestCase):
@@ -23,6 +23,10 @@ class SamplerTest(unittest.TestCase):
         self.assertIsNone(data["network"]["rx_bps"])
 
     def test_second_sample_reports_percent(self):
+        if _cpu_times() is None:
+            # 平台不提供累计计数器时采样器会返回 None（界面显示「—」），
+            # 这不是本测试要验证的行为，跳过而不是假装通过
+            self.skipTest("platform does not expose CPU counters")
         sampler = SystemSampler()
         sampler.sample()
         time.sleep(0.15)
