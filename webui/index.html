@@ -117,9 +117,6 @@
      那种「连图片一起放大」的副作用。
      注意：这里的分档是「绝对值」——标准档（m）就是过去「特大」那一档，
      因为实测下来那一档才是能舒服看清、在手机上点得准的尺寸。 */
-  html[data-uibtn="m"]{--btn-scale:1.42}
-  html[data-uibtn="l"]{--btn-scale:1.6}
-  html[data-uibtn="xl"]{--btn-scale:1.78}
 
   /* ---------------------------------------------------- 自定义背景 */
   /* 三层：图片（模糊 + 可见度）→ 界面底色（组件不透明度）→ 内容。
@@ -1513,11 +1510,10 @@
           </div>
           <div class="field" style="margin-top:var(--s2)">
             <label id="l-cfguibtn"></label>
-            <select id="cfguibtn">
-              <option value="m"></option>
-              <option value="l"></option>
-              <option value="xl"></option>
-            </select>
+            <div class="slider">
+              <input type="range" id="cfguibtn" min="0.7" max="1.8" step="0.05">
+              <output id="of-cfguibtn"></output>
+            </div>
           </div>
           <div class="hint" id="cfgui-hint"></div>
         </section>
@@ -1988,12 +1984,6 @@ function applyStrings() {
   $("l-cfgfont").textContent = strings["web.settings.ui_font"] || "";
   $("l-cfguibtn").textContent = strings["web.settings.ui_button"] || "";
   $("cfgui-hint").textContent = strings["web.settings.ui_hint"] || "";
-  const uiNames = {
-    m: strings["web.settings.ui_m"] || "Normal",
-    l: strings["web.settings.ui_l"] || "Large",
-    xl: strings["web.settings.ui_xl"] || "Extra large",
-  };
-  [...$("cfguibtn").options].forEach((opt) => { opt.textContent = uiNames[opt.value] || opt.value; });
   $("cfgfont-credit").textContent = strings["web.settings.font_credit"] || "";
   $("about-name").textContent = strings["web.about.name"] || "MSTL";
   $("about-tagline").textContent = strings["web.about.tagline"] || "";
@@ -2708,7 +2698,10 @@ function cfgFill(data) {
   $("cfgsource").value = data.download_source || "official";
   $("cfgfont").value = String(clampFont(data.ui_font_scale));
   if ($("of-cfgfont")) $("of-cfgfont").textContent = Math.round(clampFont(data.ui_font_scale) * 100) + " %";
-  $("cfguibtn").value = nearestScaleKey(BTN_SCALE_STEPS, data.ui_button_scale);
+  $("cfguibtn").value = String(clampBtn(data.ui_button_scale));
+  if ($("of-cfguibtn")) {
+    $("of-cfguibtn").textContent = Math.round(clampBtn(data.ui_button_scale) * 100) + " %";
+  }
 
   // 背景：图存在才启用这些控件；没有图时按钮变成「选择图片」
   const hasBg = !!data.bg_enabled;
@@ -2730,9 +2723,8 @@ function cfgFill(data) {
 }
 
 async function saveConfig() {
-  const btnKey = $("cfguibtn").value;
   const fontScale = clampFont($("cfgfont").value);
-  const btnScale = (BTN_SCALE_STEPS.find((s) => s[0] === btnKey) || ["m", 1])[1];
+  const btnScale = clampBtn($("cfguibtn").value);
   const body = {
     language: $("cfglang").value,
     download_threads: Number($("cfgthreads").value) || 16,
@@ -4918,7 +4910,7 @@ $("cfgbgupload").onclick = () => $("cfgbgfile").click();
 $("tab-dash").onclick = () => switchTab("dash");
 $("cfgbgblur").addEventListener("input", syncBgOutputs);
 $("cfgfont").addEventListener("input", () => applyUiScale($("cfgfont").value, $("cfguibtn").value));
-$("cfguibtn").addEventListener("change", () => applyUiScale($("cfgfont").value, $("cfguibtn").value));
+$("cfguibtn").addEventListener("input", () => applyUiScale($("cfgfont").value, $("cfguibtn").value));
 $("cfgbgclear").onclick = removeBackground;
 $("cfgbgfile").onchange = (ev) => {
   const file = ev.target.files && ev.target.files[0];
@@ -5028,7 +5020,9 @@ applyTheme(themeMode());
 // 字号是连续值（滑块），直接写 --ui-scale；按钮只保留三档，用属性切换。
 const FONT_MIN = 0.75;
 const FONT_MAX = 1.55;
-const BTN_SCALE_STEPS = [["m", 1.42], ["l", 1.6], ["xl", 1.78]];
+/* 按钮大小：0.7 能缩到比旧版还小，1.8 已经很大了。字号和按钮各自独立缩放。 */
+const BTN_MIN = 0.7;
+const BTN_MAX = 1.8;
 
 function clampFont(value) {
   const num = Number(value);
@@ -5036,23 +5030,21 @@ function clampFont(value) {
   return Math.max(FONT_MIN, Math.min(FONT_MAX, Math.round(num * 100) / 100));
 }
 
-function nearestScaleKey(steps, value) {
+function clampBtn(value) {
   const num = Number(value);
-  if (!Number.isFinite(num)) return steps[1] ? steps[1][0] : steps[0][0];
-  let best = steps[0];
-  for (const step of steps) {
-    if (Math.abs(step[1] - num) < Math.abs(best[1] - num)) best = step;
-  }
-  return best[0];
+  if (!Number.isFinite(num)) return 1.42;
+  return Math.min(BTN_MAX, Math.max(BTN_MIN, Math.round(num * 100) / 100));
 }
 
 function applyUiScale(fontScale, btnScale) {
   const font = clampFont(fontScale);
+  const btn = clampBtn(btnScale);
   document.documentElement.style.setProperty("--ui-scale", String(font));
-  document.documentElement.setAttribute(
-    "data-uibtn", nearestScaleKey(BTN_SCALE_STEPS, btnScale));
-  const out = $("of-cfgfont");
-  if (out) out.textContent = Math.round(font * 100) + " %";
+  document.documentElement.style.setProperty("--btn-scale", String(btn));
+  const fontOut = $("of-cfgfont");
+  if (fontOut) fontOut.textContent = Math.round(font * 100) + " %";
+  const btnOut = $("of-cfguibtn");
+  if (btnOut) btnOut.textContent = Math.round(btn * 100) + " %";
 }
 
 // 面板一打开就按已保存的倍率渲染；拿不到 settings 就用默认，不阻断启动

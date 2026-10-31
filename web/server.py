@@ -256,9 +256,6 @@ WEB_STRINGS = (
     "web.settings.ui_font",
     "web.settings.ui_button",
     "web.settings.ui_s",
-    "web.settings.ui_m",
-    "web.settings.ui_l",
-    "web.settings.ui_xl",
     "web.settings.ui_hint",
     "web.settings.font_credit",
     "web.about.name",
@@ -498,7 +495,7 @@ def web_settings(config: dict) -> tuple[str, int, str]:
 
 
 def _clamp_scale(value, fallback: float) -> float:
-    """界面缩放系数：限制在 0.8 ~ 2.0，非法值回退到默认（标准档）。"""
+    """界面缩放系数：限制在 0.7 ~ 2.0，非法值回退到默认。"""
     try:
         num = float(value)
     except (TypeError, ValueError):
