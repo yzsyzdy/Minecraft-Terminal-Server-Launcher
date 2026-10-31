@@ -75,6 +75,35 @@ class UpdateTest(unittest.TestCase):
             self.assertEqual(merged["server-port"], "25566")
             self.assertTrue(os.path.isfile(os.path.join(tmp, "server.properties")))
 
+    def test_emoji_round_trip(self):
+        """增补平面写成一对代理项，读回来必须拼回一个码位。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "server.properties")
+            open(path, "w", encoding="utf-8").write("motd=x\n")
+            props.update(tmp, {"motd": "你好😀"})
+            raw = open(path, encoding="utf-8").read()
+            self.assertIn("\\ud83d\\ude00", raw)
+            self.assertEqual(props.load(tmp)["motd"], "你好😀")
+
+    def test_invalid_keys_are_skipped(self):
+        """带空白或 = 的键写进去也读不回来，直接忽略。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            open(os.path.join(tmp, "server.properties"), "w").write("motd=x\n")
+            merged = props.update(tmp, {"bad key": "1", "a=b": "2", "good": "3"})
+            self.assertEqual(merged.get("good"), "3")
+            self.assertNotIn("bad key", merged)
+
+    def test_duplicate_key_updates_the_last_one(self):
+        """Java 是后者赢；只改第一行等于没改。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "server.properties")
+            with open(path, "w", encoding="utf-8", newline="\n") as handle:
+                handle.write("pvp=false\npvp=true\n")
+            merged = props.update(tmp, {"pvp": "false"})
+            self.assertEqual(merged["pvp"], "false")
+            raw = open(path, encoding="utf-8").read()
+            self.assertEqual(raw.count("pvp=false"), 2)
+
     def test_backslash_and_newline_round_trip(self):
         with tempfile.TemporaryDirectory() as tmp:
             open(os.path.join(tmp, "server.properties"), "w").write("motd=x\n")

@@ -5,12 +5,13 @@
 
 `v1.1.35` 及更早版本的说明见 [GitHub Releases](https://github.com/yzsyzdy/Minecraft-Terminal-Server-Launcher/releases)。
 
-## [未发布]
+## [1.1.41] - 2026-10-31
 
 ### 新增
 
-- **按钮大小改成滑块（70% – 180%）**：原来是三档下拉，最小档就是 142%，觉得大也没法再小。
-  现在和字号一样连续可调，两个滑块各自独立。
+- **界面字号与按钮大小都改成滑块**：字号 75% – 155%，按钮 70% – 180%，两者各自独立、
+  即时预览、保存后写进 `config.json`。按钮原来是三档下拉，最小档就是 142%，觉得大也调不小；
+  现在能一直缩到 70%。
 - **设置里的「关于」页**：软件图标、名称与一句话介绍、版本号（源码运行时显示「开发版」）、
   可点的 GitHub 仓库地址；检查更新按钮也挪到了这一页。
 - **server.properties 配置表单**：文件管理器里点 `server.properties` 直接进表单，
@@ -42,8 +43,6 @@
   macOS 用 `sysctl` / `vm_stat`），取不到的项显示「—」而不是 0。
 - **软件设置改成侧栏式**：左边分类（界面 / 背景 / 启动 / 关于）、右边只显示当前分类，
   不用在一长列里滚。
-- **界面字号改成滑块**：75% – 155% 连续可调（原来只有四档），可以往小调了；
-  按钮大小仍保留三档。
 - **组件不透明度默认改为 85%**：设了背景图时，顶栏 / 侧栏 / 右栏默认就带一点透，
   比默认全实更自然。
 - **自定义背景**：设置里可选一张图（PNG / JPEG / GIF / WebP，≤ 12 MB）铺在面板后面，
@@ -51,10 +50,6 @@
   滑杆即时预览、保存后写进 `config.json`。图片按文件头校验后存在项目目录的
   `.mstl-background.*`，只留在本机；顶栏 / 侧栏 / 右栏跟随不透明度淡化，
   对话框与输入框保持不透明以保证可读。新增 `/api/background` 读取与上传 / 移除接口。
-- **网页面板界面缩放**：软件设置里可以调「界面字号」（小 / 标准 / 大 / 特大）与
-  「按钮大小」（标准 / 大 / 特大），保存后立即生效。**标准档就是旧版的「特大」**——
-  实测下来那一档才是看得清、点得准的尺寸，所以直接把它设成默认，整块面板的按钮与
-  字号随之上调。值保存在 `config.json` 的 `ui_font_scale` / `ui_button_scale`。
 - **压缩与 7z 解压**：文件管理器的每行可以「压缩」成 `.zip` / `.7z` / `.tar.gz`，
   工具栏可以打包当前目录；解压新增 7z（按文件头识别），zip 与 7z 都支持密码包，
   密码错会明确提示而不是报「包损坏」。7z 走可选的 `py7zr`，没有时退回系统的
@@ -69,6 +64,19 @@
   Material Icons / Material Symbols / Material Design Icons / Remix Icon（Apache 2.0）
   与 Fluent UI System Icons（MIT）。
   新增只读路由 `/icons/<name>.png`（只认单层 .png，挡住穿越）。
+
+### 修复
+
+- 地图页用了绝对定位，打开后会盖住上方的标签栏，切不回去；同时把缩放从 `transform`
+  换成 `zoom`，放大后右下角能正常滚到了
+- 文件管理器里子目录中的 `server.properties` 会错误地打开实例根目录那份表单，现在只有
+  根目录的走表单，其余进普通编辑器
+- `server.properties` 里同名键出现多次时只改了第一行，游戏按最后一行生效，看起来像「保存没反应」；
+  改成改最后一行
+- `server.properties` 里的 emoji 等增补平面字符写回后变成两个孤立代理字符，再读出来是乱码；
+  现在按代理对拼回一个码位，带空白或 `=` 的非法键也直接跳过而不是写坏文件
+- 地图接口判断世界目录是否在实例里用的是字符串前缀，`servers/t2` 会被当成 `servers/t` 的子目录；
+  改用 `commonpath` 比较
 
 ## [1.1.40] - 2026-10-23
 
@@ -738,3 +746,4 @@ Nuitka 的 `--standalone` **不设置 `sys.frozen`**（实测），而项目里�
 [1.1.39]: https://github.com/yzsyzdy/Minecraft-Terminal-Server-Launcher/compare/v1.1.38...v1.1.39
 [1.1.38]: https://github.com/yzsyzdy/Minecraft-Terminal-Server-Launcher/compare/v1.1.37...v1.1.38
 [1.1.37]: https://github.com/yzsyzdy/Minecraft-Terminal-Server-Launcher/compare/v1.1.36...v1.1.37
+[1.1.41]: https://github.com/yzsyzdy/Minecraft-Terminal-Server-Launcher/compare/v1.1.40...v1.1.41

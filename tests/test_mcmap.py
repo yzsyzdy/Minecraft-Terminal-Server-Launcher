@@ -141,5 +141,20 @@ class WorldsTest(unittest.TestCase):
                 self.assertEqual(world["regions"], [[0, 0]])
 
 
+class PathInsideTest(unittest.TestCase):
+    """地图接口的世界参数必须锁在实例目录里，前缀相同的兄弟目录不算。"""
+
+    def test_sibling_prefix_is_rejected(self):
+        import web.server as ws
+        with tempfile.TemporaryDirectory() as tmp:
+            root = os.path.join(tmp, "t")
+            sibling = os.path.join(tmp, "t2")
+            os.makedirs(os.path.join(root, "world"))
+            os.makedirs(os.path.join(sibling, "world"))
+            self.assertTrue(ws.path_inside(root, os.path.join(root, "world")))
+            self.assertFalse(ws.path_inside(root, sibling))
+            self.assertFalse(ws.path_inside(root, os.path.join(root, "..", "t2")))
+
+
 if __name__ == "__main__":
     unittest.main()

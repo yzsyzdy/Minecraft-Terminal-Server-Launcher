@@ -15,11 +15,15 @@ Minecraft 用的是 Java 的 `Properties` 格式，和 INI 像但有几处必须
 from __future__ import annotations
 
 import os
+import re
 from typing import Optional
 
 from .errors import CoreError
 
 COMMENT_PREFIXES = ("#", "!")
+
+# Java properties 的键：不能有空白、`=`、`:`，也不能以 `#`/`!` 开头
+_VALID_KEY = re.compile(r"[^\s=:#!][^\s=:]*$")
 
 
 def _unescape(text: str) -> str:
@@ -37,11 +41,26 @@ def _unescape(text: str) -> str:
         if nxt == "u" and index + 5 < length:
             hex_part = text[index + 2:index + 6]
             try:
-                out.append(chr(int(hex_part, 16)))
-                index += 6
-                continue
+                code = int(hex_part, 16)
             except ValueError:
-                pass
+                code = -1
+            if code >= 0:
+                index += 6
+                # 增补平面（emoji 等）写成一对代理项，必须拼回一个码位，
+                # 否则读出来是两个孤立的代理字符，写回 UTF-8 时会炸
+                if 0xD800 <= code <= 0xDBFF and text[index:index + 2] == "\\u":
+                    low_hex = text[index + 2:index + 6]
+                    try:
+                        low = int(low_hex, 16)
+                    except ValueError:
+                        low = -1
+                    if 0xDC00 <= low <= 0xDFFF:
+                        out.append(chr(0x10000 + (code - 0xD800) * 0x400
+                                       + (low - 0xDC00)))
+                        index += 6
+                        continue
+                out.append(chr(code))
+                continue
         simple = {"t": "\t", "n": "\n", "r": "\r", "f": "\f"}
         out.append(simple.get(nxt, nxt))
         index += 2
@@ -149,14 +168,20 @@ def exists(root: str, name: str = "server.properties") -> bool:
 
 
 def _key_line_index(lines: list[str], key: str) -> int:
+    """同一个键出现多次时返回**最后一行**。
+
+    Java 的 Properties 是后者覆盖前者，而面板读出来的是最后一个值；如果只改
+    第一行，保存后看起来像没生效。
+    """
+    found = -1
     for index, line in enumerate(lines):
         stripped = line.lstrip()
         if not stripped or stripped.startswith(COMMENT_PREFIXES):
             continue
         parsed_key, _ = _split_entry(stripped)
         if parsed_key == key:
-            return index
-    return -1
+            found = index
+    return found
 
 
 def update(root: str, changes: dict[str, str],
@@ -170,6 +195,10 @@ def update(root: str, changes: dict[str, str],
         original = ""
     except OSError as e:
         raise CoreError("web.error.no_such_file", path=name) from e
+
+    if not changes:
+        # 没有改动就不要碰文件：文件不存在时也不该凭空造一个空文件
+        return parse(original)
 
     lines = original.splitlines()
     appended: list[str] = []

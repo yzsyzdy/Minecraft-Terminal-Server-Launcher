@@ -571,6 +571,16 @@ _sysstats_sampler = None
 _sysstats_lock = threading.Lock()
 
 
+def path_inside(root: str, target: str) -> bool:
+    """target 是否真的在 root 里面（按路径比较，不是字符串前缀）。"""
+    root_real = os.path.realpath(root)
+    target_real = os.path.realpath(target)
+    try:
+        return os.path.commonpath([target_real, root_real]) == root_real
+    except ValueError:          # Windows 上跨盘符
+        return False
+
+
 def _map_cache_dir(instance_root: str, world: str) -> str:
     slug = world.replace("/", "_").replace("\\", "_")
     return os.path.join(instance_root, ".mstl-map", slug)
@@ -1358,8 +1368,12 @@ def _make_handler(manager: RuntimeManager, servers_dir: str, token: str,
             if not name or not os.path.isdir(root):
                 return self._json({"ok": False, "message": "no such instance"},
                                   HTTPStatus.NOT_FOUND)
+            if not world:
+                return self._json({"ok": False, "message": "bad world"},
+                                  HTTPStatus.BAD_REQUEST)
             world_root = os.path.realpath(os.path.join(root, world))
-            if not world_root.startswith(os.path.realpath(root)):
+            # 必须用 commonpath 比较：字符串前缀会把 servers/t2 当成 servers/t 的子目录
+            if not path_inside(root, world_root):
                 return self._json({"ok": False, "message": "bad world"},
                                   HTTPStatus.BAD_REQUEST)
             try:

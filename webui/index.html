@@ -398,7 +398,8 @@
   #line .primary{height:32px;padding:0 16px}
 
   /* ---------------------------------------------------------- 文件管理器 */
-  #files{flex:1;min-height:0;display:flex;flex-direction:column}
+  /* position:relative 让编辑器 / 属性表单只盖住文件区，不盖上面的标签栏 */
+  #files{flex:1;min-height:0;display:flex;flex-direction:column;position:relative}
   #fbar{display:flex;align-items:center;gap:var(--s2);flex-wrap:wrap;
         padding:var(--s2) var(--s4);border-bottom:1px solid var(--line)}
   #fpath{max-width:44ch;color:var(--dim);
@@ -516,7 +517,9 @@
   #about-github:hover{text-decoration:underline}
 
   /* ------------------------------------------------------------------ 地图 */
-  #map{position:absolute;inset:0;display:flex;flex-direction:column;
+  /* 和 #files / #jars 一样走正常流（flex:1），不要 position:absolute：
+     绝对定位的 inset:0 会盖住上面的标签栏，切到地图之后就点不回去了。 */
+  #map{flex:1;min-height:0;display:flex;flex-direction:column;
        background:var(--surface)}
   #mapbar{display:flex;align-items:center;gap:var(--s2);
           padding:var(--s2) var(--s4);border-bottom:1px solid var(--line)}
@@ -524,7 +527,7 @@
   #mapinfo{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
   #mapview{flex:1;min-height:0;overflow:auto;background:var(--bg);
            position:relative}
-  #mapcanvas{position:relative;transform-origin:0 0}
+  #mapcanvas{position:relative}
   /* 未生成的区块是透明的，垫一层很淡的棋盘格，免得看起来像「全黑」
      而不是「这里没有数据」 */
   #mapcanvas img{position:absolute;width:512px;height:512px;
@@ -3195,7 +3198,9 @@ function mapTileUrl(world, x, z) {
 }
 
 function applyMapZoom() {
-  $("mapcanvas").style.transform = "scale(" + mapState.zoom + ")";
+  // 用 zoom 而不是 transform：transform 不改变布局，放大后右下角会超出滚动范围，
+  // 滚不到也拖不到；zoom 会把布局尺寸一起放大，滚动条才对得上。
+  $("mapcanvas").style.zoom = String(mapState.zoom);
 }
 
 function renderMap() {
@@ -3618,7 +3623,9 @@ function buildFileRow(entry, isUp) {
   nameBox.onclick = () => {
     if (entry.dir) loadFiles(entry.path);
     else if (entry.image) previewImage(entry);
-    else if (entry.name === "server.properties" && !entry.dir) openProps(entry.path);
+    // 只有实例根目录的那个 server.properties 才有中文表单；子目录里的同名文件
+    // 交给普通编辑器，否则会打开错的文件
+    else if (entry.name === "server.properties" && !entry.dir && !filesPath) openProps(entry.path);
     else if (entry.editable) openEditor(entry.path);
     else downloadFile(entry);
   };
