@@ -5,7 +5,7 @@
 
 `v1.1.35` 及更早版本的说明见 [GitHub Releases](https://github.com/yzsyzdy/Minecraft-Terminal-Server-Launcher/releases)。
 
-## [未发布]
+## [1.1.41] - 2026-11-07
 
 ### 新增
 
@@ -17,8 +17,6 @@
   不用再去别处找端口号。
 - **「在终端打开」按钮**：开一个真终端在该实例目录跑它的启动命令，给 `astrbot init` 这类
   需要 TTY 的交互步骤用——面板的控制台是管道，跑不了 curses / `Read-Host`。
-
-## [1.1.41] - 2026-10-31
 
 ### 新增
 
