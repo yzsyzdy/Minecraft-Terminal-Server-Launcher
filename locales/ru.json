@@ -974,5 +974,24 @@
     "web.about.name": "MSTL · Minecraft Terminal Server Launcher",
     "web.about.tagline": "Управляйте серверами Minecraft из терминала и браузера",
     "web.about.version": "Версия {v}",
-    "web.about.dev_version": "сборка из исходников"
+    "web.about.dev_version": "сборка из исходников",
+
+    "web.console.setup_start": "[MSTL] Первый запуск: выполняется установочная команда {cmd}",
+    "web.console.setup_aborted": "[MSTL] Первичная установка прервана",
+    "web.console.setup_failed": "[MSTL] Первичная установка не удалась: {msg}",
+    "web.setup.label": "Команда первичной установки",
+    "web.setup.hint": "Выполняется один раз перед первым запуском и запоминается при успехе. Пусто — не нужна.",
+    "web.setup.timeout": "Таймаут установки (сек)",
+    "web.port.label": "Порт сервиса",
+    "web.port.hint": "0 отключает проверку. Если задан, панель показывает, слушается ли порт, и может создать туннель.",
+    "web.port.open": "Порт {port} слушается",
+    "web.port.closed": "Порт {port} не слушается",
+    "web.port.tunnel": "Создать туннель",
+    "web.state.preparing": "Подготовка",
+    "web.setup.run": "Повторить установку",
+    "web.setup.done": "Установлено",
+    "web.setup.reset": "Установка повторится при следующем запуске",
+    "web.terminal.open": "Открыть в терминале",
+    "web.terminal.hint": "Открывает настоящий терминал в каталоге экземпляра и запускает его команду. Для интерактивных шагов вроде astrbot init.",
+    "web.error.preparing": "Экземпляр {name} готовится, подождите"
 }

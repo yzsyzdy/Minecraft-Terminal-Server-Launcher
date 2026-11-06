@@ -42,6 +42,7 @@ from core import archive as archives
 from core import files as fileops
 from core import frp as frpops
 from core import instances as instlib
+from core.netprobe import port_open
 from core import provision
 from core.errors import CoreError
 from core.runtime import RuntimeManager, accept_eula, eula_accepted
@@ -295,6 +296,24 @@ WEB_STRINGS = (
     "web.dash.cores",
     "web.dash.net_hint",
     "web.dash.unavailable",
+    "web.console.setup_start",
+    "web.console.setup_aborted",
+    "web.console.setup_failed",
+    "web.setup.label",
+    "web.setup.hint",
+    "web.setup.timeout",
+    "web.port.label",
+    "web.port.hint",
+    "web.port.open",
+    "web.port.closed",
+    "web.port.tunnel",
+    "web.state.preparing",
+    "web.setup.run",
+    "web.setup.done",
+    "web.setup.reset",
+    "web.terminal.open",
+    "web.terminal.hint",
+
     "web.tab.map",
     "web.props.save",
     "web.props.cancel",
@@ -1478,6 +1497,42 @@ def _make_handler(manager: RuntimeManager, servers_dir: str, token: str,
             self.end_headers()
             self.wfile.write(blob)
 
+        def _open_terminal(self, body: dict) -> None:
+            """在系统终端里跑这个实例的启动命令（给需要 TTY 的交互步骤用）。"""
+            import subprocess as sp
+            from core.runtime import build_launch_plan, open_terminal_argv
+            name = str((body or {}).get("name") or "")
+            root = self._instance_dir(name)
+            cfg = load_server_config(root)
+            try:
+                plan = build_launch_plan(cfg, root, project_dir)
+            except CoreError as error:
+                return self._json({"ok": False, "message": self._error_text(error)},
+                                  HTTPStatus.BAD_REQUEST)
+            argv = open_terminal_argv(plan)
+            if not argv:
+                return self._json({"ok": False, "message": "nothing to run"},
+                                  HTTPStatus.BAD_REQUEST)
+            try:
+                sp.Popen(argv, cwd=plan.workdir, close_fds=True)
+            except OSError as e:
+                return self._json({"ok": False, "message": str(e)},
+                                  HTTPStatus.INTERNAL_SERVER_ERROR)
+            self._json({"ok": True})
+
+        def _setup_reset(self, body: dict) -> None:
+            """「重新安装」：删掉标记文件，下次启动会再跑一遍 setup。"""
+            name = str((body or {}).get("name") or "")
+            root = self._instance_dir(name)
+            marker = os.path.join(root, ".mstl-setup.json")
+            try:
+                if os.path.isfile(marker):
+                    os.remove(marker)
+            except OSError as e:
+                return self._json({"ok": False, "message": str(e)},
+                                  HTTPStatus.INTERNAL_SERVER_ERROR)
+            self._json({"ok": True})
+
         def _state(self) -> None:
             instances = []
             for entry in list_servers(servers_dir):
@@ -1524,7 +1579,13 @@ def _make_handler(manager: RuntimeManager, servers_dir: str, token: str,
                     # 回显旧内存、用户随手一保存就把自己刚改的数值改了回去。
                     row.update({key: runtime[key] for key in (
                         "state", "exit_code", "pid", "started_at", "java",
-                        "program", "workdir", "command")})
+                        "program", "workdir", "command") if key in runtime})
+                    # 端口探活：只对通用实例且配了端口时做，超时 0.25 秒，
+                    # 一次 /api/state 最多多花这么点时间
+                    port = (entry.get("launch") or {}).get("port") or 0
+                    if port:
+                        row["port"] = int(port)
+                        row["port_open"] = port_open(int(port))
                 instances.append(row)
             self._json({
                 "ok": True,
@@ -2374,6 +2435,12 @@ def _make_handler(manager: RuntimeManager, servers_dir: str, token: str,
 
             if path == "/api/instances/settings":
                 return self._update_instance(body)
+
+            if path == "/api/instance/setup/reset":
+                return self._setup_reset(body)
+
+            if path == "/api/instance/terminal":
+                return self._open_terminal(body)
 
             if path.startswith("/api/frp/"):
                 return self._frp_action(path, body)

@@ -975,5 +975,24 @@
     "web.about.name": "MSTL · Minecraft 终端服务器启动器",
     "web.about.tagline": "在终端和浏览器里管理你的 Minecraft 服务器",
     "web.about.version": "版本 {v}",
-    "web.about.dev_version": "开发版"
+    "web.about.dev_version": "开发版",
+
+    "web.console.setup_start": "[MSTL] 首次启动，先执行安装命令：{cmd}",
+    "web.console.setup_aborted": "[MSTL] 已中止首次安装",
+    "web.console.setup_failed": "[MSTL] 首次安装失败：{msg}",
+    "web.setup.label": "首次安装命令",
+    "web.setup.hint": "只在第一次启动前跑一次，成功后会记住；改了命令会重新跑。留空表示不需要。",
+    "web.setup.timeout": "安装超时（秒）",
+    "web.port.label": "服务端口",
+    "web.port.hint": "填 0 表示不检测。填了之后面板会显示端口是否已在监听，并能一键建隧道。",
+    "web.port.open": "端口 {port} 已监听",
+    "web.port.closed": "端口 {port} 未监听",
+    "web.port.tunnel": "建隧道",
+    "web.state.preparing": "准备中",
+    "web.setup.run": "重新安装",
+    "web.setup.done": "已安装",
+    "web.setup.reset": "下次启动会重新执行安装命令",
+    "web.terminal.open": "在终端打开",
+    "web.terminal.hint": "打开一个真实终端，在该实例目录下跑它的启动命令。需要交互的初始化步骤（如 astrbot init）用它。",
+    "web.error.preparing": "实例 {name} 正在准备中，稍等一下"
 }

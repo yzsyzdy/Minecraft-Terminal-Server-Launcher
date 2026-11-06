@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import os
 import subprocess
+import sys
 import threading
 import time
 from dataclasses import dataclass
@@ -40,6 +41,9 @@ OnEvent = Callable[[Event], None]
 STATE_STOPPED = "stopped"
 STATE_RUNNING = "running"
 STATE_STOPPING = "stopping"
+# 通用实例在跑「首次安装命令」时的状态。进程还没起来，但也不是「没在跑」，
+# 面板要能显示「准备中」而不是干等或误判成已停止。
+STATE_PREPARING = "preparing"
 
 # 崩溃自动重启的退避：5 秒起、每次翻倍、封顶 60 秒。
 #
@@ -77,6 +81,12 @@ class LaunchPlan:
     # 再去读一遍配置的话，「改了但还没保存」的实例会重启成另一个东西。
     auto_restart: bool = False
     restart_max: int = 5
+    # 通用实例：首次启动前跑一次的安装命令，以及它成功后写的标记文件
+    setup: str = ""
+    setup_timeout: int = 900
+    setup_marker: str = ""
+    # 实例对外提供服务的端口（只用于展示与建隧道，不参与启动）
+    port: int = 0
 
 
 def _exec_args(value) -> list[str]:
@@ -199,8 +209,54 @@ def build_generic_plan(server_cfg: dict, server_dir: str) -> LaunchPlan:
         program=summary,
         log_path=os.path.join(server_dir, "logs", "mstl-console.log"),
         priority=_priority_of(server_cfg),
+        setup=str(launch.get("setup") or "").strip(),
+        setup_timeout=_clamp_int(launch.get("setup_timeout"), 900, 30, 7200),
+        setup_marker=os.path.join(server_dir, ".mstl-setup.json"),
+        port=_clamp_int(launch.get("port"), 0, 0, 65535),
         **_restart_policy_of(server_cfg),
     )
+
+
+def open_terminal_argv(plan: "LaunchPlan") -> Optional[list[str]]:
+    """在当前目录开一个真终端跑实例的命令。
+
+    面板的控制台是管道，不是 TTY：`astrbot init`、`npm create`、各种 curses
+    TUI 在管道里要么报错要么画出满屏乱码。这类一次性交互步骤只能交给真终端，
+    所以给界面一个「在终端里打开」的入口，而不是硬把命令塞进 Web 控制台。
+    """
+    if not plan.cmd:
+        return None
+    if os.name == "nt":
+        # 让 cmd 开一个新窗口并停在原地：实例命令跑完不自动关，方便看输出
+        joined = subprocess.list2cmdline(plan.cmd)
+        return ["cmd.exe", "/c", "start", "", "cmd.exe", "/k", joined]
+    if sys.platform == "darwin":
+        joined = " ".join(plan.cmd)
+        return ["osascript", "-e",
+                f'tell application "Terminal" to do script "{joined}"']
+    return ["x-terminal-emulator", "-e"] + list(plan.cmd)
+
+
+def _clamp_int(value, fallback: int, low: int, high: int) -> int:
+    try:
+        number = int(value)
+    except (TypeError, ValueError):
+        return fallback
+    return max(low, min(high, number))
+
+
+def _setup_hash(command: str) -> str:
+    import hashlib
+    return hashlib.sha256(command.encode("utf-8")).hexdigest()
+
+
+def setup_argv(plan: "LaunchPlan") -> Optional[list[str]]:
+    """setup 命令要交给哪个 shell 跑；没有配置就返回 None。"""
+    if not plan.setup:
+        return None
+    if os.name == "nt":
+        return [os.environ.get("COMSPEC") or "cmd.exe", "/c", plan.setup]
+    return ["/bin/sh", "-c", plan.setup]
 
 
 EULA_HEADER = (
@@ -310,8 +366,54 @@ def build_launch_plan(
         max_mem=max_mem,
         log_path=os.path.join(server_dir, "logs", "mstl-console.log"),
         priority=_priority_of(server_cfg),
+        setup=str(launch.get("setup") or "").strip(),
+        setup_timeout=_clamp_int(launch.get("setup_timeout"), 900, 30, 7200),
+        setup_marker=os.path.join(server_dir, ".mstl-setup.json"),
+        port=_clamp_int(launch.get("port"), 0, 0, 65535),
         **_restart_policy_of(server_cfg),
     )
+
+
+def open_terminal_argv(plan: "LaunchPlan") -> Optional[list[str]]:
+    """在当前目录开一个真终端跑实例的命令。
+
+    面板的控制台是管道，不是 TTY：`astrbot init`、`npm create`、各种 curses
+    TUI 在管道里要么报错要么画出满屏乱码。这类一次性交互步骤只能交给真终端，
+    所以给界面一个「在终端里打开」的入口，而不是硬把命令塞进 Web 控制台。
+    """
+    if not plan.cmd:
+        return None
+    if os.name == "nt":
+        # 让 cmd 开一个新窗口并停在原地：实例命令跑完不自动关，方便看输出
+        joined = subprocess.list2cmdline(plan.cmd)
+        return ["cmd.exe", "/c", "start", "", "cmd.exe", "/k", joined]
+    if sys.platform == "darwin":
+        joined = " ".join(plan.cmd)
+        return ["osascript", "-e",
+                f'tell application "Terminal" to do script "{joined}"']
+    return ["x-terminal-emulator", "-e"] + list(plan.cmd)
+
+
+def _clamp_int(value, fallback: int, low: int, high: int) -> int:
+    try:
+        number = int(value)
+    except (TypeError, ValueError):
+        return fallback
+    return max(low, min(high, number))
+
+
+def _setup_hash(command: str) -> str:
+    import hashlib
+    return hashlib.sha256(command.encode("utf-8")).hexdigest()
+
+
+def setup_argv(plan: "LaunchPlan") -> Optional[list[str]]:
+    """setup 命令要交给哪个 shell 跑；没有配置就返回 None。"""
+    if not plan.setup:
+        return None
+    if os.name == "nt":
+        return [os.environ.get("COMSPEC") or "cmd.exe", "/c", plan.setup]
+    return ["/bin/sh", "-c", plan.setup]
 
 
 class ServerRuntime:
@@ -337,6 +439,8 @@ class ServerRuntime:
         self._restart_timer: Optional[threading.Timer] = None
         self._restart_count = 0
         self._restart_at: Optional[float] = None
+        # 正在跑首次安装命令的子进程（没有就在 None）
+        self._setup_proc: Optional[subprocess.Popen] = None
 
     # -- 只读 --------------------------------------------------------------
 
@@ -346,6 +450,9 @@ class ServerRuntime:
                 and self._proc.poll() is not None):
             self._state = STATE_STOPPED
             self._exit_code = self._proc.returncode
+        # preparing 阶段的状态由启动线程自己收敛（它会写标记、拉起主进程或
+        # 报失败），这里不要抢：抢早了一瞬就会让面板看到「已停止」又跳回
+        # 「运行中」。
 
     def state(self) -> str:
         with self._lock:
@@ -380,6 +487,9 @@ class ServerRuntime:
                 "auto_restart": self.plan.auto_restart,
                 "restart_max": self.plan.restart_max,
                 "restart_count": self._restart_count,
+                "port": self.plan.port,
+                "setup": self.plan.setup,
+                "setup_pending": self._setup_needed_locked(),
                 # 面板拿这个时间戳做倒计时；None 表示没有在等重启
                 "restart_at": restart_at,
                 "restart_pending": restart_at is not None,
@@ -398,38 +508,170 @@ class ServerRuntime:
         # 两个请求真并发，一次「启动」撞上一次「停止」就够把两个请求线程
         # 一起挂死（面板随后整个失去响应）。所以：**绝不在持 self._lock 时
         # 调用 _push / _emit / _emit_state / _note**。
+        needs_setup = self._setup_needed()
         with self._lock:
+            if self._state == STATE_PREPARING:
+                # 准备中再点一次启动：含义是「别重复拉起」，如实说在准备中
+                raise CoreError("web.error.preparing", name=self.plan.name)
             if self._proc is not None and self._proc.poll() is None:
                 raise CoreError("web.error.already_running", name=self.plan.name)
             # 手动启动等于「我要它现在跑」，之前排着的重启就没意义了
             self._stop_requested = False
             self._cancel_restart_locked()
             self._open_log()
-            try:
-                self._proc = spawn_priority_process(
-                    self.plan.cmd, self.plan.workdir, self.plan.priority,
-                    stdin=subprocess.PIPE,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.STDOUT,
-                    text=True, encoding="utf-8", errors="replace", bufsize=1,
-                )
-            except OSError as e:
-                # spawn 失败时 pump 线程根本没起来，_close_log 的唯一调用点
-                # （_pump 的 finally）永远不会执行。不在这里补一次，日志句柄
-                # 会一直留到进程结束 —— Windows 上就是实例目录「文件被占用」，
-                # 删不掉，而且每次失败启动都泄漏一个。
-                self._close_log()
-                raise CoreError("web.error.spawn_failed", msg=str(e)) from e
+            if needs_setup:
+                self._state = STATE_PREPARING
+                pid = None
+            else:
+                pid = self._spawn_locked()
 
-            self._state = STATE_RUNNING
-            self._exit_code = None
-            self._started_at = time.time()
-            pid = self._proc.pid
-            self._reader = threading.Thread(
-                target=self._pump, args=(self._proc,), daemon=True)
-            self._reader.start()
-
+        if needs_setup:
+            self._note("web.console.setup_start", cmd=self.plan.setup)
+            self._emit_state()
+            threading.Thread(target=self._prepare_then_start,
+                             name=f"mstl-setup-{self.plan.name}",
+                             daemon=True).start()
+            return
         self._note("web.console.started", pid=pid)
+        self._emit_state()
+
+    def _spawn_locked(self) -> int:
+        """真正拉起主进程。调用方需持有锁，并且已经把状态置备好。"""
+        try:
+            self._proc = spawn_priority_process(
+                self.plan.cmd, self.plan.workdir, self.plan.priority,
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True, encoding="utf-8", errors="replace", bufsize=1,
+            )
+        except OSError as e:
+            # spawn 失败时 pump 线程根本没起来，_close_log 的唯一调用点
+            # （_pump 的 finally）永远不会执行。不在这里补一次，日志句柄
+            # 会一直留到进程结束 —— Windows 上就是实例目录「文件被占用」，
+            # 删不掉，而且每次失败启动都泄漏一个。
+            self._close_log()
+            self._state = STATE_STOPPED
+            raise CoreError("web.error.spawn_failed", msg=str(e)) from e
+
+        self._state = STATE_RUNNING
+        self._exit_code = None
+        self._started_at = time.time()
+        pid = self._proc.pid
+        self._reader = threading.Thread(
+            target=self._pump, args=(self._proc,), daemon=True)
+        self._reader.start()
+        return pid
+
+    # -- 首次安装 ----------------------------------------------------------
+
+    def _read_setup_marker(self) -> dict:
+        import json
+        try:
+            with open(self.plan.setup_marker, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            return data if isinstance(data, dict) else {}
+        except (OSError, ValueError):
+            return {}
+
+    def _setup_needed_locked(self) -> bool:
+        if not self.plan.setup:
+            return False
+        return self._read_setup_marker().get("hash") != _setup_hash(self.plan.setup)
+
+    def _setup_needed(self) -> bool:
+        return self._setup_needed_locked()
+
+    def _write_setup_marker(self) -> None:
+        import json
+        payload = {
+            "command": self.plan.setup,
+            "hash": _setup_hash(self.plan.setup),
+            "finished_at": time.time(),
+        }
+        try:
+            tmp = self.plan.setup_marker + ".tmp"
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump(payload, f, ensure_ascii=False, indent=2)
+            os.replace(tmp, self.plan.setup_marker)
+        except OSError:
+            # 写不了标记就退化成「每次启动都跑一遍」，宁可多跑也不要假装装好了
+            pass
+
+    def _prepare_then_start(self) -> None:
+        argv = setup_argv(self.plan)
+        if not argv:
+            return
+        try:
+            proc = spawn_priority_process(
+                argv, self.plan.workdir, self.plan.priority,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True, encoding="utf-8", errors="replace", bufsize=1,
+            )
+        except OSError as e:
+            self._fail_setup(str(e))
+            return
+        with self._lock:
+            self._setup_proc = proc
+        try:
+            try:
+                for line in proc.stdout:
+                    self._push({"type": "line", "kind": "setup",
+                                "text": line.rstrip("\r\n")})
+            except (OSError, ValueError):
+                pass
+            try:
+                code = proc.wait(timeout=self.plan.setup_timeout)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                self._fail_setup("timeout")
+                return
+        finally:
+            with self._lock:
+                self._setup_proc = None
+            self._close_setup_pipes(proc)
+
+        if self._stop_requested:
+            with self._lock:
+                self._state = STATE_STOPPED
+            self._emit_state()
+            return
+        if code != 0:
+            self._fail_setup(f"exit {code}")
+            return
+
+        self._write_setup_marker()
+        with self._lock:
+            try:
+                pid = self._spawn_locked()
+            except CoreError as e:
+                self._state = STATE_STOPPED
+                pid = None
+                error = e
+            else:
+                error = None
+        if error is not None:
+            self._note("web.console.setup_failed", msg=str(error))
+            self._emit_state()
+            return
+        self._note("web.console.started", pid=pid)
+        self._emit_state()
+
+    @staticmethod
+    def _close_setup_pipes(proc) -> None:
+        for stream in (proc.stdout,):
+            try:
+                if stream is not None:
+                    stream.close()
+            except OSError:
+                pass
+
+    def _fail_setup(self, reason: str) -> None:
+        with self._lock:
+            self._state = STATE_STOPPED
+        self._note("web.console.setup_failed", msg=reason)
         self._emit_state()
 
     def send(self, command: str) -> None:
@@ -448,26 +690,44 @@ class ServerRuntime:
         self._push({"type": "line", "kind": "input", "text": command})
 
     def stop(self, timeout: float = 20.0) -> None:
-        """先好好说：往控制台发 stop；超时再 terminate，再不行就 kill。"""
+        """先好好说：往控制台发 stop；超时再 terminate，再不行就 kill。
+
+        正在跑首次安装命令时没有主进程，这时 stop 的含义是「把安装也停掉」，
+        不能报「没在运行」——用户看到准备中却停不下来才是真的怪。
+        """
         with self._lock:
-            if self._proc is None or self._proc.poll() is not None:
-                raise CoreError("web.error.not_running", name=self.plan.name)
-            proc = self._proc
-            reader = self._reader
-            # 用户明确要停：关掉自动重启的念头。不设这一位的话，stop() 让进程
-            # 以退出码 0 结束时虽然不会重启，但若 stop 之后进程被信号打断
-            # （退出码非 0），面板里那台「已经停了」的服务器会自己站起来。
-            self._stop_requested = True
-            self._cancel_restart_locked()
-            self._state = STATE_STOPPING
-            try:
-                if proc.stdin:
-                    proc.stdin.write("stop\n")
-                    proc.stdin.flush()
-            except (OSError, ValueError):
-                pass
+            if self._state == STATE_PREPARING:
+                setup = self._setup_proc
+                self._stop_requested = True
+                self._cancel_restart_locked()
+                self._state = STATE_STOPPED
+                proc = None
+                reader = None
+                if setup is not None and setup.poll() is None:
+                    setup.kill()
+            else:
+                if self._proc is None or self._proc.poll() is not None:
+                    raise CoreError("web.error.not_running", name=self.plan.name)
+                proc = self._proc
+                reader = self._reader
+                # 用户明确要停：关掉自动重启的念头。不设这一位的话，stop() 让进程
+                # 以退出码 0 结束时虽然不会重启，但若 stop 之后进程被信号打断
+                # （退出码非 0），面板里那台「已经停了」的服务器会自己站起来。
+                self._stop_requested = True
+                self._cancel_restart_locked()
+                self._state = STATE_STOPPING
+                try:
+                    if proc.stdin:
+                        proc.stdin.write("stop\n")
+                        proc.stdin.flush()
+                except (OSError, ValueError):
+                    pass
 
         # 事件在锁外发，理由见 start() 顶部的锁序说明。
+        if proc is None:
+            self._note("web.console.setup_aborted")
+            self._emit_state()
+            return
         self._note("web.console.stop_sent")
         self._emit_state()
         try:
@@ -498,8 +758,12 @@ class ServerRuntime:
             self._stop_requested = True
             self._cancel_restart_locked()
             proc = self._proc
-        if proc is not None and proc.poll() is None:
-            proc.kill()
+            setup = self._setup_proc
+            if self._state == STATE_PREPARING:
+                self._state = STATE_STOPPED
+        for child in (proc, setup):
+            if child is not None and child.poll() is None:
+                child.kill()
 
     # -- 内部 --------------------------------------------------------------
 

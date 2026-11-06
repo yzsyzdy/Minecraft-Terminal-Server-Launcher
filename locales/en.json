@@ -974,5 +974,24 @@
     "web.about.name": "MSTL · Minecraft Terminal Server Launcher",
     "web.about.tagline": "Manage your Minecraft servers from the terminal and the browser",
     "web.about.version": "Version {v}",
-    "web.about.dev_version": "dev build"
+    "web.about.dev_version": "dev build",
+
+    "web.console.setup_start": "[MSTL] First launch: running setup command {cmd}",
+    "web.console.setup_aborted": "[MSTL] First-run setup aborted",
+    "web.console.setup_failed": "[MSTL] First-run setup failed: {msg}",
+    "web.setup.label": "First-run setup command",
+    "web.setup.hint": "Runs once before the first start and is remembered on success; editing it runs it again. Leave empty if not needed.",
+    "web.setup.timeout": "Setup timeout (seconds)",
+    "web.port.label": "Service port",
+    "web.port.hint": "0 disables the check. When set, the panel shows whether the port is listening and can create a tunnel for it.",
+    "web.port.open": "Port {port} is listening",
+    "web.port.closed": "Port {port} is not listening",
+    "web.port.tunnel": "Create tunnel",
+    "web.state.preparing": "Preparing",
+    "web.setup.run": "Run setup again",
+    "web.setup.done": "Installed",
+    "web.setup.reset": "Setup will run again on the next start",
+    "web.terminal.open": "Open in terminal",
+    "web.terminal.hint": "Opens a real terminal in the instance directory and runs its command. Use it for interactive setup steps such as astrbot init.",
+    "web.error.preparing": "Instance {name} is preparing, please wait"
 }

@@ -35,6 +35,13 @@ DEFAULT_GENERIC_LAUNCH: dict[str, Any] = {
     "args": [],      # mode=exec：参数，一项一个，不做再切分
     "command": "",   # mode=cmd / powershell：要执行的命令原文
     "workdir": "",   # 工作目录，相对实例目录；留空即实例目录
+    # 首次启动前跑一次的安装/初始化命令（装依赖、建 venv 之类）。跑成功后写
+    # 标记文件，之后不再重复；命令改了会重新跑。
+    "setup": "",
+    "setup_timeout": 900,
+    # 这个实例对外提供服务的端口。只用于显示「已监听/未监听」和一键建隧道，
+    # 启动时不会因为它去改什么。
+    "port": 0,
 }
 
 
@@ -250,12 +257,23 @@ def _normalize_server_config(cfg: dict[str, Any]) -> dict[str, Any]:
         args = args.split()
     elif not isinstance(args, list):
         args = []
+    try:
+        setup_timeout = int(launch.get("setup_timeout") or 900)
+    except (TypeError, ValueError):
+        setup_timeout = 900
+    try:
+        port = int(launch.get("port") or 0)
+    except (TypeError, ValueError):
+        port = 0
     cfg["launch"] = {
         "mode": mode if mode in LAUNCH_MODES else LAUNCH_EXEC,
         "program": str(launch.get("program") or ""),
         "args": [str(item) for item in args],
         "command": str(launch.get("command") or ""),
         "workdir": str(launch.get("workdir") or ""),
+        "setup": str(launch.get("setup") or ""),
+        "setup_timeout": max(30, min(7200, setup_timeout)),
+        "port": port if 0 <= port <= 65535 else 0,
     }
 
     openfrp = cfg.get("openfrp")

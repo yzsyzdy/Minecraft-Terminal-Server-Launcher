@@ -327,6 +327,7 @@
   .badge::before{content:"";width:5px;height:5px;border-radius:50%;
                  background:currentColor;flex:0 0 auto}
   .badge.running{background:var(--ok-soft);color:var(--ok)}
+  .badge.preparing{background:var(--warn-soft);color:var(--warn)}
   .badge.stopping{background:var(--warn-soft);color:var(--warn)}
 
   /* -------------------------------------------------------------- 右栏头部 */
@@ -1213,6 +1214,27 @@
             <input id="setgworkdir">
           </div>
         </div>
+        <div class="drow">
+          <div class="field">
+            <label id="l-setgsetup"></label>
+            <input id="setgsetup" spellcheck="false">
+          </div>
+        </div>
+        <div class="hint" id="setgsetup-hint"></div>
+        <div class="drow">
+          <div class="field">
+            <label id="l-setgport"></label>
+            <input id="setgport" type="number" min="0" max="65535" step="1">
+          </div>
+          <div class="field">
+            <label id="l-setgsetuptimeout"></label>
+            <input id="setgsetuptimeout" type="number" min="30" max="7200" step="1">
+          </div>
+        </div>
+        <div class="hint" id="setgport-hint"></div>
+        <div class="drow">
+          <button id="setgsetupnow"></button>
+        </div>
       </div>
       <div class="drow" style="margin-top:8px">
         <b id="l-setopenfrp" style="font-size:13px"></b>
@@ -1234,6 +1256,10 @@
           <span id="l-setauto"></span>
         </label>
       </div>
+      <div class="drow" id="row-terminal">
+        <button id="setterminal"></button>
+      </div>
+      <div class="hint" id="set-terminal-hint"></div>
       <div class="dactions">
         <button id="expopen"></button>
         <button class="primary" id="setsave"></button>
@@ -1898,6 +1924,14 @@ function applyStrings() {
   $("l-setmaxmem").textContent = strings["web.new.max_mem"] || "";
   $("l-setjvm").textContent = strings["web.settings.jvm_args"] || "";
   $("l-setsrv").textContent = strings["web.settings.server_args"] || "";
+  $("l-setgsetup").textContent = strings["web.setup.label"] || "";
+  $("setgsetup-hint").textContent = strings["web.setup.hint"] || "";
+  $("l-setgport").textContent = strings["web.port.label"] || "";
+  $("setgport-hint").textContent = strings["web.port.hint"] || "";
+  $("l-setgsetuptimeout").textContent = strings["web.setup.timeout"] || "";
+  $("setgsetupnow").textContent = strings["web.setup.run"] || "";
+  $("setterminal").textContent = strings["web.terminal.open"] || "";
+  $("set-terminal-hint").textContent = strings["web.terminal.hint"] || "";
   $("l-setgmode").textContent = strings["web.new.launch_mode"] || "";
   $("setgmode").options[0].textContent = strings["web.new.launch_exec"] || "exec";
   $("setgmode").options[1].textContent = strings["web.new.launch_cmd"] || "cmd";
@@ -2048,11 +2082,15 @@ function render() {
     el.innerHTML =
       '<div class="row"><span class="name">' + esc(item.name) + "</span>" +
       '<span class="badge ' + esc(state) + '">' + esc(stateLabel(state)) + "</span></div>" +
-      '<div class="meta">' + esc(sub) + "</div>" +
+      '<div class="meta">' + esc(sub) +
+      (item.port ? " · " + esc(fmt(item.port_open
+          ? (strings["web.port.open"] || "port {port} open")
+          : (strings["web.port.closed"] || "port {port} closed"), { port: item.port })) : "") +
+      "</div>" +
       '<div class="row" style="margin-top:8px">' +
       '<button data-act="start"' + (state !== "stopped" ? " disabled" : "") + ">" +
       esc(strings["web.panel.start"] || "Start") + "</button>" +
-      '<button data-act="stop"' + (state !== "running" ? " disabled" : "") + ">" +
+      '<button data-act="stop"' + ((state !== "running" && state !== "preparing") ? " disabled" : "") + ">" +
       esc(strings["web.panel.stop"] || "Stop") + "</button></div>";
 
     el.onclick = (ev) => {
@@ -4471,6 +4509,8 @@ function openSettings() {
   syncRestartMax();
   $("set-mc").hidden = generic;
   $("set-generic").hidden = !generic;
+  $("row-terminal").hidden = !generic;
+  $("set-terminal-hint").hidden = !generic;
 
   if (generic) {
     const launch = item.launch || {};
@@ -4479,6 +4519,9 @@ function openSettings() {
     $("setgargs").value = (launch.args || []).join(" ");
     $("setgcommand").value = launch.command || "";
     $("setgworkdir").value = launch.workdir || "";
+    $("setgsetup").value = launch.setup || "";
+    $("setgsetuptimeout").value = String(launch.setup_timeout || 900);
+    $("setgport").value = String(launch.port || 0);
     setModeToggle();
   } else {
     $("setmcver").value = item.mc_version || "";
@@ -4538,7 +4581,16 @@ async function saveSettings() {
       program: $("setgprogram").value.trim(),
       args: $("setgargs").value.trim().split(/\s+/).filter(Boolean),
       command: $("setgcommand").value.trim(),
-      workdir: $("setgworkdir").value.trim()
+      workdir: $("setgworkdir").value.trim(),
+      setup: $("setgsetup").value.trim(),
+      setup_timeout: (() => {
+        const raw = parseInt($("setgsetuptimeout").value, 10);
+        return Number.isFinite(raw) ? Math.max(30, Math.min(7200, raw)) : 900;
+      })(),
+      port: (() => {
+        const raw = parseInt($("setgport").value, 10);
+        return Number.isFinite(raw) ? Math.max(0, Math.min(65535, raw)) : 0;
+      })()
     };
     if ($("setgmode").value === "exec" && !body.launch.program) {
       fail(new Error(strings["web.new.program"] || "program required"));
@@ -4949,6 +5001,23 @@ $("setclose").onclick = closeSettings;
 $("setgmode").onchange = setModeToggle;
 $("setautorestart").onchange = syncRestartMax;
 $("setsave").onclick = saveSettings;
+$("setterminal").onclick = async () => {
+  if (!selected) return;
+  try {
+    await apiOk("/api/instance/terminal", { name: selected });
+  } catch (err) {
+    fail(err);
+  }
+};
+$("setgsetupnow").onclick = async () => {
+  if (!selected) return;
+  try {
+    await apiOk("/api/instance/setup/reset", { name: selected });
+    toast(strings["web.setup.reset"] || "setup will run on next start");
+  } catch (err) {
+    fail(err);
+  }
+};
 
 $("frpbtn").onclick = openFrp;
 $("frpclose").onclick = closeFrp;
