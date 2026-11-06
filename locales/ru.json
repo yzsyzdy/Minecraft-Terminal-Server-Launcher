@@ -993,5 +993,17 @@
     "web.setup.reset": "Установка повторится при следующем запуске",
     "web.terminal.open": "Открыть в терминале",
     "web.terminal.hint": "Открывает настоящий терминал в каталоге экземпляра и запускает его команду. Для интерактивных шагов вроде astrbot init.",
-    "web.error.preparing": "Экземпляр {name} готовится, подождите"
+    "web.error.preparing": "Экземпляр {name} готовится, подождите",
+    "web.desktop.disabled": "Управление рабочим столом выключено. Запустите панель с --allow-desktop.",
+    "web.desktop.bad_window": "Окно не найдено, возможно оно закрыто",
+    "web.desktop.gone": "Окна больше нет",
+    "web.desktop.bad_action": "Неизвестное действие",
+    "web.desktop.bad_key": "Неподдерживаемая клавиша",
+    "web.desktop.type_failed": "Не удалось ввести текст",
+    "web.desktop.unsupported": "Захват экрана только для Windows",
+    "web.tab.desktop": "Рабочий стол",
+    "web.desktop.pick": "Окно",
+    "web.desktop.screen": "Весь экран",
+    "web.desktop.hint": "Клик по картинке пересылается в окно; клавиши и текст ниже.",
+    "web.desktop.refresh": "Обновить список"
 }

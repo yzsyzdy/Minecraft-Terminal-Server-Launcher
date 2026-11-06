@@ -993,5 +993,17 @@
     "web.setup.reset": "下次启动会重新装一遍喵",
     "web.terminal.open": "去终端里跑喵",
     "web.terminal.hint": "开个真终端，在实例目录里跑它的启动命令；要交互的初始化用它喵。",
-    "web.error.preparing": "实例 {name} 在准备喵，等一下"
+    "web.error.preparing": "实例 {name} 在准备喵，等一下",
+    "web.desktop.disabled": "桌面控制未启用。启动面板时加 --allow-desktop 才会打开。",
+    "web.desktop.bad_window": "找不到那个窗口，可能已经关掉了",
+    "web.desktop.gone": "窗口已经不在了",
+    "web.desktop.bad_action": "不认识的桌面操作",
+    "web.desktop.bad_key": "不支持的按键",
+    "web.desktop.type_failed": "输入失败",
+    "web.desktop.unsupported": "当前系统不支持桌面捕获（只有 Windows）",
+    "web.tab.desktop": "桌面喵",
+    "web.desktop.pick": "选择窗口",
+    "web.desktop.screen": "整个屏幕",
+    "web.desktop.hint": "点画面就等于点那个窗口喵。",
+    "web.desktop.refresh": "刷新窗口列表"
 }

@@ -307,6 +307,7 @@ def _dispatch_args(argv: list[str]) -> bool:
     if first in ("web", "serve", "--web"):
         host = None
         port = None
+        allow_desktop = False
         rest = argv[1:]
         i = 0
         while i < len(rest):
@@ -315,6 +316,12 @@ def _dispatch_args(argv: list[str]) -> bool:
             if flag in ("--host", "-H") and value:
                 host = value
                 i += 2
+                continue
+            if flag == "--allow-desktop":
+                # 桌面捕获默认关闭：它会把整块屏幕和输入转发给浏览器，
+                # 想用的人自己加上这个开关
+                allow_desktop = True
+                i += 1
                 continue
             if flag in ("--port", "-p") and value:
                 try:
@@ -327,7 +334,8 @@ def _dispatch_args(argv: list[str]) -> bool:
 
         from web.server import run_web
         # 面板没起来（比如端口被占）就是失败，别回一个 0 让脚本以为成功了
-        if not run_web(_project_dir(), host=host, port=port):
+        if not run_web(_project_dir(), host=host, port=port,
+                       allow_desktop=allow_desktop):
             sys.exit(1)
         return True
 

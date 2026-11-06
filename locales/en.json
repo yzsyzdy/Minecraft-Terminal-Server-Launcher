@@ -993,5 +993,17 @@
     "web.setup.reset": "Setup will run again on the next start",
     "web.terminal.open": "Open in terminal",
     "web.terminal.hint": "Opens a real terminal in the instance directory and runs its command. Use it for interactive setup steps such as astrbot init.",
-    "web.error.preparing": "Instance {name} is preparing, please wait"
+    "web.error.preparing": "Instance {name} is preparing, please wait",
+    "web.desktop.disabled": "Desktop control is off. Start the panel with --allow-desktop to enable it.",
+    "web.desktop.bad_window": "That window is gone",
+    "web.desktop.gone": "The window no longer exists",
+    "web.desktop.bad_action": "Unknown desktop action",
+    "web.desktop.bad_key": "Unsupported key",
+    "web.desktop.type_failed": "Could not type",
+    "web.desktop.unsupported": "Desktop capture is Windows-only",
+    "web.tab.desktop": "Desktop",
+    "web.desktop.pick": "Window",
+    "web.desktop.screen": "Whole screen",
+    "web.desktop.hint": "Clicking the picture forwards the click to that window; keys and text below.",
+    "web.desktop.refresh": "Refresh windows"
 }

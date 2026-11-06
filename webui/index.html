@@ -502,6 +502,20 @@
   .pf .hint{margin-top:2px}
   .pf .unit{color:var(--dim);font-size:var(--t-label)}
 
+  /* ------------------------------------------------------------ 桌面控制 */
+  #desktop{flex:1;min-height:0;display:flex;flex-direction:column}
+  #dbar{display:flex;align-items:center;gap:var(--s2);flex-wrap:wrap;
+        padding:var(--s2) var(--s4);border-bottom:1px solid var(--line)}
+  #dwindow{min-width:200px;max-width:360px}
+  #dview{flex:1;min-height:0;overflow:auto;background:#000;
+         display:flex;align-items:center;justify-content:center}
+  /* 帧是分块补丁，所以画布铺在固定尺寸的容器上，图片绝对定位叠上去 */
+  #dcanvas{max-width:100%;max-height:100%;display:block;
+           image-rendering:auto;cursor:crosshair}
+  #dkeys{display:flex;gap:var(--s2);align-items:center;flex-wrap:wrap;
+         padding:var(--s2) var(--s4);border-top:1px solid var(--line)}
+  #dtype{flex:1;min-width:120px}
+
   /* ------------------------------------------------------------ 关于面板 */
   #about-box{display:flex;align-items:flex-start;gap:var(--s4);
              padding:var(--s4);border:1px solid var(--line);
@@ -776,6 +790,7 @@
         <button class="tab on" id="tab-console"></button>
         <button class="tab" id="tab-files"></button>
         <button class="tab" id="tab-map"></button>
+        <button class="tab" id="tab-desktop" hidden></button>
         <button class="tab" id="tab-ai"></button>
         <button class="tab" id="tab-jars" hidden></button>
       </span>
@@ -854,6 +869,24 @@
         </div>
         <div id="pbody"></div>
       </div>
+    </div>
+    <div id="desktop" hidden>
+      <div id="dbar">
+        <select id="dwindow"></select>
+        <button class="ghost" id="drefresh" title="↻">↻</button>
+        <span class="sp" style="flex:1"></span>
+        <span id="dstat" class="hint"></span>
+      </div>
+      <div id="dview"><canvas id="dcanvas"></canvas></div>
+      <div id="dkeys">
+        <input id="dtype" placeholder="">
+        <button id="dsend"></button>
+        <button class="ghost" id="dkey-enter">Enter</button>
+        <button class="ghost" id="dkey-esc">Esc</button>
+        <button class="ghost" id="dkey-tab">Tab</button>
+        <button class="ghost" id="dkey-backspace">⌫</button>
+      </div>
+      <div class="hint" id="dhint"></div>
     </div>
     <div id="map" hidden>
       <div id="mapbar">
@@ -1846,6 +1879,10 @@ function applyStrings() {
   $("tab-console").textContent = strings["web.tab.console"] || "Console";
   $("tab-files").textContent = strings["web.tab.files"] || "Files";
   $("tab-map").textContent = strings["web.tab.map"] || "Map";
+  $("tab-desktop").textContent = strings["web.tab.desktop"] || "Desktop";
+  $("dsend").textContent = strings["web.panel.send"] || "Send";
+  $("dhint").textContent = strings["web.desktop.hint"] || "";
+  $("drefresh").textContent = "↻";
   $("psave").textContent = strings["web.props.save"] || "Save";
   $("pcancel").textContent = strings["web.props.cancel"] || "Close";
   $("praw").textContent = strings["web.props.raw"] || "Raw text";
@@ -3327,12 +3364,161 @@ async function loadMaps(force) {
   }
 }
 
+/* ---------------------------------------------------------------- 桌面控制 */
+/* 帧是「分块补丁」：服务端把画面切成 32×32 的块，只发变化过的条带。
+   前端把每块 PNG 画到离屏 canvas，再整张贴到主 canvas 上，这样静止画面
+   一次请求都不会多花字节。 */
+
+const desk = {
+  enabled: false, target: "screen", hwnd: 0, width: 0, height: 0,
+  seq: 0, timer: null, busy: false, lastAt: 0,
+};
+
+async function deskInit() {
+  try {
+    const info = await apiOk("/api/desktop/enabled");
+    desk.enabled = !!(info && info.enabled && info.supported);
+  } catch (err) {
+    desk.enabled = false;
+  }
+  $("tab-desktop").hidden = !desk.enabled;
+  return desk.enabled;
+}
+
+async function deskLoadWindows() {
+  const select = $("dwindow");
+  select.textContent = "";
+  const screen = document.createElement("option");
+  screen.value = "screen";
+  screen.textContent = strings["web.desktop.screen"] || "Whole screen";
+  select.appendChild(screen);
+  try {
+    const data = await apiOk("/api/desktop/windows");
+    (data.windows || []).forEach((w) => {
+      const opt = document.createElement("option");
+      opt.value = String(w.hwnd);
+      opt.textContent = w.title + " (" + w.width + "×" + w.height + ")";
+      select.appendChild(opt);
+    });
+  } catch (err) {
+    // 列表拿不到不影响「整个屏幕」这条路
+  }
+  select.value = desk.target === "window" ? String(desk.hwnd) : "screen";
+}
+
+function deskTarget() {
+  const value = $("dwindow").value;
+  if (value === "screen" || !value) return { target: "screen", hwnd: 0 };
+  return { target: "window", hwnd: Number(value) };
+}
+
+async function deskFrame() {
+  if (!desk.enabled || desk.busy) return;
+  desk.busy = true;
+  const size = deskTarget();
+  try {
+    const data = await apiOk("/api/desktop/frame?target=" + size.target +
+                             "&hwnd=" + size.hwnd + "&scale=0.6");
+    if (data && data.seq) deskPaint(data);
+  } catch (err) {
+    if (err && err.key === "web.desktop.gone") deskStop();
+  } finally {
+    desk.busy = false;
+  }
+}
+
+function deskPaint(frame) {
+  const canvas = $("dcanvas");
+  const width = frame.width || desk.width;
+  const height = frame.height || desk.height;
+  if (!width || !height) return;
+  // 双缓冲：所有绘制先落在离屏画布上，最后一次性贴到可见画布。
+  // 直接往可见画布上画的话，换关键帧时要改 canvas.width（会清空内容），
+  // 那一瞬间截图就是全黑；而且补丁帧和关键帧会互相覆盖、闪一下。
+  if (!desk.buf) desk.buf = document.createElement("canvas");
+  const buf = desk.buf;
+  if (buf.width !== width || buf.height !== height) {
+    buf.width = width;
+    buf.height = height;
+    desk.width = width;
+    desk.height = height;
+  }
+  const bctx = buf.getContext("2d");
+  if (frame.key) {
+    const img = new Image();
+    img.onload = () => {
+      bctx.drawImage(img, 0, 0);
+      deskBlit();
+      desk.seq = frame.seq;
+    };
+    img.src = "data:image/png;base64," + frame.full;
+    return;
+  }
+  if (!frame.tiles || !frame.tiles.length) return;
+  frame.tiles.forEach((tile) => {
+    const img = new Image();
+    img.onload = () => {
+      bctx.drawImage(img, tile.x, tile.y);
+      deskBlit();
+    };
+    img.src = "data:image/png;base64," + tile.png;
+  });
+  desk.seq = frame.seq;
+}
+
+function deskBlit() {
+  const canvas = $("dcanvas");
+  const buf = desk.buf;
+  if (!canvas || !buf) return;
+  if (canvas.width !== buf.width || canvas.height !== buf.height) {
+    canvas.width = buf.width;
+    canvas.height = buf.height;
+  }
+  const ctx = canvas.getContext("2d");
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.drawImage(buf, 0, 0);
+}
+
+function deskLoop() {
+  deskStop();
+  deskFrame();
+  desk.timer = setInterval(deskFrame, 120);
+}
+
+function deskStop() {
+  if (desk.timer) clearInterval(desk.timer);
+  desk.timer = null;
+}
+
+function deskShow() {
+  if (!desk.enabled) return;
+  $("dtype").placeholder = strings["web.desktop.hint"] || "";
+  deskLoadWindows().then(() => deskLoop());
+}
+
+async function deskInput(body) {
+  if (!desk.enabled) return;
+  const size = deskTarget();
+  try {
+    await apiOk("/api/desktop/input", Object.assign({ target: size.target,
+                                                     hwnd: size.hwnd }, body));
+  } catch (err) {
+    if (err && err.key === "web.desktop.gone") deskStop();
+  }
+  deskFrame();
+}
+
+if (typeof window !== "undefined") {
+  document.addEventListener("DOMContentLoaded", () => { deskInit(); });
+}
+
 function switchTab(name) {
   tab = name;
   const isFiles = name === "files";
   const isAi = name === "ai";
   const isJars = name === "jars";
   const isMap = name === "map";
+  const isDesk = name === "desktop";
   const isDash = name === "dash";
   $("tab-dash").className = "tab" + (isDash ? " on" : "");
   $("tab-console").className = "tab" + (name === "console" ? " on" : "");
@@ -3340,6 +3526,7 @@ function switchTab(name) {
   $("tab-ai").className = "tab" + (isAi ? " on" : "");
   $("tab-jars").className = "tab" + (isJars ? " on" : "");
   $("tab-map").className = "tab" + (isMap ? " on" : "");
+  $("tab-desktop").className = "tab" + (isDesk ? " on" : "");
   $("dash").hidden = !isDash;
   // 仪表板占满整栏，详情 chips 收起来
   $("details").hidden = isDash;
@@ -3347,8 +3534,9 @@ function switchTab(name) {
   $("ai").hidden = !isAi;
   $("jars").hidden = !isJars;
   $("map").hidden = !isMap;
+  $("desktop").hidden = !isDesk;
   // 控制台那一列（日志 + 输入条 + 底部按钮）在其它标签下都要让位
-  const hideConsole = isFiles || isAi || isJars || isDash || isMap;
+  const hideConsole = isFiles || isAi || isJars || isDash || isMap || isDesk;
   $("log").hidden = hideConsole;
   $("bar").hidden = hideConsole;
   $("clear").hidden = hideConsole;
@@ -3358,6 +3546,7 @@ function switchTab(name) {
   if (isAi) aiShow();
   if (isJars) jarsShow();
   if (isMap) loadMaps();
+  if (isDesk) deskShow(); else deskStop();
   if (isDash) dashStart(); else dashStop();
 }
 
@@ -4898,6 +5087,38 @@ $("praw").onclick = () => {
 };
 
 $("tab-map").onclick = () => switchTab("map");
+$("tab-desktop").onclick = () => switchTab("desktop");
+$("dwindow").onchange = () => {
+  const size = deskTarget();
+  desk.target = size.target;
+  desk.hwnd = size.hwnd;
+  deskLoop();
+};
+$("drefresh").onclick = () => deskLoadWindows();
+$("dsend").onclick = () => {
+  const text = $("dtype").value;
+  if (!text) return;
+  $("dtype").value = "";
+  deskInput({ action: "type", text });
+};
+$("dtype").addEventListener("keydown", (ev) => {
+  if (ev.key === "Enter") { ev.preventDefault(); $("dsend").click(); }
+});
+["enter", "esc", "tab", "backspace"].forEach((key) => {
+  $("dkey-" + key).onclick = () => deskInput({ action: "key", key });
+});
+$("dcanvas").addEventListener("click", (ev) => {
+  const rect = ev.target.getBoundingClientRect();
+  deskInput({ action: "click",
+              x: (ev.clientX - rect.left) / rect.width,
+              y: (ev.clientY - rect.top) / rect.height });
+});
+$("dcanvas").addEventListener("dblclick", (ev) => {
+  const rect = ev.target.getBoundingClientRect();
+  deskInput({ action: "double",
+              x: (ev.clientX - rect.left) / rect.width,
+              y: (ev.clientY - rect.top) / rect.height });
+});
 $("mapworld").onchange = () => {
   mapState.world = $("mapworld").value;
   renderMap();

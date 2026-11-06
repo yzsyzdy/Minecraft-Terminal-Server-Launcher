@@ -43,6 +43,32 @@ from core import files as fileops
 from core import frp as frpops
 from core import instances as instlib
 from core.netprobe import port_open
+from core import wincapture
+
+# 桌面捕获的会话。同一时间只保留一个：多标签页同时看会互相抢鼠标，
+# 而且每多一个会话就多一份全屏像素常驻内存。
+_DESKTOP_STATE: dict = {"session": None}
+_DESKTOP_LOCK = threading.Lock()
+
+
+class _DesktopSession:
+    """薄包装：把 (target, hwnd, scale) 记在会话上，便于复用判断。"""
+
+    def __init__(self, target: str, hwnd: int, scale: float) -> None:
+        from core.desktop import DesktopSession as _Real
+        self.key = (target, hwnd, round(max(0.2, min(1.0, scale)), 2))
+        self.target = target
+        self.hwnd = hwnd
+        self._real = _Real(target=target, hwnd=hwnd, scale=scale)
+
+    def frame(self, force: bool = False):
+        return self._real.frame(force=force)
+
+    def request_keyframe(self) -> None:
+        self._real.request_keyframe()
+
+    def close(self) -> None:
+        self._real.close()
 from core import provision
 from core.errors import CoreError
 from core.runtime import RuntimeManager, accept_eula, eula_accepted
@@ -313,6 +339,19 @@ WEB_STRINGS = (
     "web.setup.reset",
     "web.terminal.open",
     "web.terminal.hint",
+    "web.desktop.disabled",
+    "web.desktop.bad_window",
+    "web.desktop.gone",
+    "web.desktop.bad_action",
+    "web.desktop.bad_key",
+    "web.desktop.type_failed",
+    "web.desktop.unsupported",
+    "web.tab.desktop",
+    "web.desktop.pick",
+    "web.desktop.screen",
+    "web.desktop.hint",
+    "web.desktop.refresh",
+
 
     "web.tab.map",
     "web.props.save",
@@ -964,7 +1003,8 @@ def _is_loopback_address(address: str) -> bool:
 
 
 def _make_handler(manager: RuntimeManager, servers_dir: str, token: str,
-                  project_dir: str, token_provider: Any = None):
+                  project_dir: str, token_provider: Any = None,
+                  allow_desktop: bool = False):
     """把 manager、token 与目录关进闭包，产出一个请求处理器类。
 
     token 是启动时那份（兜底用）；token_provider 每次请求现读配置，
@@ -1291,6 +1331,12 @@ def _make_handler(manager: RuntimeManager, servers_dir: str, token: str,
                 return self._guard(self._background_get)
             if path == "/api/system":
                 return self._guard(self._system_stats)
+            if path == "/api/desktop/windows":
+                return self._guard(self._desktop_windows)
+            if path == "/api/desktop/frame":
+                return self._guard(lambda: self._desktop_frame(query))
+            if path == "/api/desktop/enabled":
+                return self._guard(self._desktop_enabled)
             if path == "/api/properties":
                 return self._guard(lambda: self._properties_get(query))
             if path == "/api/maps":
@@ -1532,6 +1578,130 @@ def _make_handler(manager: RuntimeManager, servers_dir: str, token: str,
                 return self._json({"ok": False, "message": str(e)},
                                   HTTPStatus.INTERNAL_SERVER_ERROR)
             self._json({"ok": True})
+
+        # ------------------------------------------------------------ 桌面控制
+        def _desktop_denied(self) -> None:
+            self._json({"ok": False, "key": "web.desktop.disabled",
+                        "message": t("web.desktop.disabled")},
+                       HTTPStatus.FORBIDDEN)
+
+        def _desktop_enabled(self) -> None:
+            self._json({"ok": True, "enabled": bool(allow_desktop),
+                        "supported": wincapture.IS_WINDOWS})
+
+        def _desktop_windows(self) -> None:
+            if not allow_desktop:
+                return self._desktop_denied()
+            if not wincapture.IS_WINDOWS:
+                return self._json({"ok": True, "windows": [],
+                                   "supported": False})
+            self._json({"ok": True, "supported": True,
+                        "windows": wincapture.list_windows()})
+
+        def _desktop_session(self, query: dict[str, str]) -> Optional[_DesktopSession]:
+            """按 target/window 参数取或建会话（同一时间只留一个）。"""
+            target = str(query.get("target") or "screen")
+            hwnd = 0
+            if target == "window":
+                try:
+                    hwnd = int(query.get("hwnd") or 0)
+                except (TypeError, ValueError):
+                    hwnd = 0
+                if not hwnd:
+                    return None
+            try:
+                scale = float(query.get("scale") or 0.6)
+            except (TypeError, ValueError):
+                scale = 0.6
+            key = (target, hwnd, round(max(0.2, min(1.0, scale)), 2))
+            with _DESKTOP_LOCK:
+                session = _DESKTOP_STATE.get("session")
+                if session is not None and session.key == key:
+                    return session
+                if session is not None:
+                    session.close()
+                session = _DesktopSession(target, hwnd, scale)
+                _DESKTOP_STATE["session"] = session
+                return session
+
+        def _desktop_frame(self, query: dict[str, str]) -> None:
+            if not allow_desktop:
+                return self._desktop_denied()
+            session = self._desktop_session(query)
+            if session is None:
+                return self._json({"ok": False, "key": "web.desktop.bad_window",
+                                   "message": t("web.desktop.bad_window")},
+                                  HTTPStatus.BAD_REQUEST)
+            force = str(query.get("force") or "") == "1"
+            frame = session.frame(force=force)
+            if frame is None:
+                # 没有新画面就回一个空帧，前端据此保持上一帧
+                return self._json({"ok": True, "seq": 0, "tiles": [],
+                                   "key": False, "width": 0, "height": 0})
+            import base64
+            payload = {
+                "ok": True, "seq": frame.seq, "key": frame.key,
+                "width": frame.width, "height": frame.height,
+                "full": (base64.b64encode(frame.full_png).decode("ascii")
+                         if frame.key else ""),
+                "tiles": [{
+                    "x": tile.x, "y": tile.y, "w": tile.width, "h": tile.height,
+                    "png": base64.b64encode(tile.png).decode("ascii"),
+                } for tile in frame.tiles],
+            }
+            self._json(payload)
+
+        def _desktop_input(self, body: dict) -> None:
+            if not allow_desktop:
+                return self._desktop_denied()
+            if not wincapture.IS_WINDOWS:
+                return self._json({"ok": False, "key": "web.desktop.unsupported"},
+                                  HTTPStatus.BAD_REQUEST)
+            session = self._desktop_session({
+                "target": str(body.get("target") or "screen"),
+                "hwnd": str(body.get("hwnd") or ""),
+                "scale": str(body.get("scale") or ""),
+            })
+            if session is None:
+                return self._json({"ok": False, "key": "web.desktop.bad_window"},
+                                  HTTPStatus.BAD_REQUEST)
+            action = str(body.get("action") or "")
+            # 点坐标是「画面内」的归一化坐标（0..1），这里换算成屏幕坐标：
+            # 前端拿到的画面可能被降采样过，直接用像素坐标会错位。
+            try:
+                nx = float(body.get("x") or 0)
+                ny = float(body.get("y") or 0)
+            except (TypeError, ValueError):
+                nx = ny = 0.0
+            if action in ("click", "double", "move"):
+                if session.target == "window":
+                    rect = wincapture.window_rect(session.hwnd)
+                    if not rect:
+                        return self._json({"ok": False,
+                                           "key": "web.desktop.gone"},
+                                          HTTPStatus.CONFLICT)
+                    left, top, width, height = rect
+                else:
+                    left, top, width, height = wincapture.virtual_screen()
+                px = int(left + nx * width)
+                py = int(top + ny * height)
+                if action == "move":
+                    wincapture.move_mouse(px, py)
+                else:
+                    wincapture.click(px, py, double=(action == "double"))
+                return self._json({"ok": True})
+            if action == "key":
+                if wincapture.press_key(str(body.get("key") or "")):
+                    return self._json({"ok": True})
+                return self._json({"ok": False, "key": "web.desktop.bad_key"},
+                                  HTTPStatus.BAD_REQUEST)
+            if action == "type":
+                if wincapture.type_text(str(body.get("text") or "")):
+                    return self._json({"ok": True})
+                return self._json({"ok": False, "key": "web.desktop.type_failed"},
+                                  HTTPStatus.BAD_REQUEST)
+            return self._json({"ok": False, "key": "web.desktop.bad_action"},
+                              HTTPStatus.BAD_REQUEST)
 
         def _state(self) -> None:
             instances = []
@@ -2442,6 +2612,9 @@ def _make_handler(manager: RuntimeManager, servers_dir: str, token: str,
             if path == "/api/instance/terminal":
                 return self._open_terminal(body)
 
+            if path == "/api/desktop/input":
+                return self._desktop_input(body)
+
             if path.startswith("/api/frp/"):
                 return self._frp_action(path, body)
 
@@ -2772,7 +2945,8 @@ def _config_token_provider(project_dir: str):
 def build_server(project_dir: str, *, host: str = "127.0.0.1", port: int = 8765,
                  token: str = "", manager: Optional[RuntimeManager] = None,
                  servers_dir: Optional[str] = None,
-                 token_provider: Any = None) -> ThreadingHTTPServer:
+                 token_provider: Any = None,
+                 allow_desktop: bool = False) -> ThreadingHTTPServer:
     """起一个 HTTP 服务（不进入事件循环），方便测试与嵌入。
 
     token_provider 传了的话，每个请求都会现读一次 token（重新生成 token
@@ -2796,7 +2970,8 @@ def build_server(project_dir: str, *, host: str = "127.0.0.1", port: int = 8765,
 
     servers_dir = servers_dir or ensure_servers_folder(project_dir)
     manager = manager or shared_manager(project_dir)
-    handler = _make_handler(manager, servers_dir, token, project_dir, token_provider)
+    handler = _make_handler(manager, servers_dir, token, project_dir, token_provider,
+                            allow_desktop=allow_desktop)
     httpd = _PanelServer((host, port), handler)
     return httpd
 
@@ -2907,7 +3082,7 @@ def start_background(project_dir: str, host: Optional[str] = None,
 
 
 def run_web(project_dir: str, host: Optional[str] = None,
-            port: Optional[int] = None) -> bool:
+            port: Optional[int] = None, allow_desktop: bool = False) -> bool:
     """进网页面板的事件循环：`python start.py web [--host H] [--port P]`。
 
     会一直阻塞到 Ctrl+C。返回 False 表示根本没起来（比如端口被占），
@@ -2928,7 +3103,8 @@ def run_web(project_dir: str, host: Optional[str] = None,
 
     try:
         httpd = build_server(project_dir, host=bind_host, port=bind_port, token=token,
-                             token_provider=_config_token_provider(project_dir))
+                             token_provider=_config_token_provider(project_dir),
+                             allow_desktop=allow_desktop)
     except OSError as e:
         # 端口被占是最常见的一种；原来会直接抛一个 traceback 出来，
         # 从菜单里启动面板时看起来像是程序崩了
