@@ -50,6 +50,18 @@ class DownscaleTest(unittest.TestCase):
         corner = ((h - 2) * w + (w - 2)) * 4
         self.assertEqual(out[corner], 255, "右下角内容被裁掉了")
 
+    def test_odd_width_does_not_crash(self):
+        """宽不是步长整数倍时，ceil(width/step) != floor(width/step)。
+
+        旧写法 `line[0::4][::step]` 取到 ceil 个元素，赋值给 floor 大小的扩展
+        切片直接抛 ValueError（用户实测「565 到 564」）。所有宽度都必须能缩。
+        """
+        for width in (1001, 1130, 1201, 1920, 830, 1919):
+            for scale in (0.5, 0.6, 0.75):
+                buf = bytes(width * 40 * 4)
+                w, h, out = _downscale(buf, width, 40, scale)
+                self.assertEqual(len(out), w * h * 4, f"{width}x40 scale={scale}")
+
     def test_fractional_scale_does_not_shrink_content(self):
         # 0.75 的步长取整成 1，也就是不缩放，而不是裁掉 25%
         w, h, out = _downscale(_solid(800, 600), 800, 600, 0.75)

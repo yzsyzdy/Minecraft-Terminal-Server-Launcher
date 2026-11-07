@@ -77,15 +77,19 @@ def _downscale(rgba: bytes, width: int, height: int,
         return width, height, rgba
 
     stride = width * 4
-    keep = slice(None, None, step)
     alpha = bytes([255]) * target_w
+    # 一次切片取到「每隔 step 个像素」的通道：4*step 是字节步长。
+    # 不能用 `line[0::4][::step]`——那样得到的是 ceil(width/step) 个元素，
+    # 而 target_w 是 floor(width/step)，宽不是 step 整数倍时两者差一个，
+    # 赋值给扩展切片就会抛 "attempt to assign bytes of size N to extended
+    # slice of size N-1"（用户实测 565 vs 564）。所以最后统一截到 target_w。
     out = bytearray()
     for ty in range(target_h):
         y = ty * step
         line = rgba[y * stride:(y + 1) * stride]
-        r = line[0::4][keep]
-        g = line[1::4][keep]
-        b = line[2::4][keep]
+        r = line[0::4 * step][:target_w]
+        g = line[1::4 * step][:target_w]
+        b = line[2::4 * step][:target_w]
         tile = bytearray(target_w * 4)
         tile[0::4] = r
         tile[1::4] = g
