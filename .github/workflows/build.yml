@@ -129,6 +129,11 @@ jobs:
           # 免得只因为一个元数据参数就让整条腿红掉。
           $exeVersion = if ($version -match '^\d+(\.\d+){0,3}$') { $version } else { '0.0.0' }
 
+          # 注意：下面这段 Nuitka 命令用反引号续行，续行串中间绝不能插注释——
+          # 那会被 PowerShell 当成要执行的表达式，直接 ParseException。
+          # Nuitka 的 --include-data-dir 会跳过 .py 文件（把源码当代码处理），
+          # 所以插件入口 plugin.py 与 conpty.py 要用 --include-data-files 单独带上。
+
           # 这两个选项只对 Windows 有意义：--windows-console-mode 决定双击时
           # 有没有控制台窗口，--windows-icon-from-ico 是 exe 的图标。其它平台
           # 给了也只是被 Nuitka 忽略（它只发一条 warning），但显式分开更清楚，
@@ -156,7 +161,6 @@ jobs:
             --include-data-dir=locales=locales `
             --include-data-dir=webui=webui `
             --include-data-dir=plugins=plugins `
-            # Nuitka 的 --include-data-dir 会跳过 .py，而插件入口必须是 plugin.py
             --include-data-files=plugins/terminal/plugin.py=plugins/terminal/plugin.py `
             --include-data-files=plugins/terminal/conpty.py=plugins/terminal/conpty.py `
             --output-filename=${{ matrix.binary }} `
@@ -218,7 +222,9 @@ jobs:
             "locales/ru.json",
             "locales/neko.json",
             "plugins/terminal/plugin.json",
-            "plugins/terminal/web/xterm.js"
+            "plugins/terminal/web/xterm.js",
+            "plugins/terminal/plugin.py",
+            "plugins/terminal/conpty.py"
           )
 
           # --include-data-dir 正常会把这些拷好，但它漏过，所以缺什么就从源码目录补拷一次，

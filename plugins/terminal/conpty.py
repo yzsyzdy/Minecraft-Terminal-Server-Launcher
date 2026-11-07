@@ -23,10 +23,15 @@ import os
 import shutil
 import sys
 import threading
-from ctypes import wintypes
 from typing import Optional
 
 IS_WINDOWS = sys.platform == "win32"
+
+# `ctypes.wintypes` 在非 Windows 上**不能导入**：它的 VARIANT_BOOL 用了
+# `_type_ = "v"`，别的平台的 ctypes 不认识这个类型，import 直接抛 ValueError。
+# 所以连它下面的结构体定义一起挡在守卫里（v1.1.42 就在这儿绊过一回）。
+if IS_WINDOWS:                      # pragma: no branch - 平台分支
+    from ctypes import wintypes
 
 EXTENDED_STARTUPINFO_PRESENT = 0x00080000
 STARTF_USESTDHANDLES = 0x00000100
@@ -40,39 +45,41 @@ else:
     _k32 = None
 
 
-class COORD(ctypes.Structure):
-    _fields_ = [("X", wintypes.SHORT), ("Y", wintypes.SHORT)]
+if IS_WINDOWS:
+    class COORD(ctypes.Structure):
+        _fields_ = [("X", wintypes.SHORT), ("Y", wintypes.SHORT)]
 
 
-class STARTUPINFOW(ctypes.Structure):
-    _fields_ = [
-        ("cb", wintypes.DWORD), ("lpReserved", wintypes.LPWSTR),
-        ("lpDesktop", wintypes.LPWSTR), ("lpTitle", wintypes.LPWSTR),
-        ("dwX", wintypes.DWORD), ("dwY", wintypes.DWORD),
-        ("dwXSize", wintypes.DWORD), ("dwYSize", wintypes.DWORD),
-        ("dwXCountChars", wintypes.DWORD), ("dwYCountChars", wintypes.DWORD),
-        ("dwFillAttribute", wintypes.DWORD), ("dwFlags", wintypes.DWORD),
-        ("wShowWindow", wintypes.WORD), ("cbReserved2", wintypes.WORD),
-        ("lpReserved2", ctypes.c_void_p),
-        ("hStdInput", wintypes.HANDLE), ("hStdOutput", wintypes.HANDLE),
-        ("hStdError", wintypes.HANDLE),
-    ]
+    class STARTUPINFOW(ctypes.Structure):
+        _fields_ = [
+            ("cb", wintypes.DWORD), ("lpReserved", wintypes.LPWSTR),
+            ("lpDesktop", wintypes.LPWSTR), ("lpTitle", wintypes.LPWSTR),
+            ("dwX", wintypes.DWORD), ("dwY", wintypes.DWORD),
+            ("dwXSize", wintypes.DWORD), ("dwYSize", wintypes.DWORD),
+            ("dwXCountChars", wintypes.DWORD), ("dwYCountChars", wintypes.DWORD),
+            ("dwFillAttribute", wintypes.DWORD), ("dwFlags", wintypes.DWORD),
+            ("wShowWindow", wintypes.WORD), ("cbReserved2", wintypes.WORD),
+            ("lpReserved2", ctypes.c_void_p),
+            ("hStdInput", wintypes.HANDLE), ("hStdOutput", wintypes.HANDLE),
+            ("hStdError", wintypes.HANDLE),
+        ]
 
 
-class STARTUPINFOEXW(ctypes.Structure):
-    _fields_ = [("StartupInfo", STARTUPINFOW),
-                ("lpAttributeList", ctypes.c_void_p)]
+    class STARTUPINFOEXW(ctypes.Structure):
+        _fields_ = [("StartupInfo", STARTUPINFOW),
+                    ("lpAttributeList", ctypes.c_void_p)]
 
 
-class PROCESS_INFORMATION(ctypes.Structure):
-    _fields_ = [("hProcess", wintypes.HANDLE), ("hThread", wintypes.HANDLE),
-                ("dwProcessId", wintypes.DWORD), ("dwThreadId", wintypes.DWORD)]
+    class PROCESS_INFORMATION(ctypes.Structure):
+        _fields_ = [("hProcess", wintypes.HANDLE), ("hThread", wintypes.HANDLE),
+                    ("dwProcessId", wintypes.DWORD), ("dwThreadId", wintypes.DWORD)]
 
 
-class SECURITY_ATTRIBUTES(ctypes.Structure):
-    _fields_ = [("nLength", wintypes.DWORD),
-                ("lpSecurityDescriptor", ctypes.c_void_p),
-                ("bInheritHandle", wintypes.BOOL)]
+    class SECURITY_ATTRIBUTES(ctypes.Structure):
+        _fields_ = [("nLength", wintypes.DWORD),
+                    ("lpSecurityDescriptor", ctypes.c_void_p),
+                    ("bInheritHandle", wintypes.BOOL)]
+
 
 
 def conpty_available() -> bool:

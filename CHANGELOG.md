@@ -9,6 +9,13 @@
 
 ### 新增
 
+- **修复：CI 构建命令里的注释导致 PowerShell 解析失败**：我把一行说明插进了
+  Nuitka 命令的反引号续行串中间。PowerShell 的续行串里出现 `#` 注释后，紧跟着
+  以 `--` 开头的那行会被当成「一元运算符后面的缺失表达式」，直接 ParseException。
+  四平台全挂在 `Build with Nuitka` 上、release 被跳过。注释已移到命令之前。
+- **修复：`conpty.py` 的 `ctypes.wintypes` 导入裸露在平台判断之外**：非 Windows 上
+  `wintypes` 根本不能导入（`VARIANT_BOOL` 用了 `_type_ = "v"`），会让 Linux/macOS
+  的测试收集期直接炸。已连同结构体定义一起挡进 `if IS_WINDOWS:`。
 - **修复：插件入口没被打包进 exe**：Nuitka 的 `--include-data-dir` 会跳过 `.py`
   文件（它把源码当代码处理），于是 `plugins/terminal/` 里 `plugin.json` 与 `web/`
   都在，唯独 `plugin.py` 和 `conpty.py` 丢了——表现为「插件列表里能看到，但一直
