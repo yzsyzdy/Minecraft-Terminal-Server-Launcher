@@ -19,10 +19,16 @@ from __future__ import annotations
 
 import ctypes
 import sys
-from ctypes import wintypes
 from typing import Optional
 
 IS_WINDOWS = sys.platform == "win32"
+
+# `ctypes.wintypes` 在非 Windows 上**不能导入**：它的 VARIANT_BOOL 用了
+# `_type_ = "v"`，而别的平台的 ctypes 不认识这个类型，import 直接抛
+# ValueError。CI 要在 Linux/macOS 上跑测试、而 test_desktop 会 import 这个模块，
+# 所以必须把导入和结构体定义都挡在 if 里。
+if IS_WINDOWS:                      # pragma: no branch - 平台分支
+    from ctypes import wintypes
 
 # -- Win32 常量 -------------------------------------------------------------
 
@@ -52,20 +58,20 @@ else:
     _user32 = _gdi32 = _dwmapi = None
 
 
-class _BITMAPINFOHEADER(ctypes.Structure):
-    _fields_ = [
-        ("biSize", wintypes.DWORD), ("biWidth", wintypes.LONG),
-        ("biHeight", wintypes.LONG), ("biPlanes", wintypes.WORD),
-        ("biBitCount", wintypes.WORD), ("biCompression", wintypes.DWORD),
-        ("biSizeImage", wintypes.DWORD), ("biXPelsPerMeter", wintypes.LONG),
-        ("biYPelsPerMeter", wintypes.LONG), ("biClrUsed", wintypes.DWORD),
-        ("biClrImportant", wintypes.DWORD),
-    ]
+if IS_WINDOWS:
+    class _BITMAPINFOHEADER(ctypes.Structure):
+        _fields_ = [
+            ("biSize", wintypes.DWORD), ("biWidth", wintypes.LONG),
+            ("biHeight", wintypes.LONG), ("biPlanes", wintypes.WORD),
+            ("biBitCount", wintypes.WORD), ("biCompression", wintypes.DWORD),
+            ("biSizeImage", wintypes.DWORD), ("biXPelsPerMeter", wintypes.LONG),
+            ("biYPelsPerMeter", wintypes.LONG), ("biClrUsed", wintypes.DWORD),
+            ("biClrImportant", wintypes.DWORD),
+        ]
 
-
-class _BITMAPINFO(ctypes.Structure):
-    _fields_ = [("bmiHeader", _BITMAPINFOHEADER),
-                ("bmiColors", wintypes.DWORD * 3)]
+    class _BITMAPINFO(ctypes.Structure):
+        _fields_ = [("bmiHeader", _BITMAPINFOHEADER),
+                    ("bmiColors", wintypes.DWORD * 3)]
 
 
 # -- 窗口枚举 ---------------------------------------------------------------
