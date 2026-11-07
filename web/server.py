@@ -1006,11 +1006,15 @@ def _index_html() -> str:
 # 「面板打不开」或「界面全是 i18n key」，很难联想到打包；启动时先点名说清楚。
 _BUNDLED_ASSETS = (
     os.path.join("webui", "index.html"),
+    # 插件入口是 .py，Nuitka 的 --include-data-dir 会跳过它，
+    # 必须靠 --include-data-files 单独带上；漏了的表现是「插件列表里有，但不可用」
     os.path.join("locales", "zh.json"),
     os.path.join("locales", "en.json"),
     # 插件是可选功能，但「装了却没打进去」的表现是「面板里没有终端标签」，
     # 很难联想到打包，所以也列进来让启动时说清楚
     os.path.join("plugins", "terminal", "plugin.json"),
+    os.path.join("plugins", "terminal", "plugin.py"),
+    os.path.join("plugins", "terminal", "conpty.py"),
 )
 
 

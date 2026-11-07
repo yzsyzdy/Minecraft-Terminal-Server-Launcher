@@ -9,6 +9,11 @@
 
 ### 新增
 
+- **修复：插件入口没被打包进 exe**：Nuitka 的 `--include-data-dir` 会跳过 `.py`
+  文件（它把源码当代码处理），于是 `plugins/terminal/` 里 `plugin.json` 与 `web/`
+  都在，唯独 `plugin.py` 和 `conpty.py` 丢了——表现为「插件列表里能看到，但一直
+  显示缺少 plugin.py」。改用 `--include-data-files` 显式把这两个文件带上，
+  并把它们加进启动时的资源自检，漏打时能直接说清是哪个文件。
 - **终端插件（自带）**：面板里多一个「终端」标签页，在浏览器里操作**真正的**
   cmd / PowerShell。走 ConPTY 伪控制台（Win10 1809+ / Win11），彩色输出、方向键菜单、
   `color` 这类内建命令都正常——这些在管道里根本不生效。可选 PowerShell 7 / Windows

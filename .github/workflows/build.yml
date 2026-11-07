@@ -156,6 +156,9 @@ jobs:
             --include-data-dir=locales=locales `
             --include-data-dir=webui=webui `
             --include-data-dir=plugins=plugins `
+            # Nuitka 的 --include-data-dir 会跳过 .py，而插件入口必须是 plugin.py
+            --include-data-files=plugins/terminal/plugin.py=plugins/terminal/plugin.py `
+            --include-data-files=plugins/terminal/conpty.py=plugins/terminal/conpty.py `
             --output-filename=${{ matrix.binary }} `
             @platformArgs `
             start.py
