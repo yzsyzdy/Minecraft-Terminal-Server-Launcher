@@ -1,0 +1,10 @@
+{
+  "id": "terminal",
+  "name": "终端",
+  "version": "1.0.0",
+  "description": "在浏览器里操作一个真正的 cmd / PowerShell（ConPTY 伪控制台，支持 TUI 交互）。",
+  "entry": "plugin.py",
+  "requires": [],
+  "web": ["xterm.css", "xterm.js", "terminal.js"],
+  "api": "terminal"
+}

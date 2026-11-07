@@ -1017,5 +1017,14 @@
     "web.desktop.quality_60": "60% (default)",
     "web.desktop.quality_half": "50%",
     "web.desktop.quality_40": "40%",
-    "web.desktop.quality_30": "30% (least data)"
+    "web.desktop.quality_30": "30% (least data)",
+    "settings.plugins_option": "  [{n}] Plugins ({count} enabled)",
+    "plugins.title": "  Plugins",
+    "plugins.empty": "  No plugins found in plugins/. ({path})",
+    "plugins.entry": "  [{n}] {name}  ({id} v{version}) = {state}",
+    "plugins.missing": "        missing: {names}",
+    "plugins.prompt": "  Number to toggle (0 = back):",
+    "plugins.back": "  [{n}] Back",
+    "plugins.saved": "  {name} set to {val}.",
+    "plugins.cannot_enable": "  Cannot enable: missing {names}. Install it first."
 }

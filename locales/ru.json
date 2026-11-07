@@ -1017,5 +1017,14 @@
     "web.desktop.quality_60": "60 % (по умолчанию)",
     "web.desktop.quality_half": "50 %",
     "web.desktop.quality_40": "40 %",
-    "web.desktop.quality_30": "30 % (экономно)"
+    "web.desktop.quality_30": "30 % (экономно)",
+    "settings.plugins_option": "  [{n}] Плагины (включено {count})",
+    "plugins.title": "  Плагины",
+    "plugins.empty": "  В каталоге plugins/ нет плагинов. ({path})",
+    "plugins.entry": "  [{n}] {name}  ({id} v{version}) = {state}",
+    "plugins.missing": "        отсутствует: {names}",
+    "plugins.prompt": "  Номер для переключения (0 = назад):",
+    "plugins.back": "  [{n}] Назад",
+    "plugins.saved": "  {name}: {val}.",
+    "plugins.cannot_enable": "  Нельзя включить: нет {names}."
 }

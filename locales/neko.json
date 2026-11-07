@@ -1017,5 +1017,14 @@
     "web.desktop.quality_60": "60%（默认喵）",
     "web.desktop.quality_half": "50%喵",
     "web.desktop.quality_40": "40%喵",
-    "web.desktop.quality_30": "30%（最省喵）"
+    "web.desktop.quality_30": "30%（最省喵）",
+    "settings.plugins_option": "  [{n}] 插件管理喵（开了 {count} 个）",
+    "plugins.title": "  插件管理喵",
+    "plugins.empty": "  plugins 目录里没有插件。（{path}）",
+    "plugins.entry": "  [{n}] {name}  ({id} v{version}) = {state}",
+    "plugins.missing": "        缺少依赖：{names}",
+    "plugins.prompt": "  输入编号切换启用状态（0 返回）：",
+    "plugins.back": "  [{n}] 返回",
+    "plugins.saved": "  {name} 已设为 {val}。",
+    "plugins.cannot_enable": "  无法启用：缺少 {names}。先装上再回来。"
 }

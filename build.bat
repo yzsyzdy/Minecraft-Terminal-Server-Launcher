@@ -11,6 +11,7 @@ python -m nuitka --standalone ^
   --copyright="MSTL" ^
   --include-data-dir=locales=locales ^
   --include-data-dir=webui=webui ^
+  --include-data-dir=plugins=plugins ^
   --output-filename=MSTL.exe ^
   start.py
 

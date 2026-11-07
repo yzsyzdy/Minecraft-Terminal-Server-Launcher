@@ -1242,6 +1242,86 @@ def _openfrp_bind_tunnel(servers: list[dict], servers_dir: str, project_dir: str
 # Settings menu
 # ---------------------------------------------------------------------------
 
+def enabled_plugins(config: dict) -> list[str]:
+    """config.json 里已启用的插件 id。"""
+    plugins = config.get("plugins")
+    if not isinstance(plugins, dict):
+        return []
+    return [str(p) for p in (plugins.get("enabled") or []) if str(p).strip()]
+
+
+def _plugins_menu(project_dir: str) -> None:
+    """插件开关。
+
+    装了 ≠ 启用：插件代码以本进程权限运行，等于「这台机器上跑任意代码」，
+    所以默认一个都不开，要在这里显式打开。
+    """
+    from core.plugins import PluginManager
+
+    while True:
+        config = load_config(project_dir)
+        enabled = enabled_plugins(config)
+        manager = PluginManager(project_dir)
+        # 只扫描清单，不加载入口——这一步不该触发任何第三方代码
+        found = manager.scan(enabled=[])
+
+        clear_screen()
+        print()
+        print(t("plugins.title"))
+        print()
+        if not found:
+            print(t("plugins.empty", path=os.path.join(project_dir, "plugins")))
+            input(t("app.press_enter"))
+            return
+
+        for index, plugin in enumerate(found, 1):
+            state_text = t("settings.on") if plugin.id in enabled else t("settings.off")
+            missing = ("  " + t("plugins.missing", names=", ".join(plugin.missing))
+                       if plugin.missing else "")
+            print(t("plugins.entry", n=index, name=plugin.name,
+                    id=plugin.id, version=plugin.version or "-", state=state_text))
+            if missing:
+                print(missing)
+        print()
+        print(t("plugins.back", n=0))
+        print()
+        choice = input(t("plugins.prompt")).strip()
+
+        if choice == "0":
+            return
+
+        try:
+            index = int(choice) - 1
+        except ValueError:
+            print(t("app.invalid_choice_short"))
+            input(t("app.press_enter"))
+            continue
+        if not (0 <= index < len(found)):
+            print(t("app.invalid_choice_short"))
+            input(t("app.press_enter"))
+            continue
+
+        plugin = found[index]
+        if plugin.missing:
+            print(t("plugins.cannot_enable", names=", ".join(plugin.missing)))
+            input(t("app.press_enter"))
+            continue
+
+        plugins_cfg = dict(config.get("plugins") or {})
+        current = list(plugins_cfg.get("enabled") or [])
+        if plugin.id in current:
+            current.remove(plugin.id)
+        else:
+            current.append(plugin.id)
+        plugins_cfg["enabled"] = current
+        config["plugins"] = plugins_cfg
+        save_config(config, project_dir)
+        print()
+        print(t("plugins.saved", name=plugin.name,
+                val=t("settings.on") if plugin.id in current else t("settings.off")))
+        input(t("app.press_enter"))
+
+
 def _settings_menu(project_dir: str) -> None:
     """Settings: language, download threads, update, auto-start."""
     from download_msl import MAX_DOWNLOAD_THREADS, set_download_threads
@@ -1269,6 +1349,7 @@ def _settings_menu(project_dir: str) -> None:
         print(t("settings.auto_start_option", n=4, name=auto_server))
         print(t("settings.startup_option", n=5, state=startup_state))
         print(t("settings.source_option", n=6, val=source_state))
+        print(t("settings.plugins_option", n=7, count=len(enabled_plugins(config))))
         print(t("settings.back", n=0))
         print()
         choice = input(t("settings.prompt")).strip()
@@ -1388,6 +1469,10 @@ def _settings_menu(project_dir: str) -> None:
             else:
                 print(t("settings.startup_unsupported"))
             input(t("app.press_enter"))
+
+        elif choice == "7":
+            _plugins_menu(project_dir)
+            continue
 
         elif choice == "6":
             # 切下载源：官方 → BMCL → MSL 循环。每一档都另有兜底，不会真的断掉

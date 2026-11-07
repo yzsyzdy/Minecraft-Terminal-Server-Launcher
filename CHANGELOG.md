@@ -9,6 +9,12 @@
 
 ### 新增
 
+- **终端插件（自带）**：面板里多一个「终端」标签页，在浏览器里操作**真正的**
+  cmd / PowerShell。走 ConPTY 伪控制台（Win10 1809+ / Win11），彩色输出、方向键菜单、
+  `color` 这类内建命令都正常——这些在管道里根本不生效。可选 PowerShell 7 / Windows
+  PowerShell / cmd，工作目录可以选项目根目录或某个实例目录。不用装任何 Python 包：
+  ConPTY 是系统 API，插件里用 ctypes 直接调；xterm.js（MIT）随包携带，不走 CDN。
+  在 TUI 的「设置 → 插件管理」里启用即可。
 - **插件机制**：`plugins/<id>/` 放一个 `plugin.json` + `plugin.py`（暴露 `register(ctx)`），
   就能给面板加功能。插件可以声明 `requires`（缺失时标记为不可用，而不是假装能跑）、
   `web`（要注入 `index.html` 的 JS/CSS）、`api`（挂在 `/api/plugin/<id>/` 下的路由）。

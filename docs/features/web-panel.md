@@ -119,6 +119,22 @@ def register(ctx):
 处理函数签名 `(query, body) -> (status, content_type, bytes)`。插件不需要知道
 面板的鉴权、线程模型和 JSON 约定——这些都在外面。
 
+### 自带的终端插件
+
+`plugins/terminal/` 是一个可以直接用的例子：在浏览器里操作真实的 cmd / PowerShell。
+
+- **真 TTY**：走 ConPTY（Win10 1809+ / Win11），不是管道。所以彩色输出、方向键菜单、
+  `color 0A` 这类 `cmd` 内建命令都正常——这些在管道里根本不生效
+- **可选 shell**：PowerShell 7（装了就有了）/ Windows PowerShell / cmd，建会话时选
+- **工作目录**：选「项目根目录」或某个实例目录，省得进去再 `cd`
+- **键位与尺寸**：xterm.js 负责渲染与按键映射，窗口大小变化会同步给后端，
+  `vim` / `htop` 这类全屏程序能正确重排
+- **不用装任何 Python 包**：ConPTY 是 Windows 自带 API，插件里用 ctypes 直接调；
+  xterm.js（MIT）是随包带的本地文件，不走 CDN
+
+开两个终端会话（比如一个 cmd 一个 PowerShell）会各自独立跑，互不影响。
+关闭标签页或点「关闭」，会话与子进程一起结束。
+
 ### 默认不加载
 
 **装了插件不等于启用**。必须在 `config.json` 里显式写：

@@ -1008,6 +1008,9 @@ _BUNDLED_ASSETS = (
     os.path.join("webui", "index.html"),
     os.path.join("locales", "zh.json"),
     os.path.join("locales", "en.json"),
+    # 插件是可选功能，但「装了却没打进去」的表现是「面板里没有终端标签」，
+    # 很难联想到打包，所以也列进来让启动时说清楚
+    os.path.join("plugins", "terminal", "plugin.json"),
 )
 
 

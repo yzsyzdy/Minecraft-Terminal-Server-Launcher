@@ -155,6 +155,7 @@ jobs:
             --copyright="MSTL" `
             --include-data-dir=locales=locales `
             --include-data-dir=webui=webui `
+            --include-data-dir=plugins=plugins `
             --output-filename=${{ matrix.binary }} `
             @platformArgs `
             start.py
@@ -212,7 +213,9 @@ jobs:
             "locales/zh.json",
             "locales/en.json",
             "locales/ru.json",
-            "locales/neko.json"
+            "locales/neko.json",
+            "plugins/terminal/plugin.json",
+            "plugins/terminal/web/xterm.js"
           )
 
           # --include-data-dir 正常会把这些拷好，但它漏过，所以缺什么就从源码目录补拷一次，
