@@ -81,9 +81,15 @@ class TreeKillTest(unittest.TestCase):
     """停止安装时要连子孙进程一起杀，否则 uv 会变孤儿继续写 venv。"""
 
     def test_kill_process_tree_handles_none_and_dead(self):
+        """传 None / 已退出进程都不该抛。
+
+        这里要用**跨平台**的命令：早先写死 `cmd /c exit 0`，而这条用例没加
+        Windows 跳过标记，CI 在 Linux/macOS 上直接 FileNotFoundError，
+        三个平台的 build leg 全挂在 Run tests 上、release job 被跳过。
+        """
+        import subprocess, sys
         self.assertIsNone(rt.kill_process_tree(None))
-        import subprocess
-        done = subprocess.Popen(["cmd", "/c", "exit 0"])
+        done = subprocess.Popen([sys.executable, "-c", "pass"])
         done.wait()
         rt.kill_process_tree(done)          # 已退出，不该抛
 
