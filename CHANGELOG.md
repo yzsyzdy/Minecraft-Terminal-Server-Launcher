@@ -5,6 +5,20 @@
 
 `v1.1.35` 及更早版本的说明见 [GitHub Releases](https://github.com/yzsyzdy/Minecraft-Terminal-Server-Launcher/releases)。
 
+## [1.1.43] - 2026-11-07
+
+### 修复
+
+- **桌面画面宽度是奇数时崩溃**：降采样取 `line[0::4][::step]` 得到的是
+  `ceil(width/step)` 个元素，而目标宽是 `floor(width/step)`；1920×1080 这种整数倍
+  没问题，但 1919 宽的窗口（QQ、部分浏览器窗口）就会抛
+  `ValueError: attempt to assign bytes of size 565 to extended slice of size 564`，
+  表现为桌面页一片空白、控制台刷红色堆栈。改成一次切到位再截断。
+- **点击落偏**：截图用 `GetWindowRect`（830×941），点击换算却用 DWM 扩展边框
+  （816×934、左边界差 7 px），越靠右下偏得越多；而且 `mouse_event` 打在屏幕坐标上，
+  窗口被挡住时点击会落到盖住它的窗口上。现在两边共用同一个矩形，点击前先把目标
+  窗口提到前台。
+
 ## [1.1.42] - 2026-11-07
 
 ### 新增
@@ -834,3 +848,4 @@ Nuitka 的 `--standalone` **不设置 `sys.frozen`**（实测），而项目里�
 [1.1.37]: https://github.com/yzsyzdy/Minecraft-Terminal-Server-Launcher/compare/v1.1.36...v1.1.37
 [1.1.41]: https://github.com/yzsyzdy/Minecraft-Terminal-Server-Launcher/compare/v1.1.40...v1.1.41
 [1.1.42]: https://github.com/yzsyzdy/Minecraft-Terminal-Server-Launcher/compare/v1.1.41...v1.1.42
+[1.1.43]: https://github.com/yzsyzdy/Minecraft-Terminal-Server-Launcher/compare/v1.1.42...v1.1.43
