@@ -237,6 +237,42 @@ def open_terminal_argv(plan: "LaunchPlan") -> Optional[list[str]]:
     return ["x-terminal-emulator", "-e"] + list(plan.cmd)
 
 
+def kill_process_tree(proc: subprocess.Popen, timeout: float = 10.0) -> None:
+    """杀掉一个子进程**以及它的所有子孙**。
+
+    为什么不能只 `proc.kill()`：`MSTL.exe` 拉起来的 setup 是
+    `cmd.exe /c "<命令>"`，真正的安装器（uv、pip、npm）是它的子进程。
+    只杀 cmd 的话，uv 会变成孤儿继续往 venv 里写文件——用户看到「已停止」，
+    后台却还在装；这时再点启动就是两个 uv 同时改同一份依赖目录。
+
+    Windows 用 `taskkill /F /T`（T = 整棵树），POSIX 用进程组：
+    spawn 时已经设了 start_new_session，所以 os.killpg 能一次收掉。
+    """
+    if proc is None or proc.poll() is not None:
+        return
+    try:
+        if os.name == "nt":
+            subprocess.run(
+                ["taskkill", "/F", "/T", "/PID", str(proc.pid)],
+                capture_output=True, timeout=timeout,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        else:
+            import signal
+            try:
+                os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
+            except OSError:
+                proc.terminate()
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+    try:
+        proc.wait(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        try:
+            proc.kill()
+        except OSError:
+            pass
+
+
 def _clamp_int(value, fallback: int, low: int, high: int) -> int:
     try:
         number = int(value)
@@ -609,6 +645,8 @@ class ServerRuntime:
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 text=True, encoding="utf-8", errors="replace", bufsize=1,
+                # POSIX 上开新会话，停止时才能按进程组一次性收掉整棵树
+                start_new_session=(os.name != "nt"),
             )
         except OSError as e:
             self._fail_setup(str(e))
@@ -625,7 +663,7 @@ class ServerRuntime:
             try:
                 code = proc.wait(timeout=self.plan.setup_timeout)
             except subprocess.TimeoutExpired:
-                proc.kill()
+                kill_process_tree(proc)
                 self._fail_setup("timeout")
                 return
         finally:
@@ -704,7 +742,7 @@ class ServerRuntime:
                 proc = None
                 reader = None
                 if setup is not None and setup.poll() is None:
-                    setup.kill()
+                    kill_process_tree(setup)
             else:
                 if self._proc is None or self._proc.poll() is not None:
                     raise CoreError("web.error.not_running", name=self.plan.name)
@@ -763,7 +801,7 @@ class ServerRuntime:
                 self._state = STATE_STOPPED
         for child in (proc, setup):
             if child is not None and child.poll() is None:
-                child.kill()
+                kill_process_tree(child)
 
     # -- 内部 --------------------------------------------------------------
 

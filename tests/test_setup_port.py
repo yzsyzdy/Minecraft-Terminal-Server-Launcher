@@ -6,6 +6,7 @@
 
 import os
 import tempfile
+import sys
 import unittest
 from unittest import mock
 
@@ -74,6 +75,29 @@ class PortProbeTest(unittest.TestCase):
             server.listen(1)
             port = server.getsockname()[1]
             self.assertTrue(netprobe.port_open(port))
+
+
+class TreeKillTest(unittest.TestCase):
+    """停止安装时要连子孙进程一起杀，否则 uv 会变孤儿继续写 venv。"""
+
+    def test_kill_process_tree_handles_none_and_dead(self):
+        self.assertIsNone(rt.kill_process_tree(None))
+        import subprocess
+        done = subprocess.Popen(["cmd", "/c", "exit 0"])
+        done.wait()
+        rt.kill_process_tree(done)          # 已退出，不该抛
+
+    @unittest.skipUnless(os.name == "nt", "Windows only")
+    def test_kill_process_tree_kills_grandchild(self):
+        import subprocess, time
+        # 父进程拉一个长时间的子进程（cmd 起 ping），只杀父会留下 ping
+        proc = subprocess.Popen(
+            ["cmd", "/c", "ping -n 60 127.0.0.1 >nul"],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        time.sleep(0.5)
+        rt.kill_process_tree(proc, timeout=10)
+        self.assertIsNotNone(proc.poll(), "父进程应当已退出")
 
 
 class PreparingStateTest(unittest.TestCase):
