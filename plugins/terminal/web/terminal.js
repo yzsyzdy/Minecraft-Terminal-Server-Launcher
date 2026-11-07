@@ -12,7 +12,7 @@
 
   const PLUGIN_ID = "terminal";
   const API = "/api/plugin/" + PLUGIN_ID;
-  const POLL_MS = 250;
+  const POLL_MS = 120;
   // 面板自己管的那些页面，切到终端时都要让开
   const PANEL_PANES = ["dash", "log", "bar", "files", "map", "desktop", "ai", "jars", "jump"];
 
@@ -209,6 +209,13 @@
   function mountTerm() {
     const host = q("tplug-term");
     if (!host) return;
+    // 必须 dispose 旧实例：xterm 的 onData 是挂在实例上的订阅，
+    // 只清 DOM 不会解绑。多点几次「新建终端」就会有 N 个实例同时发按键，
+    // 表现成「输入一条命令执行了 N 次」。
+    if (state.term) {
+      try { state.term.dispose(); } catch (e) { /* 已经销毁过就算了 */ }
+      state.term = null;
+    }
     host.innerHTML = "";
     if (!window.Terminal) {
       host.textContent = "xterm.js 未加载";
@@ -231,7 +238,20 @@
 
     term.onData(function (text) {
       if (!state.sessionId) return;
-      api(API + "/input", { id: state.sessionId, data: text }).catch(function () {});
+      /* xterm 是按字符回调的：一个字一次 POST，打字快的时候每一击都要等
+         一次往返，体感就是「延迟巨大」。这里攒一小段（15ms）再一起发，
+         回车这类提交键立即发出去，不牺牲响应。 */
+      pendingInput += text;
+      const flushNow = text.indexOf("\r") >= 0 || text.indexOf("\n") >= 0;
+      if (flushNow) {
+        clearTimeout(inputTimer);
+        inputTimer = null;
+        flushInput();
+      } else if (!inputTimer) {
+        // 60ms 的合并窗口：人的连续击键通常间隔 80–200ms，
+        // 这个值能把「快速打字」合成一两次请求，又不会让单字符输入感到迟滞
+        inputTimer = setTimeout(flushInput, 60);
+      }
     });
     term.onResize(function (size) {
       if (!state.sessionId) return;
@@ -259,6 +279,17 @@
       if (cols !== term.cols || rows !== term.rows) term.resize(cols, rows);
     };
     setTimeout(function () { state.fit(); term.focus(); }, 60);
+  }
+
+  let pendingInput = "";
+  let inputTimer = null;
+
+  function flushInput() {
+    if (inputTimer) { clearTimeout(inputTimer); inputTimer = null; }
+    const data = pendingInput;
+    pendingInput = "";
+    if (!data || !state.sessionId) return;
+    api(API + "/input", { id: state.sessionId, data: data }).catch(function () {});
   }
 
   function startPolling() {
@@ -308,7 +339,12 @@
     api(API + "/kill", { id: state.sessionId }).then(function () {
       stopPolling();
       state.sessionId = null;
-      if (state.term) state.term.reset();
+      if (state.term) {
+        try { state.term.dispose(); } catch (e) {}
+        state.term = null;
+      }
+      const host = q("tplug-term");
+      if (host) host.innerHTML = "";
       q("tplug-kill").disabled = true;
       q("tplug-start").disabled = false;
       q("tplug-stat").textContent = "";
