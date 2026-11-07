@@ -5,7 +5,7 @@
 
 `v1.1.35` 及更早版本的说明见 [GitHub Releases](https://github.com/yzsyzdy/Minecraft-Terminal-Server-Launcher/releases)。
 
-## [未发布]
+## [1.1.42] - 2026-11-07
 
 ### 新增
 
@@ -833,3 +833,4 @@ Nuitka 的 `--standalone` **不设置 `sys.frozen`**（实测），而项目里�
 [1.1.38]: https://github.com/yzsyzdy/Minecraft-Terminal-Server-Launcher/compare/v1.1.37...v1.1.38
 [1.1.37]: https://github.com/yzsyzdy/Minecraft-Terminal-Server-Launcher/compare/v1.1.36...v1.1.37
 [1.1.41]: https://github.com/yzsyzdy/Minecraft-Terminal-Server-Launcher/compare/v1.1.40...v1.1.41
+[1.1.42]: https://github.com/yzsyzdy/Minecraft-Terminal-Server-Launcher/compare/v1.1.41...v1.1.42
