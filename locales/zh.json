@@ -1010,9 +1010,13 @@
     "web.menu.desktop": "  [{n}] 桌面控制（仅 Windows） = {val}",
     "web.menu.desktop_saved": "  桌面控制已设为 {val}。开启后「桌面」标签页会出现在面板里。",
     "web.menu.desktop_hint": "  打开后可以看任意窗口的实时画面并点击/按键；只影响面板入口，不是安全边界。",
-    "web.desktop.quality": "画质（像素抽样）",
-    "web.desktop.quality_full": "100%（原图，最费流量）",
-    "web.desktop.quality_half": "50%（默认）",
-    "web.desktop.quality_third": "33%",
-    "web.desktop.quality_quarter": "25%（最省流量）"
+    "web.desktop.quality": "画质",
+    "web.desktop.quality_full": "100%（原图）",
+    "web.desktop.quality_90": "90%",
+    "web.desktop.quality_80": "80%",
+    "web.desktop.quality_70": "70%",
+    "web.desktop.quality_60": "60%（默认）",
+    "web.desktop.quality_half": "50%",
+    "web.desktop.quality_40": "40%",
+    "web.desktop.quality_30": "30%（最省流量）"
 }

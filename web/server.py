@@ -353,9 +353,13 @@ WEB_STRINGS = (
     "web.desktop.refresh",
     "web.desktop.quality",
     "web.desktop.quality_full",
+    "web.desktop.quality_90",
+    "web.desktop.quality_80",
+    "web.desktop.quality_70",
+    "web.desktop.quality_60",
     "web.desktop.quality_half",
-    "web.desktop.quality_third",
-    "web.desktop.quality_quarter",
+    "web.desktop.quality_40",
+    "web.desktop.quality_30",
 
 
 
@@ -1628,10 +1632,12 @@ def _make_handler(manager: RuntimeManager, servers_dir: str, token: str,
                 if not hwnd:
                     return None
             try:
-                scale = float(query.get("scale") or 0.6)
+                scale = float(query.get("scale") or 1.0)
             except (TypeError, ValueError):
-                scale = 0.6
-            key = (target, hwnd, round(max(0.2, min(1.0, scale)), 2))
+                scale = 1.0
+            # 任意倍率现在都能走（GDI StretchBlt），只挡掉明显不合理的值
+            scale = round(max(0.2, min(1.0, scale)), 2)
+            key = (target, hwnd, scale)
             with _DESKTOP_LOCK:
                 session = _DESKTOP_STATE.get("session")
                 if session is not None and session.key == key:

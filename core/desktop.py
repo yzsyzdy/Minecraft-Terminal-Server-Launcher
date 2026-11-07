@@ -164,16 +164,31 @@ class DesktopSession:
         now = time.time()
         if not force and now - self._last_at < MIN_FRAME_INTERVAL:
             return None
+        # 缩放交给 GDI 的 StretchBlt（HALFTONE 面积平均），不再用「按整数步长
+        # 抽样」：抽样只能取 1/2、1/3、1/4，中间倍率（比如 70%）根本做不出来，
+        # 而且「每 n 行取一行」会把文字笔画砍掉。StretchBlt 支持任意倍率，
+        # 缩到 60% 文字依然完整，代价只是多一次 GDI 内存拷贝（约 20 ms）。
+        target_w = target_h = 0
+        if self.scale < 1.0:
+            probe = wincapture.window_capture_rect(self.hwnd)                 if self.target == "window" else None
+            if self.target == "window":
+                if not self.hwnd or not probe:
+                    return None
+                src_w, src_h = probe[2], probe[3]
+            else:
+                src_w, src_h = wincapture.virtual_screen()[2:]
+            if src_w > 0 and src_h > 0:
+                target_w = max(1, int(src_w * self.scale))
+                target_h = max(1, int(src_h * self.scale))
         if self.target == "window":
             if not self.hwnd:
                 return None
-            shot = wincapture.capture_window(self.hwnd)
+            shot = wincapture.capture_window(self.hwnd, target_w, target_h)
         else:
-            shot = wincapture.capture_screen()
+            shot = wincapture.capture_screen(target_w, target_h)
         if not shot:
             return None
         width, height, rgba = shot
-        width, height, rgba = _downscale(rgba, width, height, self.scale)
 
         key = self._forced_full or self._prev is None \
             or (width, height) != self._prev_size

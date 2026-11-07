@@ -5,42 +5,26 @@
 
 `v1.1.35` 及更早版本的说明见 [GitHub Releases](https://github.com/yzsyzdy/Minecraft-Terminal-Server-Launcher/releases)。
 
-## [1.1.43] - 2026-11-07
-
-### 新增
-
-- **桌面页可以调画质了**：工具条上加了「画质」下拉，100%（原图）/ 50%（默认）/
-  33% / 25%。之前倍率写死在代码里，网页端改不了；现在切换会重建会话并重来一张
-  关键帧，1080p 屏幕对应 1920×1080 / 960×540 / 640×360 / 480×270。
-  下拉里只列「真能取到」的倍率——降采样是整数步长（1/2/3/4），写 75%、60%
-  出来实际也只得到 50%，那属于骗人。
-
-### 修复
-
-- **桌面画面宽度是奇数时崩溃**：降采样取 `line[0::4][::step]` 得到的是
-  `ceil(width/step)` 个元素，而目标宽是 `floor(width/step)`；1920×1080 这种整数倍
-  没问题，但 1919 宽的窗口（QQ、部分浏览器窗口）就会抛
-  `ValueError: attempt to assign bytes of size 565 to extended slice of size 564`，
-  表现为桌面页一片空白、控制台刷红色堆栈。改成一次切到位再截断。
-- **点击落偏**：截图用 `GetWindowRect`（830×941），点击换算却用 DWM 扩展边框
-  （816×934、左边界差 7 px），越靠右下偏得越多；而且 `mouse_event` 打在屏幕坐标上，
-  窗口被挡住时点击会落到盖住它的窗口上。现在两边共用同一个矩形，点击前先把目标
-  窗口提到前台。
-
 ## [1.1.42] - 2026-11-07
 
 ### 新增
 
+- **桌面页可以调画质**：工具条上加了「画质」下拉，100% / 90% / 80% / 70% / 60%（默认）/
+  50% / 40% / 30%。缩放走 GDI 的 `StretchBlt`（HALFTONE 面积平均），**任意倍率都成立**；
+  之前用「按整数步长抽样」，只能取 1/2、1/3、1/4，中间倍率做不出来、文字还会缺笔画。
+  1080p 屏幕对应 1920×1080 一直到 576×324。
 - **桌面控制（仅 Windows）**：在 TUI 的「网页面板」菜单里打开（或 `MSTL.exe web --allow-desktop`），
   面板多出「桌面」标签页，
   可以把一个 Windows 程序当屏幕用——看实时画面、点一下、敲键、发文字，都原样转发。
   默认关闭，不打开就完全不存在这个入口。
-  带宽做了三层削减：降采样到 1152 宽、32×32 分块只在变化处发数据、同变化的块合并成条带。
+  带宽做了三层削减：按倍率缩小（默认 60%）、32×32 分块只在变化处发数据、同变化的块合并成条带。
   实测静止的 UI 窗口首帧 71 KB 后**连续 14 帧 0 字节**；放视频的全屏约 600–950 KB/帧。
   抓帧用 `PrintWindow`（被遮挡也能抓），失败退回屏幕拷贝；文字输入走剪贴板粘贴
   （逐字符模拟键盘处理不了中文/输入法）。开关默认关，写在 `config.json` 的 `web.allow_desktop`。
-  修掉两个「显示不全」的坑：`PrintWindow` 要按 `GetWindowRect` 的尺寸建位图（DWM 边界会裁掉
-  右边和下边），降采样必须用整数步长（小数步长是裁剪不是缩放）。
+  修掉几个坑：`PrintWindow` 要按 `GetWindowRect` 的尺寸建位图（DWM 边界会裁掉右边和下边）；
+  宽度不是步长整数倍时（1919 宽的窗口）降采样会抛
+  `ValueError: attempt to assign bytes of size 565 to extended slice of size 564`；
+  点击换算必须和截图用同一个矩形，且点击前要把目标窗口提到前台，否则点击会落到盖住它的窗口上。
 
 ## [1.1.41] - 2026-11-07
 
@@ -856,4 +840,3 @@ Nuitka 的 `--standalone` **不设置 `sys.frozen`**（实测），而项目里�
 [1.1.37]: https://github.com/yzsyzdy/Minecraft-Terminal-Server-Launcher/compare/v1.1.36...v1.1.37
 [1.1.41]: https://github.com/yzsyzdy/Minecraft-Terminal-Server-Launcher/compare/v1.1.40...v1.1.41
 [1.1.42]: https://github.com/yzsyzdy/Minecraft-Terminal-Server-Launcher/compare/v1.1.41...v1.1.42
-[1.1.43]: https://github.com/yzsyzdy/Minecraft-Terminal-Server-Launcher/compare/v1.1.42...v1.1.43

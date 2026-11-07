@@ -1009,9 +1009,13 @@
     "web.menu.desktop": "  [{n}] Desktop control (Windows only) = {val}",
     "web.menu.desktop_saved": "  Desktop control set to {val}. The Desktop tab appears in the panel when on.",
     "web.menu.desktop_hint": "  Lets the panel show any window live and forward clicks/keys; it gates the UI entry, not security.",
-    "web.desktop.quality": "Quality (pixel sampling)",
-    "web.desktop.quality_full": "100% (full size, most data)",
-    "web.desktop.quality_half": "50% (default)",
-    "web.desktop.quality_third": "33%",
-    "web.desktop.quality_quarter": "25% (least data)"
+    "web.desktop.quality": "Quality",
+    "web.desktop.quality_full": "100% (full size)",
+    "web.desktop.quality_90": "90%",
+    "web.desktop.quality_80": "80%",
+    "web.desktop.quality_70": "70%",
+    "web.desktop.quality_60": "60% (default)",
+    "web.desktop.quality_half": "50%",
+    "web.desktop.quality_40": "40%",
+    "web.desktop.quality_30": "30% (least data)"
 }

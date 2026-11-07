@@ -1885,17 +1885,20 @@ function applyStrings() {
   $("tab-desktop").textContent = strings["web.tab.desktop"] || "Desktop";
   $("dsend").textContent = strings["web.panel.send"] || "Send";
   $("dscale").title = strings["web.desktop.quality"] || "Quality";
-  // 只列「真的能取到」的倍率：降采样是整数步长（1/2/3/4），
-  // 写 75% 或 60% 出来实际也只会得到 50%，那属于骗人。
+  // 缩放走 GDI 的 StretchBlt，任意倍率都成立，所以这里可以给细档位
   const scaleNames = {
     "1": strings["web.desktop.quality_full"] || "100%",
+    "0.9": strings["web.desktop.quality_90"] || "90%",
+    "0.8": strings["web.desktop.quality_80"] || "80%",
+    "0.7": strings["web.desktop.quality_70"] || "70%",
+    "0.6": strings["web.desktop.quality_60"] || "60%",
     "0.5": strings["web.desktop.quality_half"] || "50%",
-    "0.34": strings["web.desktop.quality_third"] || "33%",
-    "0.25": strings["web.desktop.quality_quarter"] || "25%",
+    "0.4": strings["web.desktop.quality_40"] || "40%",
+    "0.3": strings["web.desktop.quality_30"] || "30%",
   };
   const scaleSelect = $("dscale");
   if (!scaleSelect.options.length) {
-    ["1", "0.5", "0.34", "0.25"].forEach((value) => {
+    ["1", "0.9", "0.8", "0.7", "0.6", "0.5", "0.4", "0.3"].forEach((value) => {
       const opt = document.createElement("option");
       opt.value = value;
       opt.textContent = scaleNames[value] || value;
@@ -3394,8 +3397,8 @@ async function loadMaps(force) {
 const desk = {
   enabled: false, target: "screen", hwnd: 0, width: 0, height: 0,
   seq: 0, timer: null, busy: false, lastAt: 0,
-  // 画质/带宽取舍：越小越省流量、字越糊。0.5 是默认（1080p → 960×540）
-  scale: 0.5,
+  // 画质/带宽取舍：越小越省流量、字越糊。0.6 是默认（1080p → 1152×648）
+  scale: 0.6,
 };
 
 async function deskInit() {

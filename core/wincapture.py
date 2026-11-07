@@ -34,6 +34,10 @@ if IS_WINDOWS:                      # pragma: no branch - 平台分支
 
 SRCCOPY = 0x00CC0020
 CAPTUREBLT = 0x40000000
+# StretchBlt 的缩放模式：HALFTONE 做面积平均（缩小时文字不会缺笔画），
+# 这是「任意倍率」能用的前提。COLORONCOLOR 只是丢列，缩完会掉笔画。
+HALFTONE = 4
+COLORONCOLOR = 3
 PW_RENDERFULLCONTENT = 0x00000002
 DIB_RGB_COLORS = 0
 BI_RGB = 0
@@ -198,6 +202,34 @@ def focus_window(hwnd: int) -> bool:
 
 # -- 截帧 -------------------------------------------------------------------
 
+def _bitmap_to_rgba(mem_dc, bitmap, width: int, height: int) -> Optional[bytes]:
+    """把一张已选进 DC 的位图读成 RGBA（自下而上 → 自上而下）。"""
+    info = _BITMAPINFO()
+    info.bmiHeader.biSize = ctypes.sizeof(_BITMAPINFOHEADER)
+    info.bmiHeader.biWidth = width
+    info.bmiHeader.biHeight = height
+    info.bmiHeader.biPlanes = 1
+    info.bmiHeader.biBitCount = 32
+    info.bmiHeader.biCompression = BI_RGB
+    buffer = ctypes.create_string_buffer(width * height * 4)
+    if not _gdi32.GetDIBits(mem_dc, bitmap, 0, height, buffer,
+                            ctypes.byref(info), DIB_RGB_COLORS):
+        return None
+    return _dib_to_rgba(buffer.raw, width, height)
+
+
+def _stretch_into(target_dc, target_bitmap, src_dc, width: int, height: int,
+                  target_w: int, target_h: int) -> Optional[bytes]:
+    """把 src_dc 里的 width×height 缩到 target_w×target_h，读成 RGBA。"""
+    _gdi32.SetStretchBltMode(target_dc, HALFTONE)
+    _gdi32.SetBrushOrgEx(target_dc, 0, 0, None)
+    ok = _gdi32.StretchBlt(target_dc, 0, 0, target_w, target_h,
+                           src_dc, 0, 0, width, height, SRCCOPY)
+    if not ok:
+        return None
+    return _bitmap_to_rgba(target_dc, target_bitmap, target_w, target_h)
+
+
 def _dib_to_rgba(dib, width: int, height: int) -> bytes:
     """BITMAPINFOHEADER 取回来的是 BGRA、行序自下而上，转成 RGBA 自上而下。
 
@@ -277,8 +309,14 @@ def window_capture_rect(hwnd: int) -> Optional[tuple[int, int, int, int]]:
     return _window_rect_raw(hwnd)
 
 
-def capture_window(hwnd: int) -> Optional[tuple[int, int, bytes]]:
+def capture_window(hwnd: int, target_width: int = 0,
+                   target_height: int = 0) -> Optional[tuple[int, int, bytes]]:
     """抓一个窗口，返回 (宽, 高, RGBA)。抓不到返回 None。
+
+    target_width/height 非 0 时用 GDI 的 StretchBlt 缩到那个尺寸——这样
+    **任意倍率都能用**，而不是只能按整数步长抽样。顺带质量更好：
+    HALFTONE 模式是面积平均，缩到 70% 文字仍然完整；按整数步长抽样等于
+    「每 n 行取一行」，字会被砍掉笔画。
 
     尺寸这里有个坑：`PrintWindow` 画的是**整块窗口**（含标题栏与边框，尺寸等于
     GetWindowRect），而 DWM 的「扩展边框」比它小一圈（1002×712 vs 1016×719）。
@@ -294,28 +332,38 @@ def capture_window(hwnd: int) -> Optional[tuple[int, int, bytes]]:
     if width <= 0 or height <= 0 or width > 10000 or height > 10000:
         return None
 
+    want_w = target_width or width
+    want_h = target_height or height
+
     window_dc = _user32.GetWindowDC(hwnd)
     if window_dc:
         mem_dc = _gdi32.CreateCompatibleDC(window_dc)
         bitmap = _gdi32.CreateCompatibleBitmap(window_dc, width, height) if mem_dc else None
+        scaled = False
         if mem_dc and bitmap:
             old = _gdi32.SelectObject(mem_dc, bitmap)
             try:
                 # PW_RENDERFULLCONTENT：让 DirectComposition 的窗口也吐内容
                 ok = _user32.PrintWindow(hwnd, mem_dc, PW_RENDERFULLCONTENT)
                 if ok:
-                    info = _BITMAPINFO()
-                    info.bmiHeader.biSize = ctypes.sizeof(_BITMAPINFOHEADER)
-                    info.bmiHeader.biWidth = width
-                    info.bmiHeader.biHeight = height
-                    info.bmiHeader.biPlanes = 1
-                    info.bmiHeader.biBitCount = 32
-                    info.bmiHeader.biCompression = BI_RGB
-                    buffer = ctypes.create_string_buffer(width * height * 4)
-                    if _gdi32.GetDIBits(mem_dc, bitmap, 0, height, buffer,
-                                        ctypes.byref(info), DIB_RGB_COLORS):
-                        return (width, height,
-                                _dib_to_rgba(buffer.raw, width, height))
+                    if want_w == width and want_h == height:
+                        rgba = _bitmap_to_rgba(mem_dc, bitmap, width, height)
+                        if rgba:
+                            return (width, height, rgba)
+                    else:
+                        mem2 = _gdi32.CreateCompatibleDC(window_dc)
+                        bmp2 = _gdi32.CreateCompatibleBitmap(window_dc, want_w, want_h) if mem2 else None
+                        if mem2 and bmp2:
+                            old2 = _gdi32.SelectObject(mem2, bmp2)
+                            try:
+                                rgba = _stretch_into(mem2, bmp2, mem_dc,
+                                                     width, height, want_w, want_h)
+                            finally:
+                                _gdi32.SelectObject(mem2, old2)
+                                _gdi32.DeleteObject(bmp2)
+                                _gdi32.DeleteDC(mem2)
+                            if rgba:
+                                return (want_w, want_h, rgba)
             finally:
                 _gdi32.SelectObject(mem_dc, old)
                 _gdi32.DeleteObject(bitmap)
@@ -327,16 +375,46 @@ def capture_window(hwnd: int) -> Optional[tuple[int, int, bytes]]:
     # 这时要按 DWM 边界取，才是屏幕上真正看得见的那块。
     screen_rect = window_rect(hwnd) or raw
     left, top, width, height = screen_rect
+    want_w = target_width or width
+    want_h = target_height or height
     screen_dc = _user32.GetDC(0)
     if not screen_dc:
         return None
     try:
-        rgba = _capture_dc(screen_dc, left, top, width, height)
+        src_dc = _gdi32.CreateCompatibleDC(screen_dc)
+        src_bmp = _gdi32.CreateCompatibleBitmap(screen_dc, width, height) if src_dc else None
+        if not (src_dc and src_bmp):
+            return None
+        old = _gdi32.SelectObject(src_dc, src_bmp)
+        try:
+            if not _gdi32.BitBlt(src_dc, 0, 0, width, height, screen_dc, left, top,
+                                 SRCCOPY | CAPTUREBLT):
+                return None
+            if want_w == width and want_h == height:
+                rgba = _bitmap_to_rgba(src_dc, src_bmp, width, height)
+                if not rgba:
+                    return None
+                return (width, height, rgba)
+            mem2 = _gdi32.CreateCompatibleDC(screen_dc)
+            bmp2 = _gdi32.CreateCompatibleBitmap(screen_dc, want_w, want_h) if mem2 else None
+            if not (mem2 and bmp2):
+                return None
+            old2 = _gdi32.SelectObject(mem2, bmp2)
+            try:
+                rgba = _stretch_into(mem2, bmp2, src_dc, width, height, want_w, want_h)
+            finally:
+                _gdi32.SelectObject(mem2, old2)
+                _gdi32.DeleteObject(bmp2)
+                _gdi32.DeleteDC(mem2)
+        finally:
+            _gdi32.SelectObject(src_dc, old)
+            _gdi32.DeleteObject(src_bmp)
+            _gdi32.DeleteDC(src_dc)
     finally:
         _user32.ReleaseDC(0, screen_dc)
     if not rgba:
         return None
-    return (width, height, rgba)
+    return (want_w, want_h, rgba)
 
 
 def virtual_screen() -> tuple[int, int, int, int]:
@@ -350,22 +428,54 @@ def virtual_screen() -> tuple[int, int, int, int]:
     return (left, top, width, height)
 
 
-def capture_screen() -> Optional[tuple[int, int, bytes]]:
+def capture_screen(target_width: int = 0,
+                   target_height: int = 0) -> Optional[tuple[int, int, bytes]]:
+    """抓整个虚拟屏幕。target_* 非 0 时用 StretchBlt 缩到那个尺寸。"""
     if not IS_WINDOWS:
         return None
     screen_dc = _user32.GetDC(0)
     if not screen_dc:
         return None
+    src_dc = None
+    src_bmp = None
     try:
         left, top, width, height = virtual_screen()
         if width <= 0 or height <= 0:
             return None
-        rgba = _capture_dc(screen_dc, left, top, width, height)
+        want_w = target_width or width
+        want_h = target_height or height
+        if want_w == width and want_h == height:
+            rgba = _capture_dc(screen_dc, left, top, width, height)
+            return (width, height, rgba) if rgba else None
+
+        src_dc = _gdi32.CreateCompatibleDC(screen_dc)
+        src_bmp = _gdi32.CreateCompatibleBitmap(screen_dc, width, height) if src_dc else None
+        if not (src_dc and src_bmp):
+            return None
+        old = _gdi32.SelectObject(src_dc, src_bmp)
+        try:
+            if not _gdi32.BitBlt(src_dc, 0, 0, width, height, screen_dc, left, top,
+                                 SRCCOPY | CAPTUREBLT):
+                return None
+            mem2 = _gdi32.CreateCompatibleDC(screen_dc)
+            bmp2 = _gdi32.CreateCompatibleBitmap(screen_dc, want_w, want_h) if mem2 else None
+            if not (mem2 and bmp2):
+                return None
+            old2 = _gdi32.SelectObject(mem2, bmp2)
+            try:
+                rgba = _stretch_into(mem2, bmp2, src_dc, width, height, want_w, want_h)
+            finally:
+                _gdi32.SelectObject(mem2, old2)
+                _gdi32.DeleteObject(bmp2)
+                _gdi32.DeleteDC(mem2)
+            return (want_w, want_h, rgba) if rgba else None
+        finally:
+            _gdi32.SelectObject(src_dc, old)
     finally:
+        if src_dc and src_bmp:
+            _gdi32.DeleteObject(src_bmp)
+            _gdi32.DeleteDC(src_dc)
         _user32.ReleaseDC(0, screen_dc)
-    if not rgba:
-        return None
-    return (width, height, rgba)
 
 
 # -- 输入 -------------------------------------------------------------------
