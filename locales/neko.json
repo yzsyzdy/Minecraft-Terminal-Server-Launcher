@@ -1008,5 +1008,10 @@
     "web.desktop.refresh": "刷新窗口列表",
     "web.menu.desktop": "  [{n}] 桌面控制（只有 Windows） = {val}喵",
     "web.menu.desktop_saved": "  桌面控制已设为 {val}。开启后「桌面」标签页会出现在面板里。",
-    "web.menu.desktop_hint": "  打开后可以看任意窗口的实时画面并点击/按键；只影响面板入口，不是安全边界。"
+    "web.menu.desktop_hint": "  打开后可以看任意窗口的实时画面并点击/按键；只影响面板入口，不是安全边界。",
+    "web.desktop.quality": "画质喵（抽像素）",
+    "web.desktop.quality_full": "100%（原图，最费流量）",
+    "web.desktop.quality_half": "50%（默认喵）",
+    "web.desktop.quality_third": "33%",
+    "web.desktop.quality_quarter": "25%（最省喵）"
 }

@@ -1008,5 +1008,10 @@
     "web.desktop.refresh": "Обновить список",
     "web.menu.desktop": "  [{n}] Управление рабочим столом (только Windows) = {val}",
     "web.menu.desktop_saved": "  Управление рабочим столом: {val}. Вкладка появится в панели.",
-    "web.menu.desktop_hint": "  Позволяет смотреть любое окно и передавать клики/клавиши; это переключатель интерфейса."
+    "web.menu.desktop_hint": "  Позволяет смотреть любое окно и передавать клики/клавиши; это переключатель интерфейса.",
+    "web.desktop.quality": "Качество (прореживание)",
+    "web.desktop.quality_full": "100 % (исходный размер)",
+    "web.desktop.quality_half": "50 % (по умолчанию)",
+    "web.desktop.quality_third": "33 %",
+    "web.desktop.quality_quarter": "25 % (экономно)"
 }

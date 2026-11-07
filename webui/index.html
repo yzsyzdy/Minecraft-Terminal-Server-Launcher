@@ -876,6 +876,7 @@
       <div id="dbar">
         <select id="dwindow"></select>
         <button class="ghost" id="drefresh" title="↻">↻</button>
+        <select id="dscale" title=""></select>
         <span class="sp" style="flex:1"></span>
         <span id="dstat" class="hint"></span>
       </div>
@@ -1883,6 +1884,25 @@ function applyStrings() {
   $("tab-map").textContent = strings["web.tab.map"] || "Map";
   $("tab-desktop").textContent = strings["web.tab.desktop"] || "Desktop";
   $("dsend").textContent = strings["web.panel.send"] || "Send";
+  $("dscale").title = strings["web.desktop.quality"] || "Quality";
+  // 只列「真的能取到」的倍率：降采样是整数步长（1/2/3/4），
+  // 写 75% 或 60% 出来实际也只会得到 50%，那属于骗人。
+  const scaleNames = {
+    "1": strings["web.desktop.quality_full"] || "100%",
+    "0.5": strings["web.desktop.quality_half"] || "50%",
+    "0.34": strings["web.desktop.quality_third"] || "33%",
+    "0.25": strings["web.desktop.quality_quarter"] || "25%",
+  };
+  const scaleSelect = $("dscale");
+  if (!scaleSelect.options.length) {
+    ["1", "0.5", "0.34", "0.25"].forEach((value) => {
+      const opt = document.createElement("option");
+      opt.value = value;
+      opt.textContent = scaleNames[value] || value;
+      scaleSelect.appendChild(opt);
+    });
+    scaleSelect.value = String(desk.scale);
+  }
   $("dhint").textContent = strings["web.desktop.hint"] || "";
   $("drefresh").textContent = "↻";
   $("psave").textContent = strings["web.props.save"] || "Save";
@@ -3374,6 +3394,8 @@ async function loadMaps(force) {
 const desk = {
   enabled: false, target: "screen", hwnd: 0, width: 0, height: 0,
   seq: 0, timer: null, busy: false, lastAt: 0,
+  // 画质/带宽取舍：越小越省流量、字越糊。0.5 是默认（1080p → 960×540）
+  scale: 0.5,
 };
 
 async function deskInit() {
@@ -3420,7 +3442,7 @@ async function deskFrame() {
   const size = deskTarget();
   try {
     const data = await apiOk("/api/desktop/frame?target=" + size.target +
-                             "&hwnd=" + size.hwnd + "&scale=0.6");
+                             "&hwnd=" + size.hwnd + "&scale=" + desk.scale);
     if (data && data.seq) deskPaint(data);
   } catch (err) {
     if (err && err.key === "web.desktop.gone") deskStop();
@@ -5112,6 +5134,11 @@ $("dwindow").onchange = () => {
   deskLoop();
 };
 $("drefresh").onclick = () => deskLoadWindows();
+$("dscale").onchange = () => {
+  desk.scale = Number($("dscale").value) || 0.6;
+  // 换了倍率就是换一路画面，重建会话并强制来一张关键帧
+  deskLoop();
+};
 $("dsend").onclick = () => {
   const text = $("dtype").value;
   if (!text) return;

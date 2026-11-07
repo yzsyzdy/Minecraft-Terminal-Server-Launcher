@@ -351,6 +351,12 @@ WEB_STRINGS = (
     "web.desktop.screen",
     "web.desktop.hint",
     "web.desktop.refresh",
+    "web.desktop.quality",
+    "web.desktop.quality_full",
+    "web.desktop.quality_half",
+    "web.desktop.quality_third",
+    "web.desktop.quality_quarter",
+
 
 
     "web.tab.map",
