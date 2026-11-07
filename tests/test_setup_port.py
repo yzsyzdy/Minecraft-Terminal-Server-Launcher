@@ -100,6 +100,33 @@ class TreeKillTest(unittest.TestCase):
         self.assertIsNotNone(proc.poll(), "父进程应当已退出")
 
 
+class TerminalTest(unittest.TestCase):
+    def test_no_command_gives_no_argv(self):
+        # make_plan 默认带 cmd，这里显式置空才是「没有启动命令」的情形
+        self.assertIsNone(rt.open_terminal_argv(make_plan(cmd=[])))
+
+    @unittest.skipUnless(os.name == "nt", "Windows only")
+    def test_windows_argv_does_not_nest_start(self):
+        """不能再用 `cmd /c start "" cmd /k ...`。
+
+        那串参数经 subprocess 序列化后引号会被重新转义，start 又把后面整段
+        当成窗口标题，结果是立刻返回 0、窗口一个都没开——用户点了「没反应」。
+        """
+        argv = rt.open_terminal_argv(make_plan(cmd=["cmd.exe", "/k", "echo hi"]))
+        self.assertNotIn("start", [part.lower() for part in argv])
+        self.assertEqual(argv[0], "cmd.exe")
+        self.assertIn("/k", argv)
+        self.assertTrue(argv[-1].startswith("title "), "应当先设窗口标题")
+
+    @unittest.skipUnless(os.name == "nt", "Windows only")
+    def test_creationflags_open_new_console(self):
+        self.assertEqual(rt.terminal_creationflags(), 0x00000010)
+
+    @unittest.skipIf(os.name == "nt", "POSIX only")
+    def test_posix_creationflags_zero(self):
+        self.assertEqual(rt.terminal_creationflags(), 0)
+
+
 class PreparingStateTest(unittest.TestCase):
     def test_stop_during_preparing_does_not_raise(self):
         """准备中按停止应该能停，而不是报「没在运行」。"""

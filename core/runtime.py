@@ -217,26 +217,6 @@ def build_generic_plan(server_cfg: dict, server_dir: str) -> LaunchPlan:
     )
 
 
-def open_terminal_argv(plan: "LaunchPlan") -> Optional[list[str]]:
-    """在当前目录开一个真终端跑实例的命令。
-
-    面板的控制台是管道，不是 TTY：`astrbot init`、`npm create`、各种 curses
-    TUI 在管道里要么报错要么画出满屏乱码。这类一次性交互步骤只能交给真终端，
-    所以给界面一个「在终端里打开」的入口，而不是硬把命令塞进 Web 控制台。
-    """
-    if not plan.cmd:
-        return None
-    if os.name == "nt":
-        # 让 cmd 开一个新窗口并停在原地：实例命令跑完不自动关，方便看输出
-        joined = subprocess.list2cmdline(plan.cmd)
-        return ["cmd.exe", "/c", "start", "", "cmd.exe", "/k", joined]
-    if sys.platform == "darwin":
-        joined = " ".join(plan.cmd)
-        return ["osascript", "-e",
-                f'tell application "Terminal" to do script "{joined}"']
-    return ["x-terminal-emulator", "-e"] + list(plan.cmd)
-
-
 def kill_process_tree(proc: subprocess.Popen, timeout: float = 10.0) -> None:
     """杀掉一个子进程**以及它的所有子孙**。
 
@@ -416,18 +396,34 @@ def open_terminal_argv(plan: "LaunchPlan") -> Optional[list[str]]:
     面板的控制台是管道，不是 TTY：`astrbot init`、`npm create`、各种 curses
     TUI 在管道里要么报错要么画出满屏乱码。这类一次性交互步骤只能交给真终端，
     所以给界面一个「在终端里打开」的入口，而不是硬把命令塞进 Web 控制台。
+
+    Windows 上**不能用** `cmd /c start "" cmd /k <cmd>`：那串参数经 subprocess
+    序列化后引号会被重新转义，`start` 又把后面的整段当成了窗口标题，结果是
+    立刻返回 0 却什么都没打开（点了没反应就是踩在这里）。改用 subprocess 的
+    `CREATE_NEW_CONSOLE` 直接开一个新控制台，标题用 `title` 设成实例名。
     """
     if not plan.cmd:
         return None
     if os.name == "nt":
-        # 让 cmd 开一个新窗口并停在原地：实例命令跑完不自动关，方便看输出
         joined = subprocess.list2cmdline(plan.cmd)
-        return ["cmd.exe", "/c", "start", "", "cmd.exe", "/k", joined]
+        # /k = 命令跑完不关窗口，方便看输出和报错
+        return ["cmd.exe", "/k", f"title MSTL · {plan.name} && {joined}"]
     if sys.platform == "darwin":
         joined = " ".join(plan.cmd)
         return ["osascript", "-e",
                 f'tell application "Terminal" to do script "{joined}"']
     return ["x-terminal-emulator", "-e"] + list(plan.cmd)
+
+
+def terminal_creationflags() -> int:
+    """在 Windows 上给「在终端打开」用的进程创建标志。
+
+    CREATE_NEW_CONSOLE 让新进程拥有自己的控制台窗口；不设它的话子进程会
+    继承 MSTL 的控制台（打包版没有控制台，于是窗口根本不出现）。
+    """
+    if os.name == "nt":
+        return 0x00000010      # CREATE_NEW_CONSOLE
+    return 0
 
 
 def _clamp_int(value, fallback: int, low: int, high: int) -> int:

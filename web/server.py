@@ -1568,7 +1568,8 @@ def _make_handler(manager: RuntimeManager, servers_dir: str, token: str,
         def _open_terminal(self, body: dict) -> None:
             """在系统终端里跑这个实例的启动命令（给需要 TTY 的交互步骤用）。"""
             import subprocess as sp
-            from core.runtime import build_launch_plan, open_terminal_argv
+            from core.runtime import (build_launch_plan, open_terminal_argv,
+                                      terminal_creationflags)
             name = str((body or {}).get("name") or "")
             root = self._instance_dir(name)
             cfg = load_server_config(root)
@@ -1582,7 +1583,10 @@ def _make_handler(manager: RuntimeManager, servers_dir: str, token: str,
                 return self._json({"ok": False, "message": "nothing to run"},
                                   HTTPStatus.BAD_REQUEST)
             try:
-                sp.Popen(argv, cwd=plan.workdir, close_fds=True)
+                # Windows 必须带 CREATE_NEW_CONSOLE，否则新进程会共用 MSTL 的
+                # 控制台（打包版没有控制台，窗口根本不会出现）
+                sp.Popen(argv, cwd=plan.workdir, close_fds=True,
+                         creationflags=terminal_creationflags())
             except OSError as e:
                 return self._json({"ok": False, "message": str(e)},
                                   HTTPStatus.INTERNAL_SERVER_ERROR)
