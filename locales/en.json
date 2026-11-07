@@ -1005,5 +1005,8 @@
     "web.desktop.pick": "Window",
     "web.desktop.screen": "Whole screen",
     "web.desktop.hint": "Clicking the picture forwards the click to that window; keys and text below.",
-    "web.desktop.refresh": "Refresh windows"
+    "web.desktop.refresh": "Refresh windows",
+    "web.menu.desktop": "  [{n}] Desktop control (Windows only) = {val}",
+    "web.menu.desktop_saved": "  Desktop control set to {val}. The Desktop tab appears in the panel when on.",
+    "web.menu.desktop_hint": "  Lets the panel show any window live and forward clicks/keys; it gates the UI entry, not security."
 }

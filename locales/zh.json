@@ -1006,5 +1006,8 @@
     "web.desktop.pick": "选择窗口",
     "web.desktop.screen": "整个屏幕",
     "web.desktop.hint": "点击画面即转发到该窗口；下方可发按键与文字。",
-    "web.desktop.refresh": "刷新窗口列表"
+    "web.desktop.refresh": "刷新窗口列表",
+    "web.menu.desktop": "  [{n}] 桌面控制（仅 Windows） = {val}",
+    "web.menu.desktop_saved": "  桌面控制已设为 {val}。开启后「桌面」标签页会出现在面板里。",
+    "web.menu.desktop_hint": "  打开后可以看任意窗口的实时画面并点击/按键；只影响面板入口，不是安全边界。"
 }

@@ -307,7 +307,8 @@ def _dispatch_args(argv: list[str]) -> bool:
     if first in ("web", "serve", "--web"):
         host = None
         port = None
-        allow_desktop = False
+        # 三态：None = 没在命令行提到，交给 config.json 的 web.allow_desktop
+        allow_desktop = None
         rest = argv[1:]
         i = 0
         while i < len(rest):
@@ -318,9 +319,13 @@ def _dispatch_args(argv: list[str]) -> bool:
                 i += 2
                 continue
             if flag == "--allow-desktop":
-                # 桌面捕获默认关闭：它会把整块屏幕和输入转发给浏览器，
-                # 想用的人自己加上这个开关
+                # 桌面捕获默认关闭：它会把整块屏幕和输入转发给浏览器。
+                # 这条命令行开关优先于 config（TUI 里那个开关写的就是 config）
                 allow_desktop = True
+                i += 1
+                continue
+            if flag == "--no-allow-desktop":
+                allow_desktop = False
                 i += 1
                 continue
             if flag in ("--port", "-p") and value:

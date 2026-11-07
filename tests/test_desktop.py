@@ -37,6 +37,24 @@ class DownscaleTest(unittest.TestCase):
         self.assertEqual((w, h), (320, 180))
         self.assertEqual(len(out), w * h * 4)
 
+    def test_downscale_uses_integer_step_never_crops(self):
+        """步长必须是整数：否则输出尺寸变小、内容却只截了左上角一块。"""
+        width, height = 1016, 719
+        buf = bytearray(width * height * 4)
+        # 右下角涂红，缩完必须还能看到它（说明没有裁掉右边）
+        for y in range(height - 20, height):
+            for x in range(width - 20, width):
+                off = (y * width + x) * 4
+                buf[off] = 255
+        w, h, out = _downscale(bytes(buf), width, height, 0.6)
+        corner = ((h - 2) * w + (w - 2)) * 4
+        self.assertEqual(out[corner], 255, "右下角内容被裁掉了")
+
+    def test_fractional_scale_does_not_shrink_content(self):
+        # 0.75 的步长取整成 1，也就是不缩放，而不是裁掉 25%
+        w, h, out = _downscale(_solid(800, 600), 800, 600, 0.75)
+        self.assertEqual((w, h), (800, 600))
+
     def test_downscale_caps_width(self):
         buf = _solid(4000, 2000)
         w, h, _out = _downscale(buf, 4000, 2000, 1.0)

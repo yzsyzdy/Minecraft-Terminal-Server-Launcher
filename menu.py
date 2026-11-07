@@ -1602,7 +1602,8 @@ def _web_menu(project_dir: str) -> None:
     面板是个长期驻留的服务，「启动面板」和「启动服务器」是一个形态：
     选了就一直阻塞在这里，Ctrl+C 才回到菜单。
     """
-    from web.server import run_web, web_auto_start, web_settings
+    from web.server import (run_web, web_allow_desktop, web_auto_start,
+                            web_settings)
 
     while True:
         config = load_config(project_dir)
@@ -1623,12 +1624,27 @@ def _web_menu(project_dir: str) -> None:
         print(t("web.menu.regen", n=3))
         print(t("web.menu.autostart", n=4,
                 val=t("settings.on") if web_auto_start(config) else t("settings.off")))
+        print(t("web.menu.desktop", n=5,
+                val=t("settings.on") if web_allow_desktop(config) else t("settings.off")))
+        print(t("web.menu.desktop_hint"))
         print(t("menu.plugin.back", n=0))
         print()
-        choice = input("  " + t("menu.main.prompt", max=4)).strip()
+        choice = input("  " + t("menu.main.prompt", max=5)).strip()
 
         if choice == "0":
             return
+
+        if choice == "5":
+            web_cfg = dict(config.get("web") or {})
+            web_cfg["allow_desktop"] = not web_allow_desktop(config)
+            config["web"] = web_cfg
+            save_config(config, project_dir)
+            print()
+            print(t("web.menu.desktop_saved",
+                    val=t("settings.on") if web_cfg["allow_desktop"]
+                    else t("settings.off")))
+            input(t("app.press_enter"))
+            continue
 
         if choice == "4":
             web_cfg = dict(config.get("web") or {})

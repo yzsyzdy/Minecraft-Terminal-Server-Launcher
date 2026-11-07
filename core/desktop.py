@@ -56,42 +56,43 @@ class Frame:
 
 def _downscale(rgba: bytes, width: int, height: int,
                scale: float) -> tuple[int, int, bytes]:
-    """降采样。scale>=1 或尺寸没变就原样返回。
+    """按整数倍抽样降采样。scale>=1 或尺寸没变就原样返回。
 
-    用「行/列等距抽样 + 扩展切片」而不是逐像素平均：平均要在 Python 里跑
-    207 万次乘加，实测 740 ms 一帧，根本满足不了 10 fps；抽样 + 切片只要
-    18 ms（快 40 倍）。代价是细线可能丢，但这一层是「看界面」不是「看像素」，
-    真要逐像素就用 scale=1 关掉缩放。
+    必须用**整数步长**（宽高同一个 step），否则不是缩放而是裁剪：步长算成 1
+    的时候输出尺寸变小、内容却只截了左上角一块——这正是之前「显示不全」的原因。
+
+    抽样而不是平均：平均要在 Python 里跑 207 万次乘加，实测 740 ms 一帧，
+    满足不了 10 fps；整数步长 + 扩展切片只要 18 ms。
     """
     if scale >= 1.0 or width <= 0 or height <= 0:
         return width, height, rgba
-    target_w = max(1, min(MAX_WIDTH, int(width * scale)))
-    target_h = max(1, int(height * (target_w / width)))
+    step = max(1, int(round(1.0 / max(0.05, scale))))
+    if width // step > MAX_WIDTH:
+        step = max(step, (width + MAX_WIDTH - 1) // MAX_WIDTH)
+    target_w = width // step
+    target_h = height // step
+    if target_w < 1 or target_h < 1:
+        return width, height, rgba
     if target_w == width and target_h == height:
         return width, height, rgba
 
     stride = width * 4
-    col_step = max(1, width // target_w)
-    row_step = max(1, height // target_h)
-    out = bytearray()
-    keep = slice(None, None, col_step)
+    keep = slice(None, None, step)
     alpha = bytes([255]) * target_w
+    out = bytearray()
     for ty in range(target_h):
-        y = ty * row_step
+        y = ty * step
         line = rgba[y * stride:(y + 1) * stride]
-        if not line:
-            break
-        r = line[0::4][keep][:target_w]
-        g = line[1::4][keep][:target_w]
-        b = line[2::4][keep][:target_w]
+        r = line[0::4][keep]
+        g = line[1::4][keep]
+        b = line[2::4][keep]
         tile = bytearray(target_w * 4)
         tile[0::4] = r
         tile[1::4] = g
         tile[2::4] = b
         tile[3::4] = alpha
         out.extend(tile)
-    real_h = len(out) // (target_w * 4)
-    return target_w, real_h, bytes(out[:target_w * real_h * 4])
+    return target_w, target_h, bytes(out)
 
 
 def _tile_slice(rgba: bytes, width: int, x: int, y: int, w: int, h: int) -> bytes:

@@ -248,14 +248,34 @@ def _capture_dc(source_dc, x: int, y: int, width: int, height: int) -> Optional[
         _gdi32.DeleteDC(mem_dc)
 
 
-def capture_window(hwnd: int) -> Optional[tuple[int, int, bytes]]:
-    """抓一个窗口，返回 (宽, 高, RGBA)。抓不到返回 None。"""
+def _window_rect_raw(hwnd: int) -> Optional[tuple[int, int, int, int]]:
+    """GetWindowRect 的原始结果：PrintWindow 画的是整块窗口，用这个尺寸。"""
     if not IS_WINDOWS:
         return None
-    rect = window_rect(hwnd)
-    if not rect:
+    rect = wintypes.RECT()
+    if not _user32.GetWindowRect(hwnd, ctypes.byref(rect)):
         return None
-    _left, _top, width, height = rect
+    width = rect.right - rect.left
+    height = rect.bottom - rect.top
+    if width <= 0 or height <= 0:
+        return None
+    return (rect.left, rect.top, width, height)
+
+
+def capture_window(hwnd: int) -> Optional[tuple[int, int, bytes]]:
+    """抓一个窗口，返回 (宽, 高, RGBA)。抓不到返回 None。
+
+    尺寸这里有个坑：`PrintWindow` 画的是**整块窗口**（含标题栏与边框，尺寸等于
+    GetWindowRect），而 DWM 的「扩展边框」比它小一圈（1002×712 vs 1016×719）。
+    之前按 DWM 尺寸建位图，右边和下边就被裁掉了——表现为对话框底部的按钮
+    看不见。所以这里两条路用各自的正确尺寸。
+    """
+    if not IS_WINDOWS:
+        return None
+    raw = _window_rect_raw(hwnd)
+    if not raw:
+        return None
+    _left, _top, width, height = raw
     if width <= 0 or height <= 0 or width > 10000 or height > 10000:
         return None
 
@@ -288,12 +308,14 @@ def capture_window(hwnd: int) -> Optional[tuple[int, int, bytes]]:
         if window_dc:
             _user32.ReleaseDC(hwnd, window_dc)
 
-    # PrintWindow 失败（有些 GPU 合成的窗口就是不给）：退回屏幕拷贝
+    # PrintWindow 失败（有些 GPU 合成的窗口就是不给）：退回屏幕拷贝。
+    # 这时要按 DWM 边界取，才是屏幕上真正看得见的那块。
+    screen_rect = window_rect(hwnd) or raw
+    left, top, width, height = screen_rect
     screen_dc = _user32.GetDC(0)
     if not screen_dc:
         return None
     try:
-        left, top, _w, _h = rect
         rgba = _capture_dc(screen_dc, left, top, width, height)
     finally:
         _user32.ReleaseDC(0, screen_dc)

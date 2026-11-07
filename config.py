@@ -32,6 +32,9 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "token": "",
         # 启动软件时顺带把面板也拉起来（后台线程，不挡住终端菜单）
         "auto_start": False,
+        # 桌面控制（仅 Windows）：面板里是否出现「桌面」标签页。
+        # 默认关；TUI 的网页面板菜单里可以打开。
+        "allow_desktop": False,
         # 软件重启后，把上次退出时还在跑的实例再拉一遍
         "restore_running": True,
     },
