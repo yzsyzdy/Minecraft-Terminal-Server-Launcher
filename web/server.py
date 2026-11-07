@@ -43,10 +43,31 @@ from core import files as fileops
 from core import frp as frpops
 from core import instances as instlib
 from core.netprobe import port_open
+from core.plugins import PluginManager, plugins_dir
 from core import wincapture
 
 # 桌面捕获的会话。同一时间只保留一个：多标签页同时看会互相抢鼠标，
 # 而且每多一个会话就多一份全屏像素常驻内存。
+_PLUGINS: dict = {"m": None}
+_PLUGINS_LOCK = threading.Lock()
+
+_ASSET_TYPES = {
+    ".js": "application/javascript; charset=utf-8",
+    ".css": "text/css; charset=utf-8",
+    ".woff2": "font/woff2",
+    ".woff": "font/woff",
+    ".ttf": "font/ttf",
+    ".png": "image/png",
+    ".svg": "image/svg+xml",
+    ".json": "application/json",
+}
+
+
+def _asset_content_type(name: str) -> str:
+    _, ext = os.path.splitext(str(name).lower())
+    return _ASSET_TYPES.get(ext, "application/octet-stream")
+
+
 _DESKTOP_STATE: dict = {"session": None}
 _DESKTOP_LOCK = threading.Lock()
 
@@ -928,24 +949,56 @@ _INDEX_CACHE: dict[str, Any] = {}
 _INDEX_CACHE_LOCK = threading.Lock()
 
 
+def _plugin_asset_tags() -> str:
+    """生成插件前端资源的 <link>/<script> 标签。
+
+    只注入**已启用且可用**的插件；插件自己声明要哪些文件（清单里的 web 数组）。
+    顺序：css 先进 head，js 进 body 末尾（等面板自己的脚本都定义好再跑）。
+    """
+    with _PLUGINS_LOCK:
+        manager = _PLUGINS.get("m")
+    if manager is None:
+        return ""
+    css, js = [], []
+    for plugin in manager.available():
+        for name in plugin.assets:
+            url = "/plugin-assets/%s/%s" % (plugin.id, name)
+            if name.lower().endswith(".css"):
+                css.append('<link rel="stylesheet" href="%s">' % url)
+            elif name.lower().endswith(".js"):
+                js.append('<script src="%s"></script>' % url)
+    return "".join(css) + "|||" + "".join(js)
+
+
 def _index_html() -> str:
-    """读 webui/index.html。
+    """读 webui/index.html，并把已启用插件的前端资源注入进去。
 
     每次请求都重读一遍 78 KB 是白费力气（面板刷得很勤），但也不能一直缓存
     不放——开发时改了页面、刷新一下就该看到新内容。所以按 (mtime, size)
     记住上一次的结果：文件没动就直接复用，动了就重读。
+
+    插件标签不参与缓存键：插件开关是运行时改的，缓存住就看不到变化。
     """
     path = os.path.join(bundled_dir(), "webui", "index.html")
     stat = os.stat(path)
     key = (path, stat.st_mtime_ns, stat.st_size)
     with _INDEX_CACHE_LOCK:
-        if _INDEX_CACHE.get("key") == key:
-            return _INDEX_CACHE["html"]
-    with open(path, "r", encoding="utf-8") as f:
-        html = f.read()
-    with _INDEX_CACHE_LOCK:
-        _INDEX_CACHE["key"] = key
-        _INDEX_CACHE["html"] = html
+        cached = _INDEX_CACHE.get("key") == key
+        html = _INDEX_CACHE.get("html") if cached else None
+    if not cached:
+        with open(path, "r", encoding="utf-8") as f:
+            html = f.read()
+        with _INDEX_CACHE_LOCK:
+            _INDEX_CACHE["key"] = key
+            _INDEX_CACHE["html"] = html
+
+    css, _, js = _plugin_asset_tags().partition("|||")
+    if not css and not js:
+        return html
+    if css:
+        html = html.replace("</head>", css + "</head>", 1)
+    if js:
+        html = html.replace("</body>", js + "</body>", 1)
     return html
 
 
@@ -1320,6 +1373,12 @@ def _make_handler(manager: RuntimeManager, servers_dir: str, token: str,
                 return self._guard(lambda: self._static_font(path))
             if path == "/icon.png":
                 return self._guard(self._app_icon)
+            if path == "/api/plugins":
+                return self._guard(self._plugin_list)
+            if path.startswith("/api/plugin/"):
+                return self._guard(lambda: self._plugin_api(path, query))
+            if path.startswith("/plugin-assets/"):
+                return self._guard(lambda: self._plugin_asset(path))
             if path == "/api/state":
                 return self._state()
             if path == "/api/stream":
@@ -1735,6 +1794,53 @@ def _make_handler(manager: RuntimeManager, servers_dir: str, token: str,
                                   HTTPStatus.BAD_REQUEST)
             return self._json({"ok": False, "key": "web.desktop.bad_action"},
                               HTTPStatus.BAD_REQUEST)
+
+        # ------------------------------------------------------------ 插件
+        def _plugin_list(self) -> None:
+            """列出已安装插件。前端据此决定要不要显示插件的入口。"""
+            with _PLUGINS_LOCK:
+                manager = _PLUGINS.get("m")
+            if manager is None:
+                return self._json({"ok": True, "plugins": []})
+            self._json({"ok": True, "plugins": [p.to_dict() for p in manager.all()]})
+
+        def _plugin_api(self, path: str, query: Optional[dict[str, str]] = None,
+                        body: Optional[dict] = None) -> None:
+            """把 /api/plugin/<id>/<path> 转给插件。"""
+            with _PLUGINS_LOCK:
+                manager = _PLUGINS.get("m")
+            if manager is None:
+                return self._json({"ok": False, "message": "no plugin manager"},
+                                  HTTPStatus.NOT_FOUND)
+            rest = path[len("/api/plugin/"):]
+            pid, _, sub = rest.partition("/")
+            if not pid:
+                return self._json({"ok": False, "message": "missing plugin id"},
+                                  HTTPStatus.BAD_REQUEST)
+            result = manager.dispatch(pid, sub, query or {}, body)
+            if result is None:
+                return self._json({"ok": False, "message": "no such plugin route"},
+                                  HTTPStatus.NOT_FOUND)
+            status, content_type, payload = result
+            self._send(payload, status, content_type)
+
+        def _plugin_asset(self, path: str) -> None:
+            """插件的前端资源（xterm.js 之类）。只认 /plugin-assets/<id>/<file>。"""
+            with _PLUGINS_LOCK:
+                manager = _PLUGINS.get("m")
+            if manager is None:
+                return self._json({"ok": False, "message": "not found"},
+                                  HTTPStatus.NOT_FOUND)
+            rest = path[len("/plugin-assets/"):]
+            pid, _, name = rest.partition("/")
+            file_path = manager.asset_file(pid, name) if pid else None
+            if not file_path:
+                return self._json({"ok": False, "message": "not found"},
+                                  HTTPStatus.NOT_FOUND)
+            with open(file_path, "rb") as f:
+                blob = f.read()
+            ctype = _asset_content_type(name)
+            self._send(blob, HTTPStatus.OK, ctype)
 
         def _state(self) -> None:
             instances = []
@@ -2645,6 +2751,9 @@ def _make_handler(manager: RuntimeManager, servers_dir: str, token: str,
             if path == "/api/instance/terminal":
                 return self._open_terminal(body)
 
+            if path.startswith("/api/plugin/"):
+                return self._plugin_api(path, body=body)
+
             if path == "/api/desktop/input":
                 return self._desktop_input(body)
 
@@ -3003,6 +3112,16 @@ def build_server(project_dir: str, *, host: str = "127.0.0.1", port: int = 8765,
 
     servers_dir = servers_dir or ensure_servers_folder(project_dir)
     manager = manager or shared_manager(project_dir)
+
+    # 插件：只加载 config.json 里显式启用的那些。
+    # 插件以本进程权限运行，等于「这台机器上执行任意代码」——和通用实例、
+    # 文件管理器是同一条信任边界，所以默认一个都不加载。
+    with _PLUGINS_LOCK:
+        if _PLUGINS.get("m") is None or _PLUGINS["m"].project_dir != project_dir:
+            plugin_manager = PluginManager(project_dir)
+            enabled = list((config.get("plugins") or {}).get("enabled") or [])
+            plugin_manager.scan(enabled=enabled)
+            _PLUGINS["m"] = plugin_manager
     handler = _make_handler(manager, servers_dir, token, project_dir, token_provider,
                             allow_desktop=allow_desktop)
     httpd = _PanelServer((host, port), handler)

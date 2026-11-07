@@ -5,6 +5,18 @@
 
 `v1.1.35` 及更早版本的说明见 [GitHub Releases](https://github.com/yzsyzdy/Minecraft-Terminal-Server-Launcher/releases)。
 
+## [未发布]
+
+### 新增
+
+- **插件机制**：`plugins/<id>/` 放一个 `plugin.json` + `plugin.py`（暴露 `register(ctx)`），
+  就能给面板加功能。插件可以声明 `requires`（缺失时标记为不可用，而不是假装能跑）、
+  `web`（要注入 `index.html` 的 JS/CSS）、`api`（挂在 `/api/plugin/<id>/` 下的路由）。
+  核心仍然是零依赖：需要 pywinpty、xterm.js 这类库的功能放进插件，核心不带。
+  **默认一个都不加载**，必须在 `config.json` 的 `plugins.enabled` 里显式写 id——
+  插件代码以本进程权限运行，等于「这台机器上跑任意代码」，和通用实例、
+  文件管理器是同一条信任边界。
+
 ## [1.1.42] - 2026-11-07
 
 ### 修复

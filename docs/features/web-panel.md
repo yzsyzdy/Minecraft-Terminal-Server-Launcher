@@ -73,6 +73,73 @@
 「由 MSTL 面板补充」。中文会按 Java Properties 的规则写成 `\uXXXX`——游戏按
 ISO-8859-1 读这个文件，直接写 UTF-8 进游戏就是乱码。
 
+## 插件
+
+面板支持插件：需要第三方库的功能放在插件里，核心保持零依赖。
+
+### 目录结构
+
+```
+plugins/
+  terminal/
+    plugin.json     清单
+    plugin.py       后端入口，必须暴露 register(ctx)
+    web/            要注入面板的静态资源
+```
+
+`plugin.json`：
+
+```json
+{
+  "id": "terminal",
+  "name": "终端",
+  "version": "1.0.0",
+  "entry": "plugin.py",
+  "requires": ["pywinpty"],
+  "web": ["xterm.js", "xterm.css"],
+  "api": "terminal"
+}
+```
+
+| 字段 | 作用 |
+|---|---|
+| `requires` | 依赖清单。**任何一项 import 不上就把插件标成「不可用」**，面板不会调用它——宁可功能缺失，也不假装能跑 |
+| `web` | 要注入 `index.html` 的文件名（在插件 `web/` 目录里）。`.css` 进 `<head>`、`.js` 进 `</body>` 前 |
+| `api` | 后端路由挂在 `/api/plugin/<id>/<path>` 下 |
+
+### 后端写法
+
+```python
+def register(ctx):
+    def status(query, body):
+        return (200, "application/json", b'{"ok":true}')
+    ctx.route("status", status)
+```
+
+处理函数签名 `(query, body) -> (status, content_type, bytes)`。插件不需要知道
+面板的鉴权、线程模型和 JSON 约定——这些都在外面。
+
+### 默认不加载
+
+**装了插件不等于启用**。必须在 `config.json` 里显式写：
+
+```json
+{ "plugins": { "enabled": ["terminal"] } }
+```
+
+原因是插件代码以 MSTL 进程权限运行，等于「在这台机器上执行任意代码」——
+和「通用实例能跑任意命令」「文件管理器能改文件」是同一条信任边界，
+没有额外风险，但也不该在你没准备好的时候自动生效。
+
+### 容错
+
+插件是第三方代码，出问题不能拖垮面板：
+
+- `plugin.py` 抛异常 → 记进 `error` 字段，插件标为不可用，面板照常启动
+- 缺 `register` 函数、缺入口文件 → 同上
+- 处理函数运行时抛异常 → 该请求返回 500，其它请求不受影响
+- 静态资源路径含 `..` 或分隔符 → 直接拒绝
+
 ## 桌面控制（仅 Windows）
 
 面板可以把一个 Windows 程序当成「屏幕」来用：看到实时画面，点一下、敲一下都原样
