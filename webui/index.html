@@ -534,7 +534,28 @@
   #about-github:hover{text-decoration:underline}
 
   /* ------------------------------------------------------------------ 地图 */
-  /* 和 #files / #jars 一样走正常流（flex:1），不要 position:absolute：
+  /* 运维页：备份 + 玩家名单。和 #files / #map 一样走正常流，不要绝对定位。 */
+  #ops{flex:1;min-height:0;display:flex;flex-direction:column;overflow:hidden}
+  #opsbar{display:flex;align-items:center;gap:var(--s2);padding:var(--s2) var(--s4);
+    border-bottom:1px solid var(--line);flex-wrap:wrap}
+  #opsbackup,#opsplayers{flex:1;min-height:0;display:flex;flex-direction:column;
+    gap:var(--s2);padding:var(--s2) var(--s4);overflow:auto}
+  .opsrow{display:flex;align-items:center;gap:var(--s2);flex-wrap:wrap}
+  .opsfield{display:inline-flex;align-items:center;gap:6px;font-size:var(--font-sm);
+    color:var(--dim);cursor:pointer;user-select:none}
+  .opstime{width:110px}
+  #bklist,#pllist{display:flex;flex-direction:column;gap:4px;margin-top:var(--s2)}
+  .opsitem{display:flex;align-items:center;gap:var(--s2);padding:6px 10px;
+    border:1px solid var(--line);border-radius:var(--r-sm);background:var(--sunken);
+    font-size:var(--font-sm)}
+  .opsitem .nm{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;
+    white-space:nowrap}
+  .opsitem .meta{color:var(--dim);font-size:12px;white-space:nowrap}
+  .opsitem button{padding:2px 8px;font-size:12px}
+  .oplv{display:inline-block;padding:0 6px;border-radius:999px;
+    border:1px solid var(--line);font-size:11px;color:var(--dim)}
+
+/* 和 #files / #jars 一样走正常流（flex:1），不要 position:absolute：
      绝对定位的 inset:0 会盖住上面的标签栏，切到地图之后就点不回去了。 */
   #map{flex:1;min-height:0;display:flex;flex-direction:column;
        background:var(--surface)}
@@ -792,6 +813,7 @@
         <button class="tab on" id="tab-console"></button>
         <button class="tab" id="tab-files"></button>
         <button class="tab" id="tab-map"></button>
+        <button class="tab" id="tab-ops" hidden></button>
         <button class="tab" id="tab-desktop" hidden></button>
         <button class="tab" id="tab-ai"></button>
         <button class="tab" id="tab-jars" hidden></button>
@@ -890,6 +912,61 @@
         <button class="ghost" id="dkey-backspace">⌫</button>
       </div>
       <div class="hint" id="dhint"></div>
+    </div>
+    <div id="ops" hidden>
+      <div id="opsbar">
+        <span class="tabs" id="opsseg">
+          <button class="tab on" id="opsseg-backup"></button>
+          <button class="tab" id="opsseg-players"></button>
+        </span>
+        <span class="sp" style="flex:1"></span>
+        <span id="opsstate" class="hint"></span>
+      </div>
+
+      <div id="opsbackup">
+        <div class="opsrow">
+          <button id="bkcreate"></button>
+          <span class="sp" style="flex:1"></span>
+          <span id="bktotal" class="hint"></span>
+        </div>
+        <div class="opsrow">
+          <label class="opsfield">
+            <input type="checkbox" id="bkdaily">
+            <span id="l-bkdaily"></span>
+          </label>
+          <input type="time" id="bktime" class="opstime">
+          <label class="opsfield">
+            <span id="l-bkkeep"></span>
+            <input type="number" id="bkkeep" min="0" max="200" style="width:70px">
+          </label>
+          <label class="opsfield">
+            <input type="checkbox" id="bkonstop">
+            <span id="l-bkonstop"></span>
+          </label>
+          <button id="bksave"></button>
+        </div>
+        <div id="bklist"></div>
+      </div>
+
+      <div id="opsplayers" hidden>
+        <div class="opsrow">
+          <select id="plkind">
+            <option value="whitelist"></option>
+            <option value="ops"></option>
+            <option value="banned"></option>
+          </select>
+          <input id="plname" type="text" maxlength="16" style="flex:1;min-width:160px">
+          <select id="pllevel" hidden>
+            <option value="4">4</option>
+            <option value="3">3</option>
+            <option value="2">2</option>
+            <option value="1">1</option>
+          </select>
+          <button id="pladd"></button>
+        </div>
+        <div id="plhint" class="hint"></div>
+        <div id="pllist"></div>
+      </div>
     </div>
     <div id="map" hidden>
       <div id="mapbar">
@@ -2180,6 +2257,9 @@ function render() {
   const canJars = !!(cur && cur.jar_kind);
   $("tab-jars").hidden = !canJars;
   if (!canJars && tab === "jars") switchTab("console");
+  // 运维页（备份 / 玩家名单）只要求"选中了一个实例"
+  $("tab-ops").hidden = !cur;
+  if (!cur && tab === "ops") switchTab("console");
 }
 
 /* ---------------------------------------------------------------- 详情条 */
@@ -3561,6 +3641,7 @@ function switchTab(name) {
   const isJars = name === "jars";
   const isMap = name === "map";
   const isDesk = name === "desktop";
+  const isOps = name === "ops";
   const isDash = name === "dash";
   $("tab-dash").className = "tab" + (isDash ? " on" : "");
   $("tab-console").className = "tab" + (name === "console" ? " on" : "");
@@ -3569,6 +3650,7 @@ function switchTab(name) {
   $("tab-jars").className = "tab" + (isJars ? " on" : "");
   $("tab-map").className = "tab" + (isMap ? " on" : "");
   $("tab-desktop").className = "tab" + (isDesk ? " on" : "");
+  $("tab-ops").className = "tab" + (isOps ? " on" : "");
   $("dash").hidden = !isDash;
   // 仪表板占满整栏，详情 chips 收起来
   $("details").hidden = isDash;
@@ -3577,8 +3659,9 @@ function switchTab(name) {
   $("jars").hidden = !isJars;
   $("map").hidden = !isMap;
   $("desktop").hidden = !isDesk;
+  $("ops").hidden = !isOps;
   // 控制台那一列（日志 + 输入条 + 底部按钮）在其它标签下都要让位
-  const hideConsole = isFiles || isAi || isJars || isDash || isMap || isDesk;
+  const hideConsole = isFiles || isAi || isJars || isDash || isMap || isDesk || isOps;
   $("log").hidden = hideConsole;
   $("bar").hidden = hideConsole;
   $("clear").hidden = hideConsole;
@@ -3587,9 +3670,329 @@ function switchTab(name) {
   if (isFiles) loadFiles(filesPath);
   if (isAi) aiShow();
   if (isJars) jarsShow();
+  if (isOps) opsShow();
   if (isMap) loadMaps();
   if (isDesk) deskShow(); else deskStop();
   if (isDash) dashStart(); else dashStop();
+}
+
+/* ------------------------------------------------------------------ 运维 */
+
+/* 运维页：备份与玩家名单。
+ *
+ * 两者都只在「原版 / 插件 / 模组」这类真实服务端上有意义（代理端没有存档、
+ * 也没有白名单），所以标签按钮跟着实例类型显示，和「内容」页同一套判断。
+ */
+
+let opsSeg = "backup";
+let opsBackups = [];
+let playersData = { whitelist: [], ops: [], banned: [] };
+
+function opsCurrent() {
+  return instances.find(function (x) { return x.name === selected; }) || null;
+}
+
+function opsSupported() {
+  // 只要能读到实例就支持：备份对通用实例同样有意义（它也可能有数据要存）。
+  // 代理端没有存档、白名单也没意义，但那种情况列表里本来就选不出玩家，
+  // 界面上回一句"名单是空的"就够了，不必专门隐藏整个页签。
+  return !!opsCurrent();
+}
+
+function opsShow() {
+  opsRenderLabels();
+  if (opsSeg === "players") {
+    loadPlayers();
+  } else {
+    loadBackups();
+    loadOpsStatus();
+  }
+}
+
+function opsRenderLabels() {
+  $("tab-ops").textContent = strings["web.ops.title"] || "运维";
+  $("opsseg-backup").textContent = strings["web.backup.title"] || "备份";
+  $("opsseg-players").textContent = strings["web.players.title"] || "玩家";
+  $("bkcreate").textContent = strings["web.backup.now"] || "立即备份";
+  $("l-bkdaily").textContent = strings["web.backup.daily"] || "每天定时备份";
+  $("l-bkkeep").textContent = strings["web.backup.keep"] || "保留份数";
+  $("l-bkonstop").textContent = strings["web.backup.on_stop"] || "关服时备份";
+  $("bksave").textContent = strings["web.settings.save"] || "保存";
+  $("pladd").textContent = strings["web.players.add"] || "添加";
+  $("plname").placeholder = strings["web.players.name_placeholder"] || "";
+  $("plhint").textContent = strings["web.players.not_running"] || "";
+  const labels = {
+    whitelist: strings["web.players.whitelist"] || "白名单",
+    ops: strings["web.players.ops"] || "管理员",
+    banned: strings["web.players.banned"] || "封禁",
+  };
+  for (const opt of $("plkind").options) {
+    opt.textContent = labels[opt.value] || opt.value;
+  }
+  $("opsseg-backup").className = "tab" + (opsSeg === "backup" ? " on" : "");
+  $("opsseg-players").className = "tab" + (opsSeg === "players" ? " on" : "");
+  $("opsbackup").hidden = opsSeg !== "backup";
+  $("opsplayers").hidden = opsSeg !== "players";
+}
+
+function opsInstanceName() {
+  const inst = opsCurrent();
+  return inst ? inst.name : "";
+}
+
+/* ---- 备份 ---- */
+
+function opsSegBackup() {
+  opsSeg = "backup";
+  opsRenderLabels();
+  loadBackups();
+  loadOpsStatus();
+}
+
+function opsSegPlayers() {
+  opsSeg = "players";
+  opsRenderLabels();
+  loadPlayers();
+}
+
+function loadBackups() {
+  const name = opsInstanceName();
+  if (!name) return;
+  fetch("/api/backups?name=" + encodeURIComponent(name))
+    .then(function (r) { return r.json(); })
+    .then(function (data) {
+      if (!data || !data.ok) return;
+      opsBackups = data.backups || [];
+      renderBackups(data.total || 0);
+    })
+    .catch(function () {});
+}
+
+function fmtSize(bytes) {
+  if (bytes >= 1073741824) return (bytes / 1073741824).toFixed(1) + " GB";
+  if (bytes >= 1048576) return (bytes / 1048576).toFixed(1) + " MB";
+  if (bytes >= 1024) return (bytes / 1024).toFixed(0) + " KB";
+  return bytes + " B";
+}
+
+function renderBackups(total) {
+  const box = $("bklist");
+  box.innerHTML = "";
+  $("bktotal").textContent = opsBackups.length
+    ? tpl(strings["web.backup.total"], { count: opsBackups.length, size: fmtSize(total) })
+    : "";
+  if (!opsBackups.length) {
+    const empty = document.createElement("div");
+    empty.className = "hint";
+    empty.textContent = strings["web.backup.none"] || "还没有备份";
+    box.appendChild(empty);
+    return;
+  }
+  for (const item of opsBackups) {
+    const row = document.createElement("div");
+    row.className = "opsitem";
+    const nm = document.createElement("span");
+    nm.className = "nm";
+    nm.textContent = item.name;
+    const meta = document.createElement("span");
+    meta.className = "meta";
+    meta.textContent = item.created_text + " · " + fmtSize(item.size);
+    const del = document.createElement("button");
+    del.className = "ghost";
+    del.textContent = strings["web.backup.delete"] || "删除";
+    del.onclick = function () {
+      const ask = tpl(strings["web.backup.confirm_delete"], { name: item.name });
+      if (!confirm(ask)) return;
+      fetch("/api/backups/delete", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: opsInstanceName(), backup: item.name }),
+      }).then(function () { loadBackups(); }).catch(function () {});
+    };
+    row.appendChild(nm);
+    row.appendChild(meta);
+    row.appendChild(del);
+    box.appendChild(row);
+  }
+}
+
+function loadOpsStatus() {
+  const name = opsInstanceName();
+  if (!name) return;
+  fetch("/api/ops?name=" + encodeURIComponent(name))
+    .then(function (r) { return r.json(); })
+    .then(function (data) {
+      if (!data || !data.ok) return;
+      const bk = data.backup || {};
+      $("bkdaily").checked = !!bk.enabled;
+      $("bktime").value = bk.when || "03:00";
+      $("bkkeep").value = (bk.keep == null ? 10 : bk.keep);
+      if (bk.next) {
+        $("opsstate").textContent = tpl(strings["web.ops.next_run"], { when: bk.next });
+      }
+    })
+    .catch(function () {});
+}
+
+function saveOpsSettings() {
+  const name = opsInstanceName();
+  if (!name) return;
+  const payload = {
+    name: name,
+    backup_daily: $("bkdaily").checked ? ($("bktime").value || "") : "",
+    backup_keep: parseInt($("bkkeep").value, 10) || 0,
+    backup_on_stop: $("bkonstop").checked,
+  };
+  fetch("/api/ops/save", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  })
+    .then(function (r) { return r.json(); })
+    .then(function (data) {
+      if (data && data.ok) {
+        toast(strings["web.backup.saved"] || "已保存");
+        loadOpsStatus();
+      }
+    })
+    .catch(function () {});
+}
+
+function createBackupNow() {
+  const name = opsInstanceName();
+  if (!name) return;
+  const btn = $("bkcreate");
+  btn.disabled = true;
+  btn.textContent = strings["web.backup.creating"] || "正在打包…";
+  fetch("/api/backups/create", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name: name }),
+  })
+    .then(function (r) { return r.json(); })
+    .then(function (data) {
+      btn.disabled = false;
+      btn.textContent = strings["web.backup.now"] || "立即备份";
+      if (!data || !data.ok) {
+        toast((data && data.message) || "备份失败");
+        return;
+      }
+      toast(tpl(strings["web.backup.created"], { name: data.name }));
+      loadBackups();
+    })
+    .catch(function () {
+      btn.disabled = false;
+      btn.textContent = strings["web.backup.now"] || "立即备份";
+    });
+}
+
+/* ---- 玩家名单 ---- */
+
+function loadPlayers() {
+  const name = opsInstanceName();
+  if (!name) return;
+  fetch("/api/players?name=" + encodeURIComponent(name))
+    .then(function (r) { return r.json(); })
+    .then(function (data) {
+      if (!data || !data.ok) return;
+      playersData = data;
+      renderPlayers();
+    })
+    .catch(function () {});
+}
+
+function renderPlayers() {
+  const box = $("pllist");
+  box.innerHTML = "";
+  const kind = $("plkind").value;
+  const list = playersData[kind] || [];
+  $("pllevel").hidden = (kind !== "ops");
+  if (!list.length) {
+    const empty = document.createElement("div");
+    empty.className = "hint";
+    empty.textContent = strings["web.players.empty"] || "名单是空的";
+    box.appendChild(empty);
+    return;
+  }
+  for (const item of list) {
+    const row = document.createElement("div");
+    row.className = "opsitem";
+    const nm = document.createElement("span");
+    nm.className = "nm";
+    nm.textContent = item.name;
+    row.appendChild(nm);
+
+    if (kind === "ops" && item.level) {
+      const lv = document.createElement("span");
+      lv.className = "oplv";
+      lv.textContent = "Lv" + item.level;
+      row.appendChild(lv);
+    }
+    if (kind === "banned") {
+      const meta = document.createElement("span");
+      meta.className = "meta";
+      const parts = [];
+      if (item.reason) parts.push(strings["web.players.reason"] + ": " + item.reason);
+      if (item.expires === "forever") parts.push(strings["web.players.forever"]);
+      else if (item.expires === "expired") parts.push(strings["web.players.expired"]);
+      else if (item.expires) parts.push(item.expires);
+      meta.textContent = parts.join(" · ");
+      row.appendChild(meta);
+    }
+
+    const del = document.createElement("button");
+    del.className = "ghost";
+    del.textContent = strings["web.players.remove"] || "移除";
+    del.onclick = (function (who) {
+      return function () { changePlayers("remove", who, 0, ""); };
+    })(item.name);
+    row.appendChild(del);
+    box.appendChild(row);
+  }
+}
+
+function changePlayers(action, player, level, reason) {
+  const name = opsInstanceName();
+  const kind = $("plkind").value;
+  fetch("/api/players/change", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      name: name, kind: kind, action: action,
+      player: player, level: level, reason: reason,
+    }),
+  })
+    .then(function (r) { return r.json(); })
+    .then(function (data) {
+      if (!data || !data.ok) {
+        toast((data && data.message) || "操作失败");
+        return;
+      }
+      playersData = data.players || playersData;
+      renderPlayers();
+      if (action === "add") {
+        $("plname").value = "";
+        toast(tpl(strings["web.players.added"], { name: player }));
+      } else {
+        toast(tpl(strings["web.players.removed"], { name: player }));
+      }
+    })
+    .catch(function () {});
+}
+
+function opsAddPlayer() {
+  const player = ($("plname").value || "").trim();
+  if (!player) return;
+  const level = parseInt($("pllevel").value, 10) || 4;
+  changePlayers("add", player, level, "");
+}
+
+/* strings 里的 {name} / {count} 这类占位符替换 */
+function tpl(text, vars) {
+  if (!text) return "";
+  return String(text).replace(/\{(\w+)\}/g, function (m, key) {
+    return (vars && key in vars) ? String(vars[key]) : m;
+  });
 }
 
 /* ------------------------------------------------------------------ AI 助手 */
@@ -5129,6 +5532,14 @@ $("praw").onclick = () => {
 };
 
 $("tab-map").onclick = () => switchTab("map");
+$("tab-ops").onclick = () => switchTab("ops");
+$("opsseg-backup").onclick = opsSegBackup;
+$("opsseg-players").onclick = opsSegPlayers;
+$("bkcreate").onclick = createBackupNow;
+$("bksave").onclick = saveOpsSettings;
+$("pladd").onclick = opsAddPlayer;
+$("plkind").onchange = renderPlayers;
+$("plname").onkeydown = (ev) => { if (ev.key === "Enter") opsAddPlayer(); };
 $("tab-desktop").onclick = () => switchTab("desktop");
 $("dwindow").onchange = () => {
   const size = deskTarget();

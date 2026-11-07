@@ -107,6 +107,7 @@ from server_manager import (
     ensure_servers_folder,
     list_servers,
     load_server_config,
+    save_server_config,
 )
 
 COOKIE_NAME = "mstl_token"
@@ -173,6 +174,49 @@ def _safe_jar_name(filename: str) -> str:
 
 # 前端需要的那几句文案，由服务端统一下发，前端只负责摆放
 WEB_STRINGS = (
+    "web.backup.confirm_delete",
+    "web.backup.created",
+    "web.backup.creating",
+    "web.backup.daily",
+    "web.backup.delete",
+    "web.backup.keep",
+    "web.backup.none",
+    "web.backup.now",
+    "web.backup.on_stop",
+    "web.backup.saved",
+    "web.backup.title",
+    "web.backup.total",
+    "web.console.backup_done",
+    "web.console.backup_failed",
+    "web.console.daily_restart",
+    "web.error.backup_nothing",
+    "web.error.backup_too_large",
+    "web.error.bad_player_list",
+    "web.error.bad_player_name",
+    "web.error.no_such_instance",
+    "web.error.write_failed",
+    "web.ops.next_run",
+    "web.ops.restart_daily",
+    "web.ops.restart_hint",
+    "web.ops.saved",
+    "web.ops.title",
+    "web.players.add",
+    "web.players.added",
+    "web.players.banned",
+    "web.players.empty",
+    "web.players.expired",
+    "web.players.expires",
+    "web.players.forever",
+    "web.players.level",
+    "web.players.level_hint",
+    "web.players.name_placeholder",
+    "web.players.not_running",
+    "web.players.ops",
+    "web.players.reason",
+    "web.players.remove",
+    "web.players.removed",
+    "web.players.title",
+    "web.players.whitelist",
     "web.panel.title",
     "web.panel.instances",
     "web.panel.no_instances",
@@ -1327,6 +1371,130 @@ def _make_handler(manager: RuntimeManager, servers_dir: str, token: str,
                     return entry["_path"]
             raise CoreError("web.error.unknown_instance", name=wanted)
 
+        # ------------------------------------------------- 备份 / 运维 / 玩家
+
+        def _backups(self, query: dict) -> None:
+            """列出某个实例的备份。"""
+            from core import backup as backup_mod
+
+            name = str(query.get("name") or "")
+            instance_dir = self._instance_dir(name)
+            entries = backup_mod.list_backups(instance_dir)
+            self._json({
+                "ok": True,
+                "backups": [entry.to_dict() for entry in entries],
+                "total": backup_mod.total_size(instance_dir),
+            })
+
+        def _backup_create(self, body: dict) -> None:
+            """立刻打一份备份。
+
+            备份可能要几十秒（大实例上更久），但面板要的是"点完就知道成没成"，
+            所以这里同步做，不做后台任务——用户点了按钮就该看到进度，
+            而不是过一会刷新页面猜它跑完没有。
+            """
+            name = str((body or {}).get("name") or "")
+            instance_dir = self._instance_dir(name)
+            runtime = manager.get(name)
+            if runtime is not None and runtime.snapshot().get("state") == "running":
+                # 服务器在跑：走 runtime.backup()，它会 save-off / save-on
+                result = runtime.backup()
+                return self._json({"ok": True, **result})
+            from core import backup as backup_mod
+            entry = backup_mod.create(instance_dir)
+            self._json({"ok": True, "name": entry.name, "size": entry.size})
+
+        def _backup_delete(self, body: dict) -> None:
+            from core import backup as backup_mod
+
+            name = str((body or {}).get("name") or "")
+            target = str((body or {}).get("backup") or "")
+            instance_dir = self._instance_dir(name)
+            self._json({"ok": backup_mod.delete(instance_dir, target)})
+
+        def _ops_status(self, query: dict) -> None:
+            """定时重启/备份的当前状态，给面板显示"下次什么时候"。"""
+            name = str(query.get("name") or "")
+            runtime = manager.get(name)
+            if runtime is not None:
+                return self._json({"ok": True, **runtime.daily_job_status()})
+            # 没在跑也要能显示配置（用户在设置里填了时间，但服务器停着）
+            instance_dir = self._instance_dir(name)
+            cfg = load_server_config(instance_dir)
+            from core.runtime import _ops_policy_of
+            policy = _ops_policy_of(cfg)
+            self._json({"ok": True,
+                        "restart": {"enabled": bool(policy["restart_daily"]),
+                                    "when": policy["restart_daily"], "next": ""},
+                        "backup": {"enabled": bool(policy["backup_daily"]),
+                                   "when": policy["backup_daily"], "next": "",
+                                   "keep": policy["backup_keep"]}})
+
+        def _ops_save(self, body: dict) -> None:
+            """保存定时重启/备份的设置到实例配置。"""
+            name = str((body or {}).get("name") or "")
+            instance_dir = self._instance_dir(name)
+            cfg = load_server_config(instance_dir)
+            for key in ("restart_daily", "backup_daily", "backup_keep",
+                        "backup_on_stop"):
+                if key in (body or {}):
+                    cfg[key] = (body or {})[key]
+            save_server_config(cfg, instance_dir)
+            self._json({"ok": True})
+
+        def _players(self, query: dict) -> None:
+            from core import players as players_mod
+
+            name = str(query.get("name") or "")
+            instance_dir = self._instance_dir(name)
+            self._json({"ok": True, **players_mod.summary(instance_dir)})
+
+        def _players_change(self, body: dict) -> None:
+            """加/删白名单、OP、封禁。
+
+            改完文件之后，如果服务器在跑，还要往控制台发对应命令——
+            服务器内存里有一份名单，只改文件它不认，下次写盘会把我们的改动盖掉。
+            """
+            from core import players as players_mod
+
+            name = str((body or {}).get("name") or "")
+            kind = str((body or {}).get("kind") or "")
+            action = str((body or {}).get("action") or "")
+            player = str((body or {}).get("player") or "")
+            instance_dir = self._instance_dir(name)
+
+            player = players_mod._norm_name(player)
+
+            if action == "remove":
+                if kind == "whitelist":
+                    players_mod.remove_whitelist(instance_dir, player)
+                elif kind == "op":
+                    players_mod.remove_op(instance_dir, player)
+                elif kind == "ban":
+                    players_mod.remove_ban(instance_dir, player)
+                else:
+                    raise CoreError("web.error.bad_player_list", name=kind)
+
+            commands = players_mod.player_commands(
+                kind, player, "add" if action == "add" else "remove",
+                level=int((body or {}).get("level") or 4),
+                reason=str((body or {}).get("reason") or ""))
+
+            sent = False
+            runtime = manager.get(name)
+            running = (runtime is not None
+                       and runtime.snapshot().get("state") == "running")
+            if running:
+                try:
+                    for command in commands:
+                        runtime.send(command)
+                    sent = True
+                except CoreError:
+                    sent = False
+
+            self._json({"ok": True, "sent": sent, "commands": commands,
+                        "players": players_mod.summary(instance_dir)})
+
         def _maybe_start_tunnel(self, servers_dir: str, name: str) -> None:
             """实例配了「随实例自动开启隧道」就在后台把 frpc 拉起来。
 
@@ -1427,6 +1595,12 @@ def _make_handler(manager: RuntimeManager, servers_dir: str, token: str,
                 return self._guard(self._desktop_enabled)
             if path == "/api/properties":
                 return self._guard(lambda: self._properties_get(query))
+            if path == "/api/backups":
+                return self._guard(lambda: self._backups(query))
+            if path == "/api/players":
+                return self._guard(lambda: self._players(query))
+            if path == "/api/ops":
+                return self._guard(lambda: self._ops_status(query))
             if path == "/api/maps":
                 return self._guard(lambda: self._maps(query))
             if path == "/api/map":
@@ -2633,6 +2807,18 @@ def _make_handler(manager: RuntimeManager, servers_dir: str, token: str,
 
             if path == "/api/properties":
                 return self._properties_save(body)
+
+            if path == "/api/backups/create":
+                return self._backup_create(body)
+
+            if path == "/api/backups/delete":
+                return self._backup_delete(body)
+
+            if path == "/api/ops/save":
+                return self._ops_save(body)
+
+            if path == "/api/players/change":
+                return self._players_change(body)
 
             if path == "/api/settings/background/remove":
                 return self._background_remove()

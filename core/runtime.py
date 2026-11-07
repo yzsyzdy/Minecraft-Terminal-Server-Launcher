@@ -85,8 +85,19 @@ class LaunchPlan:
     setup: str = ""
     setup_timeout: int = 900
     setup_marker: str = ""
+    # 实例目录的绝对路径。备份、玩家名单这些"对着磁盘干活"的功能要用到它，
+    # 而 workdir 可能被 launch.workdir 改到子目录，不能拿它代替。
+    server_dir: str = ""
     # 实例对外提供服务的端口（只用于展示与建隧道，不参与启动）
     port: int = 0
+    # 定时重启：每天几点几分重启一次（"04:30"）。空串表示不重启。
+    # 长期挂机的服务器靠它清内存泄漏，比等崩了再重启体面。
+    restart_daily: str = ""
+    # 备份：每天几点几分自动备份 + 保留份数。空串表示不定时备份。
+    backup_daily: str = ""
+    backup_keep: int = 10
+    # 关服时自动备份
+    backup_on_stop: bool = False
 
 
 def _exec_args(value) -> list[str]:
@@ -138,6 +149,40 @@ def _restart_policy_of(server_cfg: dict) -> dict:
     except (TypeError, ValueError):
         restart_max = 5
     return {"auto_restart": auto, "restart_max": restart_max}
+
+
+def _ops_policy_of(server_cfg: dict) -> dict:
+    """取实例的定时重启与备份策略。
+
+    和 _restart_policy_of 一样，配置可能被手改，不能信任类型。
+    """
+    from .schedule import parse_hhmm
+
+    cfg = server_cfg or {}
+
+    def _hhmm(key: str) -> str:
+        raw = cfg.get(key)
+        parsed = parse_hhmm(str(raw or ""))
+        return "%02d:%02d" % parsed if parsed else ""
+
+    def _flag(key: str) -> bool:
+        raw = cfg.get(key)
+        if isinstance(raw, bool):
+            return raw
+        if isinstance(raw, (int, float)):
+            return raw != 0
+        return str(raw or "").strip().lower() in ("1", "true", "yes", "on", "y")
+
+    try:
+        keep = int(cfg.get("backup_keep"))
+    except (TypeError, ValueError):
+        keep = 10
+    return {
+        "restart_daily": _hhmm("restart_daily"),
+        "backup_daily": _hhmm("backup_daily"),
+        "backup_keep": max(0, min(200, keep)),
+        "backup_on_stop": _flag("backup_on_stop"),
+    }
 
 
 def _global_java_path(project_dir: str) -> str:
@@ -213,7 +258,9 @@ def build_generic_plan(server_cfg: dict, server_dir: str) -> LaunchPlan:
         setup_timeout=_clamp_int(launch.get("setup_timeout"), 900, 30, 7200),
         setup_marker=os.path.join(server_dir, ".mstl-setup.json"),
         port=_clamp_int(launch.get("port"), 0, 0, 65535),
+        server_dir=server_dir,
         **_restart_policy_of(server_cfg),
+        **_ops_policy_of(server_cfg),
     )
 
 
@@ -386,7 +433,9 @@ def build_launch_plan(
         setup_timeout=_clamp_int(launch.get("setup_timeout"), 900, 30, 7200),
         setup_marker=os.path.join(server_dir, ".mstl-setup.json"),
         port=_clamp_int(launch.get("port"), 0, 0, 65535),
+        server_dir=server_dir,
         **_restart_policy_of(server_cfg),
+        **_ops_policy_of(server_cfg),
     )
 
 
@@ -473,6 +522,9 @@ class ServerRuntime:
         self._restart_at: Optional[float] = None
         # 正在跑首次安装命令的子进程（没有就在 None）
         self._setup_proc: Optional[subprocess.Popen] = None
+        # 定时重启 / 定时备份的调度器
+        self._restart_daily = None
+        self._backup_daily = None
 
     # -- 只读 --------------------------------------------------------------
 
@@ -566,6 +618,9 @@ class ServerRuntime:
             return
         self._note("web.console.started", pid=pid)
         self._emit_state()
+        # 定时重启/备份只在真的跑起来之后才启动调度：
+        # 进程还没起来就排一个"四点重启"没有意义，反而会去 stop 一个空进程。
+        self.start_daily_jobs()
 
     def _spawn_locked(self) -> int:
         """真正拉起主进程。调用方需持有锁，并且已经把状态置备好。"""
@@ -723,6 +778,142 @@ class ServerRuntime:
                 raise CoreError("web.error.send_failed", msg=str(e)) from e
         self._push({"type": "line", "kind": "input", "text": command})
 
+    # ---------------------------------------------------------------- 备份
+
+    def backup(self, *, quiet_save: bool = True) -> dict:
+        """给实例目录打一份备份，返回 {ok, name, size, removed}。
+
+        quiet_save=True 时先让服务器把存档落盘并暂停写盘：
+
+            save-all → 等一会 → save-off → 打包 → save-on
+
+        不这么做的话，正在跑的地图可能拷到一半新一半旧，恢复出来是坏存档。
+        服务器没在跑就直接打（没人在写文件，本来是一致的）。
+        """
+        from . import backup as backup_mod
+
+        if not self.plan.server_dir:
+            raise CoreError("web.error.no_such_instance", name=self.plan.name)
+
+        running = self._is_running()
+        if running and quiet_save:
+            try:
+                self.send("save-all flush")
+            except CoreError:
+                running = False
+            if running:
+                # 给服务器一点时间把 region 写完再暂停
+                time.sleep(2.0)
+                try:
+                    self.send("save-off")
+                except CoreError:
+                    running = False
+        try:
+            entry = backup_mod.create(self.plan.server_dir,
+                                      keep=self.plan.backup_keep)
+        finally:
+            # 无论打包成功与否都要把写盘打开，否则服务器从那以后不再存盘
+            if running and quiet_save:
+                try:
+                    self.send("save-on")
+                except CoreError:
+                    pass
+        self._note("web.console.backup_done", name=entry.name,
+                   mb=round(entry.size / 1024 / 1024, 1))
+        return {"ok": True, "name": entry.name, "size": entry.size}
+
+    def _is_running(self) -> bool:
+        with self._lock:
+            return (self._proc is not None and self._proc.poll() is None)
+
+    # ------------------------------------------------------ 定时重启与备份
+
+    def start_daily_jobs(self) -> None:
+        """按 plan 里的 restart_daily / backup_daily 起两个日调度。
+
+        幂等：重复调用不会叠出第二个调度线程。
+        """
+        from .schedule import DailyScheduler
+
+        self.stop_daily_jobs()
+        with self._lock:
+            if self.plan.restart_daily:
+                self._restart_daily = DailyScheduler(
+                    self._daily_restart, self.plan.restart_daily,
+                    "%s-restart" % self.plan.name)
+                self._restart_daily.start()
+            if self.plan.backup_daily:
+                self._backup_daily = DailyScheduler(
+                    self._daily_backup, self.plan.backup_daily,
+                    "%s-backup" % self.plan.name)
+                self._backup_daily.start()
+
+    def stop_daily_jobs(self) -> None:
+        with self._lock:
+            for attr in ("_restart_daily", "_backup_daily"):
+                job = getattr(self, attr, None)
+                if job is not None:
+                    job.stop()
+                    setattr(self, attr, None)
+
+    def daily_job_status(self) -> dict:
+        with self._lock:
+            restart = getattr(self, "_restart_daily", None)
+            backup = getattr(self, "_backup_daily", None)
+            return {
+                "restart": {
+                    "enabled": restart is not None,
+                    "when": self.plan.restart_daily,
+                    "next": restart.next_run_text() if restart else "",
+                },
+                "backup": {
+                    "enabled": backup is not None,
+                    "when": self.plan.backup_daily,
+                    "next": backup.next_run_text() if backup else "",
+                    "keep": self.plan.backup_keep,
+                },
+            }
+
+    def _daily_restart(self) -> None:
+        """定时重启：先广播，再优雅停止，然后拉起来。"""
+        if not self._is_running():
+            # 没在跑就没什么可重启的；等下一个周期
+            return
+        try:
+            self.send("say [MSTL] 服务器将在 30 秒后重启")
+        except CoreError:
+            pass
+        for seconds in (20, 10):
+            if not self._is_running():
+                return
+            time.sleep(10)
+            try:
+                self.send("say [MSTL] 服务器将在 %d 秒后重启" % seconds)
+            except CoreError:
+                pass
+        self._note("web.console.daily_restart")
+        # 标成"用户要求停"，否则 _maybe_restart 会把它当崩溃再拉一次
+        self._stop_requested = True
+        try:
+            self.stop()
+        finally:
+            self._stop_requested = False
+        # 等进程真的退干净再起，不然端口还占着
+        for _ in range(40):
+            if not self._is_running():
+                break
+            time.sleep(0.5)
+        try:
+            self.start()
+        except CoreError as e:
+            self._note("web.console.restart_failed", msg=str(e))
+
+    def _daily_backup(self) -> None:
+        try:
+            self.backup()
+        except CoreError as e:
+            self._note("web.console.backup_failed", msg=e.key)
+
     def stop(self, timeout: float = 20.0) -> None:
         """先好好说：往控制台发 stop；超时再 terminate，再不行就 kill。
 
@@ -785,6 +976,15 @@ class ServerRuntime:
         # 要拿这把锁才能把状态改成 stopped。
         if reader is not None and reader is not threading.current_thread():
             reader.join(timeout=5.0)
+        # 进程已经退干净了，日调度跟着停：否则"定时重启"会在服务器停着的时候
+        # 继续按点触发，日志里刷出一堆没意义的重启记录。
+        self.stop_daily_jobs()
+        if self.plan.backup_on_stop:
+            # 关服备份放在进程退出之后：这时文件是静止的，不需要 save-off 那套
+            try:
+                self.backup(quiet_save=False)
+            except CoreError as e:
+                self._note("web.console.backup_failed", msg=e.key)
 
     def kill(self) -> None:
         with self._lock:

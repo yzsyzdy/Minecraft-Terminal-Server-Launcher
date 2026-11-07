@@ -5,6 +5,32 @@
 
 `v1.1.35` 及更早版本的说明见 [GitHub Releases](https://github.com/yzsyzdy/Minecraft-Terminal-Server-Launcher/releases)。
 
+## [1.1.45] - 2026-11-07
+
+### 新增
+
+- **备份**：面板新增「运维」标签页。可以把整个实例目录打成 zip（落在
+  `实例目录/backups/`），支持立即备份、每天定时备份、关服时备份，以及保留份数
+  自动清理。备份前会先发 `save-all flush` → `save-off`、打包完立刻 `save-on`——
+  服务器运行时直接拷 region 会拿到半个存档，这个顺序不能省；打包失败也会把
+  `save-on` 发出去，否则服务器从那以后不再存盘。`logs/`、`cache/`、`crash-reports/`
+  与 `backups/` 自身不进备份。
+- **定时重启**：每天到点重启一次，触发前在游戏里播报 30/20/10 秒倒计时。
+  长期挂机的服务器靠它清内存泄漏。重启走「用户要求停止」的路径，不会被崩溃
+  自动重启逻辑当成崩溃再拉一次。
+- **玩家名单**：白名单 / 管理员 / 封禁三个名单在面板里增删，权限等级可选 1–4。
+  服务器在跑的时候改完文件还会往控制台发对应命令——它内存里有份名单，只改文件
+  下次写盘会被盖回去。玩家名限制 1–16 位 ASCII 字母数字下划线（这个名字会被
+  拼进控制台命令，空格或换行等于注入）。
+
+### 内部
+
+- 新增 `core/backup.py`（打包与保留策略）、`core/schedule.py`（日调度）、
+  `core/players.py`（三个名单的读写与命令生成）
+- `LaunchPlan` 增加 `server_dir` / `restart_daily` / `backup_daily` /
+  `backup_keep` / `backup_on_stop`
+- 新增 30 条测试（`tests/test_ops.py`）
+
 ## [1.1.44] - 2026-11-07
 
 ### 修复
@@ -906,3 +932,4 @@ Nuitka 的 `--standalone` **不设置 `sys.frozen`**（实测），而项目里�
 [1.1.42]: https://github.com/yzsyzdy/Minecraft-Terminal-Server-Launcher/compare/v1.1.41...v1.1.42
 [1.1.43]: https://github.com/yzsyzdy/Minecraft-Terminal-Server-Launcher/compare/v1.1.42...v1.1.43
 [1.1.44]: https://github.com/yzsyzdy/Minecraft-Terminal-Server-Launcher/compare/v1.1.43...v1.1.44
+[1.1.45]: https://github.com/yzsyzdy/Minecraft-Terminal-Server-Launcher/compare/v1.1.44...v1.1.45
