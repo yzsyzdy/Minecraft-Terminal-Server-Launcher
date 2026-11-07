@@ -66,3 +66,6 @@ _*.txt
 
 # 面板自定义背景图（用户本机的图片，可能几十 MB，不该进仓库）
 .mstl-background.*
+
+# 工具链状态文件（DSH 插件写的），和项目本身无关
+thinking-effort-loaded.json
