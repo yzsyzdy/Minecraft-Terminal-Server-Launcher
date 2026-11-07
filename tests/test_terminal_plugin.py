@@ -7,6 +7,7 @@
 import json
 import os
 import sys
+import tempfile
 import time
 import unittest
 
@@ -168,6 +169,80 @@ class BackendTest(unittest.TestCase):
     def test_workdir_falls_back_to_project_root(self):
         cwd = self.plugin._workdir(os.getcwd(), "no-such-instance")
         self.assertEqual(cwd, os.getcwd())
+
+    def test_workdir_rejects_absolute_paths(self):
+        """server 来自 HTTP 请求体，是**不可信输入**。
+
+        os.path.join(base, "servers", "C:/Windows") 会直接返回 C:/Windows
+        （join 遇到绝对路径丢掉前面所有段），终端就开在系统目录里了。
+        """
+        base = os.getcwd()
+        for probe in ("C:/Windows", r"C:\Windows", r"\server\share",
+                      "../../../Windows", "..", "t/../.."):
+            self.assertEqual(self.plugin._workdir(base, probe), base, probe)
+
+    def test_session_limit(self):
+        """每个会话是一个真实子进程，必须设上限。
+
+        不设的话连点几次按钮就能堆出几十个 cmd.exe，吃光内存和句柄。
+        """
+        self.plugin._POOL = None
+        handlers = self.plugin.make_handlers(os.getcwd())
+        made = []
+        rejected = 0
+        for _ in range(self.plugin._MAX_SESSIONS + 4):
+            data = json.loads(handlers["create"]({}, {"shell": "cmd"})[2])
+            if data.get("ok"):
+                made.append(data["id"])
+            else:
+                rejected += 1
+        try:
+            self.assertEqual(len(made), self.plugin._MAX_SESSIONS)
+            self.assertGreater(rejected, 0, "超过上限时应当拒绝")
+        finally:
+            for sid in made:
+                handlers["kill"]({}, {"id": sid})
+            self.plugin._POOL = None
+
+    def test_dimensions_are_clamped(self):
+        """cols=0 或 99999 会让 ConPTY 画出畸形画面，必须收敛到合理区间。"""
+        self.plugin._POOL = None
+        handlers = self.plugin.make_handlers(os.getcwd())
+        cases = [((0, 0), (100, 30)), ((-5, 99999),
+                                      (self.plugin._MIN_COLS, self.plugin._MAX_ROWS)),
+                 ((10000, -1), (self.plugin._MAX_COLS, self.plugin._MIN_ROWS))]
+        made = []
+        try:
+            for (cols, rows), (want_c, want_r) in cases:
+                data = json.loads(handlers["create"](
+                    {}, {"shell": "cmd", "cols": cols, "rows": rows})[2])
+                self.assertTrue(data.get("ok"), data)
+                made.append(data["id"])
+                session = self.plugin._POOL.get(data["id"])
+                self.assertEqual((session.pty.cols, session.pty.rows),
+                                 (want_c, want_r), (cols, rows))
+        finally:
+            for sid in made:
+                handlers["kill"]({}, {"id": sid})
+            self.plugin._POOL = None
+
+    def test_unknown_shell_is_rejected(self):
+        """选了不存在的 shell 要报错，不能静默回退成 cmd。"""
+        self.plugin._POOL = None
+        handlers = self.plugin.make_handlers(os.getcwd())
+        try:
+            status, _ctype, body = handlers["create"]({}, {"shell": "no-such-shell"})
+            self.assertEqual(status, 400)
+            self.assertFalse(json.loads(body)["ok"])
+        finally:
+            self.plugin._POOL = None
+
+    def test_workdir_accepts_a_real_instance(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            os.makedirs(os.path.join(tmp, "servers", "demo"))
+            got = self.plugin._workdir(tmp, "demo")
+            self.assertEqual(os.path.realpath(got),
+                             os.path.realpath(os.path.join(tmp, "servers", "demo")))
 
 
 if __name__ == "__main__":

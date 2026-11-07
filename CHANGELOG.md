@@ -5,6 +5,27 @@
 
 `v1.1.35` 及更早版本的说明见 [GitHub Releases](https://github.com/yzsyzdy/Minecraft-Terminal-Server-Launcher/releases)。
 
+## [1.1.44] - 2026-11-07
+
+### 修复
+
+- **终端：一条命令被执行多次**（用户实测撞到）：`mountTerm()` 只清了 DOM，
+  从没 `dispose()` 旧的 xterm 实例。xterm 的 `onData` 是挂在实例上的订阅，
+  只清 DOM 不会解绑——点几次「新建终端」就叠几个实例，一次按键被 POST N 次。
+  现在挂载前先销毁，关闭会话也一并销毁。
+- **终端：打字延迟巨大**：xterm 是逐字符回调，原来一个字一次 POST，每击都要
+  往返一次 HTTP；轮询还是 250ms。改成输入合批（60ms 窗口，回车立即发）+
+  轮询 120ms。
+- **终端：`server` 参数存在路径穿越**：`os.path.join(base, "servers", server)`
+  在 `server` 是绝对路径时会丢掉前面所有段，传 `C:/Windows` 就能让终端开在
+  系统目录。改用 `realpath` + `commonpath` 确认落在 `servers/` 下，否则退回根目录。
+- **终端：会话数量没有上限**：每个会话是一个真实子进程，连点几下就能堆出
+  几十个 `cmd.exe`。现在上限 8 个，超出返回 409 并提示先关闭。
+- **终端：非法 shell 静默回退成 cmd**：用户选了不存在的 shell 会悄悄用 cmd，
+  让人以为是自己配错了。现在明确报错并列出可用项。
+- **终端：尺寸不校验**：`cols=0` 或 `99999` 会画出畸形画面，现在收敛到
+  20–400 / 5–200。
+
 ## [1.1.43] - 2026-11-07
 
 ### 新增
@@ -884,3 +905,4 @@ Nuitka 的 `--standalone` **不设置 `sys.frozen`**（实测），而项目里�
 [1.1.41]: https://github.com/yzsyzdy/Minecraft-Terminal-Server-Launcher/compare/v1.1.40...v1.1.41
 [1.1.42]: https://github.com/yzsyzdy/Minecraft-Terminal-Server-Launcher/compare/v1.1.41...v1.1.42
 [1.1.43]: https://github.com/yzsyzdy/Minecraft-Terminal-Server-Launcher/compare/v1.1.42...v1.1.43
+[1.1.44]: https://github.com/yzsyzdy/Minecraft-Terminal-Server-Launcher/compare/v1.1.43...v1.1.44

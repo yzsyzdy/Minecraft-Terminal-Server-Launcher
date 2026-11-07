@@ -38,6 +38,12 @@ _MAX_BUFFER = 256 * 1024
 _MAX_CHUNK = 32 * 1024
 # 空闲多久自动关掉会话（秒）。浏览器关掉标签页后没人来取输出，留着是浪费。
 _IDLE_TIMEOUT = 900
+# 同时最多几个会话。每个会话是一个**真实子进程**（cmd/PowerShell），
+# 不设上限的话连点几下按钮就能堆出几十个进程，吃光内存和句柄。
+_MAX_SESSIONS = 8
+# 尺寸范围：太小 TUI 画不出来，太大没必要（xterm 也放不下）
+_MIN_COLS, _MAX_COLS = 20, 400
+_MIN_ROWS, _MAX_ROWS = 5, 200
 
 
 class TerminalSession:
@@ -135,6 +141,12 @@ class SessionPool:
     def create(self, shell: str, cols: int, rows: int,
                cwd: str) -> TerminalSession:
         with self._lock:
+            if len(self.sessions) >= _MAX_SESSIONS:
+                # 先试着回收闲置的，腾不出位置才拒绝
+                self._reap_locked()
+                if len(self.sessions) >= _MAX_SESSIONS:
+                    raise OSError(
+                        "同时最多 %d 个终端会话，请先关闭不用的" % _MAX_SESSIONS)
             self._counter += 1
             sid = f"t{self._counter}"
             session = TerminalSession(sid, shell, cols, rows, cwd)
@@ -201,12 +213,25 @@ def _workdir(project_dir: str, server: str) -> str:
 
     指定了实例就用那个实例目录——用户想在这个终端里跑服务器目录下的脚本时
     省得再 cd。不指定就用项目根目录。
+
+    `server` 来自 HTTP 请求体，必须当成不可信输入：
+      * `os.path.join(base, "servers", "C:/Windows")` 会**直接返回**它
+        ——join 遇到绝对路径会丢掉前面所有段，终端就开在系统目录里了
+      * 带 `..` 的相对路径也能爬到 servers/ 外面去
+    所以这里用 realpath 拿到真实路径，再确认它确实在 servers/ 下面；不满足就退回根目录。
     """
     server = (server or "").strip()
     if not server:
         return project_dir
-    path = os.path.join(project_dir, "servers", server)
-    return path if os.path.isdir(path) else project_dir
+    servers_root = os.path.realpath(os.path.join(project_dir, "servers"))
+    candidate = os.path.realpath(os.path.join(servers_root, server))
+    try:
+        inside = os.path.commonpath([candidate, servers_root]) == servers_root
+    except ValueError:              # Windows 上跨盘符
+        inside = False
+    if not inside or candidate == servers_root:
+        return project_dir
+    return candidate if os.path.isdir(candidate) else project_dir
 
 
 def make_handlers(project_dir: str) -> dict:
@@ -223,17 +248,33 @@ def make_handlers(project_dir: str) -> dict:
         body = body or {}
         if not conpty.conpty_available():
             return _bad("当前系统不支持 ConPTY（需要 Windows 10 1809+）", 501)
-        shell = str(body.get("shell") or "cmd")
+
+        # shell 必须是本机真实存在的，不能静默回退成 cmd——
+        # 用户选了 PowerShell 却得到 cmd，会以为是自己配错了
+        shell = str(body.get("shell") or "cmd").strip().lower()
+        known = {s["id"] for s in conpty.shell_choices()}
+        if known and shell not in known:
+            return _bad("不支持的 shell: %s（可用：%s）"
+                        % (shell, ", ".join(sorted(known))))
+
+        # 尺寸收敛到合理区间：0 或负数会让 ConPTY 创建失败或画出畸形画面
         try:
             cols = int(body.get("cols") or 100)
+        except (TypeError, ValueError):
+            cols = 100
+        try:
             rows = int(body.get("rows") or 30)
         except (TypeError, ValueError):
-            cols, rows = 100, 30
+            rows = 30
+        cols = max(_MIN_COLS, min(_MAX_COLS, cols))
+        rows = max(_MIN_ROWS, min(_MAX_ROWS, rows))
+
         cwd = _workdir(project_dir, str(body.get("server") or ""))
         try:
             session = pool.create(shell, cols, rows, cwd)
         except OSError as e:
-            return _bad(f"启动终端失败: {e}", 500)
+            # 达到会话上限属于「可以重试」的客户端问题，用 409 更准确
+            return _bad(str(e), 409 if "最多" in str(e) else 500)
         return _json({"ok": True, "id": session.id, "shell": session.shell,
                       "cwd": cwd})
 
