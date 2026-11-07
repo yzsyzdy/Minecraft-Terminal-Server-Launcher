@@ -507,11 +507,13 @@
   #dbar{display:flex;align-items:center;gap:var(--s2);flex-wrap:wrap;
         padding:var(--s2) var(--s4);border-bottom:1px solid var(--line)}
   #dwindow{min-width:200px;max-width:360px}
-  #dview{flex:1;min-height:0;overflow:auto;background:#000;
-         display:flex;align-items:center;justify-content:center}
-  /* 帧是分块补丁，所以画布铺在固定尺寸的容器上，图片绝对定位叠上去 */
-  #dcanvas{max-width:100%;max-height:100%;display:block;
-           image-rendering:auto;cursor:crosshair}
+  #dview{flex:1;min-height:0;overflow:hidden;background:#000;
+         display:flex;align-items:center;justify-content:center;padding:var(--s2)}
+  /* 尺寸由 JS 按「保持比例地放进容器」算好写到 style 上。
+     不能用 width/height:100% + object-fit：canvas 是替换元素，object-fit
+     在部分 Chromium 版本上对它不生效，画面会被拉变形并裁掉右边。 */
+  #dcanvas{display:block;image-rendering:auto;cursor:crosshair;
+           background:#000}
   #dkeys{display:flex;gap:var(--s2);align-items:center;flex-wrap:wrap;
          padding:var(--s2) var(--s4);border-top:1px solid var(--line)}
   #dtype{flex:1;min-width:120px}
@@ -3466,6 +3468,18 @@ function deskPaint(frame) {
   desk.seq = frame.seq;
 }
 
+/* 按比例把画布缩放到容器里：留黑边但不裁切、不拉伸。 */
+function deskFit() {
+  const canvas = $("dcanvas");
+  const view = $("dview");
+  if (!canvas || !view || !canvas.width) return;
+  const availW = Math.max(1, view.clientWidth - 8);
+  const availH = Math.max(1, view.clientHeight - 8);
+  const scale = Math.min(availW / canvas.width, availH / canvas.height);
+  canvas.style.width = Math.max(1, Math.round(canvas.width * scale)) + "px";
+  canvas.style.height = Math.max(1, Math.round(canvas.height * scale)) + "px";
+}
+
 function deskBlit() {
   const canvas = $("dcanvas");
   const buf = desk.buf;
@@ -3474,9 +3488,11 @@ function deskBlit() {
     canvas.width = buf.width;
     canvas.height = buf.height;
   }
+  // 尺寸变了要重新适配，否则新画面会按旧尺寸显示
   const ctx = canvas.getContext("2d");
   ctx.clearRect(0, 0, canvas.width, canvas.height);
   ctx.drawImage(buf, 0, 0);
+  deskFit();
 }
 
 function deskLoop() {
@@ -3510,6 +3526,7 @@ async function deskInput(body) {
 
 if (typeof window !== "undefined") {
   document.addEventListener("DOMContentLoaded", () => { deskInit(); });
+  window.addEventListener("resize", () => { deskFit(); });
 }
 
 function switchTab(name) {
@@ -5107,17 +5124,33 @@ $("dtype").addEventListener("keydown", (ev) => {
 ["enter", "esc", "tab", "backspace"].forEach((key) => {
   $("dkey-" + key).onclick = () => deskInput({ action: "key", key });
 });
+/* 画布用 object-fit: contain 撑满容器，画面两侧可能有黑边（letterbox）。
+   直接把整个元素框当成画面就会点偏，所以先算出「真正画出来的那块矩形」。 */
+function deskPoint(ev) {
+  const el = ev.target;
+  const rect = el.getBoundingClientRect();
+  const boxW = rect.width;
+  const boxH = rect.height;
+  const imgW = el.width || boxW;
+  const imgH = el.height || boxH;
+  const scale = Math.min(boxW / imgW, boxH / imgH);
+  const drawW = imgW * scale;
+  const drawH = imgH * scale;
+  const offsetX = (boxW - drawW) / 2;
+  const offsetY = (boxH - drawH) / 2;
+  const x = (ev.clientX - rect.left - offsetX) / drawW;
+  const y = (ev.clientY - rect.top - offsetY) / drawH;
+  if (x < 0 || x > 1 || y < 0 || y > 1) return null;   // 点在黑边上
+  return { x, y };
+}
+
 $("dcanvas").addEventListener("click", (ev) => {
-  const rect = ev.target.getBoundingClientRect();
-  deskInput({ action: "click",
-              x: (ev.clientX - rect.left) / rect.width,
-              y: (ev.clientY - rect.top) / rect.height });
+  const point = deskPoint(ev);
+  if (point) deskInput({ action: "click", x: point.x, y: point.y });
 });
 $("dcanvas").addEventListener("dblclick", (ev) => {
-  const rect = ev.target.getBoundingClientRect();
-  deskInput({ action: "double",
-              x: (ev.clientX - rect.left) / rect.width,
-              y: (ev.clientY - rect.top) / rect.height });
+  const point = deskPoint(ev);
+  if (point) deskInput({ action: "double", x: point.x, y: point.y });
 });
 $("mapworld").onchange = () => {
   mapState.world = $("mapworld").value;

@@ -732,6 +732,18 @@ def system_snapshot() -> dict:
         return _sysstats_sampler.sample()
 
 
+def web_allow_desktop(config: dict) -> bool:
+    """config.json 里的 web.allow_desktop：面板是否开放桌面捕获。
+
+    默认关。这个开关只影响「面板里有没有那个入口」，不是安全边界——
+    能拿到面板 token 的人本来就能在这台机器上做任何事。
+    """
+    web = config.get("web")
+    if not isinstance(web, dict):
+        return False
+    return bool(web.get("allow_desktop"))
+
+
 def web_auto_start(config: dict) -> bool:
     """config.json 里的 web.auto_start：面板是否随软件启动。"""
     web = config.get("web")
@@ -3045,6 +3057,11 @@ def start_background(project_dir: str, host: Optional[str] = None,
     token = _prepare_data_dir(project_dir, config)
     if token is None:
         return None
+    # allow_desktop 三态：命令行显式给了就听命令行的，没给就读 config
+    # （TUI 里的开关写的就是它）
+    if allow_desktop is None:
+        allow_desktop = web_allow_desktop(config)
+
     bind_host = host or cfg_host
     bind_port = cfg_port if port is None else port
 
@@ -3082,7 +3099,7 @@ def start_background(project_dir: str, host: Optional[str] = None,
 
 
 def run_web(project_dir: str, host: Optional[str] = None,
-            port: Optional[int] = None, allow_desktop: bool = False) -> bool:
+            port: Optional[int] = None, allow_desktop: Optional[bool] = None) -> bool:
     """进网页面板的事件循环：`python start.py web [--host H] [--port P]`。
 
     会一直阻塞到 Ctrl+C。返回 False 表示根本没起来（比如端口被占），
@@ -3095,6 +3112,11 @@ def run_web(project_dir: str, host: Optional[str] = None,
     token = _prepare_data_dir(project_dir, config)
     if token is None:
         return False
+
+    # allow_desktop 三态：命令行显式给了就听命令行的，没给就读 config
+    # （TUI 里的开关写的就是它）
+    if allow_desktop is None:
+        allow_desktop = web_allow_desktop(config)
 
     bind_host = host or cfg_host
     # 用 is not None 判断：--port 0 是「随便挑一个空闲端口」，是合法请求，
