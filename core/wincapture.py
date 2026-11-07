@@ -268,6 +268,15 @@ def _window_rect_raw(hwnd: int) -> Optional[tuple[int, int, int, int]]:
     return (rect.left, rect.top, width, height)
 
 
+def window_capture_rect(hwnd: int) -> Optional[tuple[int, int, int, int]]:
+    """截图用的那块矩形（= GetWindowRect）。
+
+    输入坐标必须按同一个矩形换算，否则点会偏：DWM 的扩展边框比它小一圈，
+    用两组不同的几何换算，右上角能差出七八个像素。
+    """
+    return _window_rect_raw(hwnd)
+
+
 def capture_window(hwnd: int) -> Optional[tuple[int, int, bytes]]:
     """抓一个窗口，返回 (宽, 高, RGBA)。抓不到返回 None。
 
@@ -494,6 +503,6 @@ def _clipboard_set(text: str) -> bool:
 
 __all__ = [
     "IS_WINDOWS", "list_windows", "find_window", "window_rect", "focus_window",
-    "capture_window", "capture_screen", "virtual_screen",
+    "capture_window", "capture_screen", "virtual_screen", "window_capture_rect",
     "click", "move_mouse", "press_key", "type_text",
 ]

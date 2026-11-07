@@ -1687,12 +1687,17 @@ def _make_handler(manager: RuntimeManager, servers_dir: str, token: str,
                 nx = ny = 0.0
             if action in ("click", "double", "move"):
                 if session.target == "window":
-                    rect = wincapture.window_rect(session.hwnd)
+                    # 必须用「截图那块矩形」换算：DWM 扩展边框比它小一圈，
+                    # 用两组几何算会让点击落偏
+                    rect = wincapture.window_capture_rect(session.hwnd)
                     if not rect:
                         return self._json({"ok": False,
                                            "key": "web.desktop.gone"},
                                           HTTPStatus.CONFLICT)
                     left, top, width, height = rect
+                    # 先把目标窗口提到前台：鼠标事件发给「屏幕上那个位置」，
+                    # 窗口被盖住时点击会打到盖住它的窗口上
+                    wincapture.focus_window(session.hwnd)
                 else:
                     left, top, width, height = wincapture.virtual_screen()
                 px = int(left + nx * width)
