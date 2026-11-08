@@ -191,6 +191,7 @@
           note((data && data.message) || "启动失败");
           return;
         }
+        resetInputBuffer();       // 上一段会话残留的按键不许带过来
         state.sessionId = data.id;
         state.seq = 0;
         mountTerm();
@@ -292,6 +293,14 @@
     api(API + "/input", { id: state.sessionId, data: data }).catch(function () {});
   }
 
+  /* 换会话/关会话时必须把攒着还没发的按键丢掉。
+   * 不清的话，关闭时残留的那几个字符会跟着下一个会话发出去——
+   * 表现成"新建终端后莫名其妙多出几个字符"。 */
+  function resetInputBuffer() {
+    if (inputTimer) { clearTimeout(inputTimer); inputTimer = null; }
+    pendingInput = "";
+  }
+
   function startPolling() {
     stopPolling();
     state.timer = setInterval(function () {
@@ -338,6 +347,7 @@
     if (!state.sessionId) return;
     api(API + "/kill", { id: state.sessionId }).then(function () {
       stopPolling();
+      resetInputBuffer();
       state.sessionId = null;
       if (state.term) {
         try { state.term.dispose(); } catch (e) {}
@@ -353,18 +363,39 @@
 
   /* ---------------------------------------------------------------- 启动 */
 
+  /* 全局副作用只装一次。
+   *
+   * init() 会在面板 DOM 没就绪时每 300ms 重试一次，如果直接在 init 里
+   * addEventListener，重试三次就叠三个监听器。用一个模块级标记挡住，
+   * 并且用命名函数，即使真的重复走到这里也不会重复挂。 */
+  let globalsBound = false;
+
+  function bindGlobalsOnce() {
+    if (globalsBound) return;
+    globalsBound = true;
+    document.addEventListener("click", onDocumentClick, true);
+    window.addEventListener("resize", onWindowResize);
+  }
+
+  function onDocumentClick(ev) {
+    hideIfOtherTab(ev.target);
+  }
+
+  function onWindowResize() {
+    const box = q("tplug-pane");
+    if (box && !box.hidden && state.fit) state.fit();
+  }
+
   function init() {
+    // 脚本被注入两次时，第二次直接退出：否则会有两个 xterm 实例各自
+    // 监听键盘，一次按键被发两次（用户实测见过按一次出十个字符）。
+    if (window.__tplugLoaded) return;
     if (!buildUi()) {
       setTimeout(init, 300);        // 面板 DOM 可能还没建好
       return;
     }
-    document.addEventListener("click", function (ev) {
-      hideIfOtherTab(ev.target);
-    }, true);
-    window.addEventListener("resize", function () {
-      const box = q("tplug-pane");
-      if (box && !box.hidden && state.fit) state.fit();
-    });
+    window.__tplugLoaded = true;
+    bindGlobalsOnce();
   }
 
   if (document.readyState === "loading") {

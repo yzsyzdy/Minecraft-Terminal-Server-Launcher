@@ -5,6 +5,19 @@
 
 `v1.1.35` 及更早版本的说明见 [GitHub Releases](https://github.com/yzsyzdy/Minecraft-Terminal-Server-Launcher/releases)。
 
+## [1.1.46] - 2026-11-08
+
+### 修复
+
+- **终端：一次按键被重复发送**（用户实测：打一个 `y` 屏幕上出现 `yyyyyyyyyy`，
+  `astrbot init` 被连跑了三十遍）。上一版加了 `dispose()`，但没堵住两个来源：
+  插件脚本被注入两次时整个 IIFE 会跑两遍，两个 xterm 实例各自监听键盘；
+  `init()` 在面板 DOM 没就绪时每 300ms 重试，每次都往 document/window 上
+  再加一个监听器。现在用 `window.__tplugLoaded` 挡住二次初始化、监听器改成
+  命名函数且只绑一次。
+- **终端：换会话时残留按键串到下一个会话**。关闭/新建终端时清空尚未发出的
+  输入缓冲，否则关掉前敲的几个字符会跟着新会话发出去。
+
 ## [1.1.45] - 2026-11-07
 
 ### 新增
@@ -933,3 +946,4 @@ Nuitka 的 `--standalone` **不设置 `sys.frozen`**（实测），而项目里�
 [1.1.43]: https://github.com/yzsyzdy/Minecraft-Terminal-Server-Launcher/compare/v1.1.42...v1.1.43
 [1.1.44]: https://github.com/yzsyzdy/Minecraft-Terminal-Server-Launcher/compare/v1.1.43...v1.1.44
 [1.1.45]: https://github.com/yzsyzdy/Minecraft-Terminal-Server-Launcher/compare/v1.1.44...v1.1.45
+[1.1.46]: https://github.com/yzsyzdy/Minecraft-Terminal-Server-Launcher/compare/v1.1.45...v1.1.46
